@@ -715,9 +715,25 @@ export function evaluateAccess(
 export function getBrowserPath(): string {
   if (typeof window === 'undefined') return '/';
   
-  // Prefer hash if present (e.g. /#/admin/users) for universal SPA compatibility
-  if (window.location.hash && window.location.hash.length > 1) {
-    return normalizePath(window.location.hash);
+  // Detect if hash contains OAuth tokens, refresh tokens, or auth error payloads from Supabase
+  const rawHash = window.location.hash || '';
+  const isAuthFragment =
+    rawHash.includes('access_token=') ||
+    rawHash.includes('refresh_token=') ||
+    rawHash.includes('error=') ||
+    rawHash.includes('error_description=') ||
+    rawHash.includes('type=recovery') ||
+    rawHash.includes('type=signup') ||
+    rawHash.includes('type=invite');
+
+  // If hash is an auth payload, do not treat it as a page route path!
+  if (isAuthFragment) {
+    return normalizePath(window.location.pathname);
+  }
+
+  // Prefer hash route if present (e.g. /#/admin/users or #/dashboard) for universal SPA compatibility
+  if (rawHash.length > 1 && (rawHash.startsWith('#/') || !rawHash.includes('='))) {
+    return normalizePath(rawHash);
   }
   
   return normalizePath(window.location.pathname);
@@ -727,6 +743,12 @@ export function getBrowserPath(): string {
 export function updateBrowserUrl(path: string, replace = false): void {
   if (typeof window === 'undefined') return;
   
+  // If current URL contains auth tokens that are still being processed by Supabase, do not overwrite UNLESS replace is true
+  const rawHash = window.location.hash || '';
+  if (!replace && (rawHash.includes('access_token=') || rawHash.includes('refresh_token='))) {
+    return;
+  }
+
   const cleanPath = normalizePath(path);
   const hashPath = `#${cleanPath}`;
 
