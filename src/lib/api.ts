@@ -480,18 +480,19 @@ export async function recordAdminAuditLogApi(log: {
 }
 
 // 7. Update User Role
-export async function updateAdminUserRoleApi(uid: string, roles: string[]) {
+export async function updateAdminUserRoleApi(uid: string, roles: string[] | string) {
   try {
     const headers = await getAuthHeader();
     if (!headers.Authorization) return null;
 
+    const rolesArray = Array.isArray(roles) ? roles : [roles];
     const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/roles`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
         ...headers,
       },
-      body: JSON.stringify({ roles }),
+      body: JSON.stringify({ roles: rolesArray }),
     });
 
     if (!res.ok) return null;

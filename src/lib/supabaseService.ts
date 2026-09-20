@@ -2,6 +2,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { StudentProfile, TestResult, AdminUser } from '../types';
 import { syncUserProfileWithDb, saveTestResultApi, updateUserProfileApi } from './api';
+import { getAuthRedirectUrl } from './config';
 
 export { supabase, isSupabaseConfigured };
 
@@ -38,25 +39,32 @@ function assertSupabaseConfigured(): void {
 export function formatAuthErrorMessage(error: any): string {
   if (!error) return 'An unexpected authentication error occurred.';
   const message = error.message || error.error_description || String(error);
+  const lower = message.toLowerCase();
 
+  // 1. Invalid credentials / wrong password / unverified credentials check FIRST
   if (
-    message.includes('Invalid login credentials') ||
-    message.includes('invalid_credentials') ||
-    message.includes('invalid_grant')
+    lower.includes('invalid login credentials') ||
+    lower.includes('invalid_credentials') ||
+    lower.includes('invalid_grant') ||
+    lower.includes('invalid email or password') ||
+    lower.includes('invalid administrator credentials') ||
+    lower.includes('invalid staff credentials') ||
+    lower.includes('invalid credentials')
   ) {
     return 'Invalid email or password. Please verify your credentials and try again.';
   }
   if (
-    message.includes('User already registered') ||
-    message.includes('user_already_exists') ||
-    message.includes('already registered')
+    lower.includes('user already registered') ||
+    lower.includes('user_already_exists') ||
+    lower.includes('already registered')
   ) {
     return 'An account with this email address already exists. Please log in instead.';
   }
   if (
-    message.includes('Invalid email') ||
-    message.includes('invalid_email') ||
-    message.includes('Unable to validate email')
+    ((lower.includes('invalid email') || lower.includes('invalid_email')) && !lower.includes('password')) ||
+    lower.includes('unable to validate email') ||
+    lower.includes('email is invalid') ||
+    lower.includes('email address is invalid')
   ) {
     return 'Please enter a valid email address.';
   }
@@ -159,16 +167,19 @@ export async function signUpWithEmail(
     targetExam?: string;
     avatar?: string;
     role?: 'Student' | 'Teacher' | 'Admin';
-  }
+  },
+  emailRedirectTo?: string
 ): Promise<SupabaseAuthResult> {
   assertSupabaseConfigured();
 
   const cleanEmail = email.trim().toLowerCase();
+  const targetRedirect = emailRedirectTo || getAuthRedirectUrl('/auth/callback');
 
   const { data, error } = await supabase.auth.signUp({
     email: cleanEmail,
     password: pass,
     options: {
+      emailRedirectTo: targetRedirect,
       data: {
         name: extraProfile?.name?.trim() || cleanEmail.split('@')[0],
         board: extraProfile?.board || 'BISE Lahore',
@@ -213,14 +224,18 @@ export const registerWithEmail = signUpWithEmail;
 
 /**
  * Initiate Google OAuth sign-in via Supabase.
+ * Strictly guarantees redirects return to canonical production domain (https://www.taleemguru.pk)
+ * or local dev server during local development.
  */
 export async function loginWithGoogle(redirectTo?: string): Promise<{ url?: string; provider: string }> {
   assertSupabaseConfigured();
 
+  const targetRedirect = redirectTo || getAuthRedirectUrl('/auth/callback');
+
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: redirectTo || (typeof window !== 'undefined' ? window.location.origin : undefined),
+      redirectTo: targetRedirect,
     },
   });
 
@@ -233,12 +248,15 @@ export async function loginWithGoogle(redirectTo?: string): Promise<{ url?: stri
 
 /**
  * Send password reset email via Supabase Auth.
+ * Returns users to canonical production domain or local dev.
  */
-export async function resetPasswordWithEmail(email: string): Promise<void> {
+export async function resetPasswordWithEmail(email: string, redirectTo?: string): Promise<void> {
   assertSupabaseConfigured();
 
+  const targetRedirect = redirectTo || getAuthRedirectUrl('/auth/callback');
+
   const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-    redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined,
+    redirectTo: targetRedirect,
   });
 
   if (error) throw error;
