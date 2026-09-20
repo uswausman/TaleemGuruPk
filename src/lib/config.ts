@@ -1,6 +1,7 @@
 /**
  * Taleem Guru Application Configuration
- * Provides configurable site URL for canonical SEO, sharing, and deployment on Vercel or custom .pk domains.
+ * Provides safe redirect URL resolution for local development, Vercel preview/production,
+ * and canonical custom .pk domains.
  */
 
 // Canonical production domain strictly defined for Taleem Guru
@@ -13,11 +14,11 @@ export const ALLOWED_PRODUCTION_DOMAINS = [
 ];
 
 /**
- * Detects if the current client environment is running locally or in development container.
+ * Detects if the current client environment is running locally or in a development container.
  */
 export const isLocalDevelopment = (): boolean => {
   if (typeof window === 'undefined' || !window.location) return false;
-  const hostname = window.location.hostname;
+  const hostname = window.location.hostname.toLowerCase();
   return (
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
@@ -27,11 +28,62 @@ export const isLocalDevelopment = (): boolean => {
 };
 
 /**
- * Detects if the current client environment is running on a Vercel preview or deployment domain.
+ * Detects if the current client environment is running on a Vercel preview or production deployment domain.
  */
 export const isVercelDeployment = (): boolean => {
   if (typeof window === 'undefined' || !window.location) return false;
-  return window.location.hostname.endsWith('.vercel.app');
+  return window.location.hostname.toLowerCase().endsWith('.vercel.app');
+};
+
+/**
+ * Validates if an origin is a trusted Taleem Guru domain.
+ * Prevents malicious open redirects while allowing local dev, Vercel deployments, and official domains.
+ */
+export const isAllowedOrigin = (origin: string): boolean => {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    const hostname = parsed.hostname.toLowerCase();
+
+    // 1. Localhost / container dev
+    if (
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname.endsWith('.local') ||
+      hostname.includes('.run.app')
+    ) {
+      return true;
+    }
+
+    // 2. Vercel deployments (*.vercel.app, e.g. taleemgurupk.vercel.app, taleem-guru-official.vercel.app)
+    if (hostname.endsWith('.vercel.app')) {
+      return true;
+    }
+
+    // 3. Official Taleem Guru production domains
+    if (hostname === 'taleemguru.pk' || hostname === 'www.taleemguru.pk') {
+      return true;
+    }
+
+    // 4. Configured environment URL (VITE_SITE_URL or SITE_URL)
+    const envUrl = (
+      (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SITE_URL) ||
+      (typeof process !== 'undefined' && (process.env?.VITE_SITE_URL || process.env?.SITE_URL)) ||
+      ''
+    ).trim();
+    if (envUrl) {
+      try {
+        const envParsed = new URL(envUrl);
+        if (hostname === envParsed.hostname.toLowerCase()) {
+          return true;
+        }
+      } catch {}
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 };
 
 /**
@@ -42,7 +94,9 @@ export const getSiteUrl = (): string => {
   const envUrl = (
     typeof import.meta !== 'undefined' && import.meta.env?.VITE_SITE_URL
       ? (import.meta.env.VITE_SITE_URL as string).trim()
-      : ''
+      : (typeof process !== 'undefined' && (process.env?.VITE_SITE_URL || process.env?.SITE_URL)
+        ? (process.env.VITE_SITE_URL || process.env.SITE_URL)!.trim()
+        : '')
   ).replace(/\/$/, '');
 
   // Local development detection in browser
@@ -50,18 +104,15 @@ export const getSiteUrl = (): string => {
     return window.location.origin;
   }
 
-  // If in browser and on a Vercel deployment URL or apex domain, enforce canonical production domain
-  if (typeof window !== 'undefined' && window.location) {
-    if (isVercelDeployment() || window.location.hostname === 'taleemguru.pk') {
-      return CANONICAL_PRODUCTION_DOMAIN;
+  // If running in browser and origin is an allowed Taleem Guru domain, use current origin
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    if (isAllowedOrigin(window.location.origin)) {
+      return window.location.origin;
     }
   }
 
-  // If explicit environment variable is set and NOT a vercel.app preview URL
-  if (envUrl && !envUrl.includes('.vercel.app')) {
-    if (envUrl === 'https://taleemguru.pk' || envUrl === 'http://taleemguru.pk') {
-      return CANONICAL_PRODUCTION_DOMAIN;
-    }
+  // Explicit environment variable fallback
+  if (envUrl) {
     return envUrl;
   }
 
@@ -73,22 +124,30 @@ export const getSiteUrl = (): string => {
  * Returns the exact destination URL for Supabase authentication redirects
  * (Google OAuth, Email verification, Password reset, and Auth callbacks).
  *
- * Guarantees:
- * 1. Production authentication ALWAYS returns to the canonical production domain: https://www.taleemguru.pk
- * 2. Vercel deployment/preview URLs (*.vercel.app) are NEVER used as production redirect destinations.
- * 3. Localhost development continues to work on the developer's local port (e.g., http://localhost:3000).
- * 4. Appends clean subpath and preserves required authentication parameters.
+ * Safe Redirect Strategy:
+ * 1. If running in browser and the current origin is a valid allowed Taleem Guru domain
+ *    (localhost, *.vercel.app such as taleemgurupk.vercel.app, or taleemguru.pk),
+ *    the redirect URL uses the current origin. This keeps the user inside the same
+ *    origin and application environment, avoiding cross-domain state loss and
+ *    preventing unexpected Vercel authentication prompts.
+ * 2. If called outside the browser or with an unrecognized origin, falls back
+ *    to the configured site URL or canonical production domain.
+ * 3. Appends clean subpath (default: /auth/callback).
  */
 export function getAuthRedirectUrl(subPath = '/auth/callback'): string {
   const cleanSubPath = subPath ? (subPath.startsWith('/') ? subPath : `/${subPath}`) : '';
 
-  // Local development preserves localhost / container URL
-  if (isLocalDevelopment()) {
-    return `${window.location.origin}${cleanSubPath}`;
+  // In browser: use current origin if it is an allowed Taleem Guru origin
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const currentOrigin = window.location.origin;
+    if (isAllowedOrigin(currentOrigin)) {
+      return `${currentOrigin}${cleanSubPath}`;
+    }
   }
 
-  // All production and Vercel preview environments MUST redirect to canonical production domain
-  return `${CANONICAL_PRODUCTION_DOMAIN}${cleanSubPath}`;
+  // Fallback to configured site URL
+  const base = getSiteUrl();
+  return `${base}${cleanSubPath}`;
 }
 
 export const SITE_CONFIG = {
@@ -107,6 +166,7 @@ export default {
   ALLOWED_PRODUCTION_DOMAINS,
   isLocalDevelopment,
   isVercelDeployment,
+  isAllowedOrigin,
   getSiteUrl,
   getAuthRedirectUrl,
   SITE_CONFIG,
