@@ -90,6 +90,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   const configuredOrigin = process.env.VITE_SITE_URL || process.env.SITE_URL;
   const allowedOrigins = [
     configuredOrigin,
+    'https://www.taleemguru.pk',
     'https://taleemguru.pk',
   ].filter(Boolean) as string[];
 
@@ -597,6 +598,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
         email: userEmail,
         name: adminName,
         role: authoritativeRole,
+        roles: [authoritativeRole],
         status: accountStatus,
       },
     });
