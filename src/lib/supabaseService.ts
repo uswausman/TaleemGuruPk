@@ -546,92 +546,121 @@ export async function verifyUserRoleWithServer(
   uid: string,
   _email?: string | null,
   accessTokenOverride?: string
-): Promise<{ isAdmin: boolean; role: 'Admin' | 'Student'; serverUser?: any }> {
+): Promise<{ isAdmin: boolean; role: 'Admin' | 'Student'; serverUser?: any; status?: number; isTransient?: boolean }> {
   if (!uid || !isSupabaseConfigured) return { isAdmin: false, role: 'Student' };
 
-  try {
-    let token = accessTokenOverride;
-    if (!token) {
+  let token = accessTokenOverride;
+  if (!token) {
+    try {
       const { data: { session } } = await supabase.auth.getSession();
       token = session?.access_token;
+    } catch (e) {
+      return { isAdmin: false, role: 'Student', isTransient: true };
     }
-    if (!token && typeof window !== 'undefined') {
-      try {
-        token = localStorage.getItem('taleemguru_admin_token') || undefined;
-      } catch {}
-    }
-    if (!token) {
-      return { isAdmin: false, role: 'Student' };
-    }
-
-    // 1. Direct authoritative check against backend /api/admin/verify
-    let res = await fetch('/api/admin/verify', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    // Fallback: if hosting rewrite stripped /api prefix or returned 404/non-json
-    if (!res.ok && res.status !== 403 && res.status !== 401) {
-      try {
-        const altRes = await fetch('/admin/verify', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (altRes.ok || altRes.status === 403 || altRes.status === 401) {
-          res = altRes;
-        }
-      } catch {}
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.authorized) {
-        return { isAdmin: true, role: 'Admin', serverUser: data };
-      }
-    }
-
-    if (res.status === 403) {
-      return { isAdmin: false, role: 'Student' };
-    }
-
-    // 2. Fallback check against /api/user/profile to inspect authoritative database role
-    let profileRes = await fetch('/api/user/profile', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!profileRes.ok && profileRes.status !== 403 && profileRes.status !== 401) {
-      try {
-        const altProfileRes = await fetch('/user/profile', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        if (altProfileRes.ok) {
-          profileRes = altProfileRes;
-        }
-      } catch {}
-    }
-
-    if (profileRes.ok) {
-      const profileData = await profileRes.json();
-      const dbRole = (profileData?.profile?.role || '').trim().toLowerCase();
-      const isDbAdmin = ['admin', 'superadmin', 'super_admin', 'administrator', 'editor', 'moderator'].includes(dbRole);
-      return {
-        isAdmin: isDbAdmin,
-        role: isDbAdmin ? 'Admin' : 'Student',
-        serverUser: profileData?.profile,
-      };
-    }
-  } catch (err) {
-    console.warn('Authoritative admin verification network notice:', err);
   }
 
-  // Fail closed
-  return { isAdmin: false, role: 'Student' };
+  if (!token) {
+    return { isAdmin: false, role: 'Student', status: 401 };
+  }
+
+  const maxRetries = 3;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      let res = await fetch('/api/admin/verify', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok && res.status !== 403 && res.status !== 401) {
+        try {
+          const altRes = await fetch('/admin/verify', {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (altRes.ok || altRes.status === 403 || altRes.status === 401) {
+            res = altRes;
+          }
+        } catch {}
+      }
+
+      if (res.status === 401) {
+        return { isAdmin: false, role: 'Student', status: 401 };
+      }
+      if (res.status === 403) {
+        return { isAdmin: false, role: 'Student', status: 403 };
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authorized) {
+          return { isAdmin: true, role: 'Admin', serverUser: data, status: 200 };
+        }
+        return { isAdmin: false, role: 'Student', status: 200 };
+      }
+
+      if (res.status >= 500 && attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+        continue;
+      }
+
+      // Fallback check against /api/user/profile
+      let profileRes = await fetch('/api/user/profile', {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!profileRes.ok && profileRes.status !== 403 && profileRes.status !== 401) {
+        try {
+          const altProfileRes = await fetch('/user/profile', {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          if (altProfileRes.ok) {
+            profileRes = altProfileRes;
+          }
+        } catch {}
+      }
+
+      if (profileRes.status === 401) {
+        return { isAdmin: false, role: 'Student', status: 401 };
+      }
+      if (profileRes.status === 403) {
+        return { isAdmin: false, role: 'Student', status: 403 };
+      }
+
+      if (profileRes.ok) {
+        const profileData = await profileRes.json();
+        const dbRole = (profileData?.profile?.role || '').trim().toLowerCase();
+        const isDbAdmin = ['admin', 'superadmin', 'super_admin', 'administrator', 'editor', 'moderator'].includes(dbRole);
+        return {
+          isAdmin: isDbAdmin,
+          role: isDbAdmin ? 'Admin' : 'Student',
+          serverUser: profileData?.profile,
+          status: 200,
+        };
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+        continue;
+      }
+    } catch (err) {
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, attempt * 500));
+        continue;
+      }
+      return { isAdmin: false, role: 'Student', isTransient: true };
+    }
+  }
+
+  return { isAdmin: false, role: 'Student', isTransient: true };
 }
 
 export async function isUserAdminInCloud(
