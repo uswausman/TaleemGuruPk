@@ -32,6 +32,8 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
       try {
         if (typeof window === 'undefined') return;
 
+        console.log('[AuthCallback] Callback detected on path:', window.location.pathname);
+
         // 1. Check for errors in URL search params or hash
         const searchParams = new URLSearchParams(window.location.search);
         const hash = window.location.hash || '';
@@ -44,26 +46,32 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
           hashParams.get('error');
 
         if (errorDesc) {
+          const decodedErr = decodeURIComponent(errorDesc.replace(/\+/g, ' '));
+          console.warn('[AuthCallback] Authentication error in URL:', decodedErr);
           setStatus('error');
-          setErrorMessage(decodeURIComponent(errorDesc.replace(/\+/g, ' ')));
+          setErrorMessage(decodedErr);
           return;
         }
 
         // 2. If PKCE auth code is present in query parameters, exchange it for a session
         const authCode = searchParams.get('code');
         if (authCode) {
+          console.log('[AuthCallback] Authorization code detected in URL query params. Exchanging for session...');
           setMessage('Exchanging authorization code for secure session...');
           const { error: exchangeErr } = await supabase.auth.exchangeCodeForSession(authCode);
           if (exchangeErr) {
-            console.error('Supabase code exchange error:', exchangeErr);
+            console.error('[AuthCallback] Supabase code exchange error:', exchangeErr);
+            throw exchangeErr;
           }
+        } else {
+          console.log('[AuthCallback] No auth code in query. Relying on Supabase detectSessionInUrl and getSession().');
         }
 
-        // 3. Obtain the active session (either from exchanged code or detected token in URL hash)
+        // 3. Obtain active session with brief retry for async resolution
         let { data: { session }, error: sessionErr } = await supabase.auth.getSession();
 
         if (!session && !sessionErr) {
-          // If session is still resolving asynchronously, wait briefly
+          console.log('[AuthCallback] Session not immediately available, waiting for session resolution...');
           await new Promise((resolve) => setTimeout(resolve, 800));
           const retry = await supabase.auth.getSession();
           session = retry.data.session;
@@ -71,6 +79,7 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
         }
 
         if (sessionErr || !session || !session.user) {
+          console.warn('[AuthCallback] No active session found:', sessionErr?.message);
           setStatus('error');
           setErrorMessage(
             sessionErr?.message ||
@@ -78,6 +87,8 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
           );
           return;
         }
+
+        console.log('[AuthCallback] Active session detected for user id:', session.user.id);
 
         // 4. Server-authoritative role verification
         const user = session.user;
@@ -126,38 +137,28 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
           };
         }
 
-        // 6. Propagate state up to the root app
+        // 6. Propagate state up to root app
         onAuthSuccess(studentProfile, verifiedAdmin);
         setStatus('success');
         setMessage('Authentication confirmed! Directing you to your dashboard...');
 
-        // 7. Clean up OAuth tokens from URL bar to prevent token leakage
+        // 7. Determine destination and clean URL hash/tokens immediately from browser history
         const nextTarget = searchParams.get('next') || searchParams.get('redirectTo');
+        const defaultDest = isAuthAdmin ? '/admin' : '/student-dashboard';
+        const finalDest = (nextTarget && nextTarget.startsWith('/')) ? nextTarget : defaultDest;
+
+        console.log('[AuthCallback] Authentication successful. Redirect destination:', finalDest);
 
         setTimeout(() => {
-          if (nextTarget && nextTarget.startsWith('/')) {
-            updateBrowserUrl(nextTarget, true);
-            if (nextTarget.startsWith('/admin')) {
-              onNavigate('admin-panel', undefined, nextTarget.replace('/admin/', '').replace('/admin', '') || 'dashboard');
-            } else if (nextTarget.startsWith('/dashboard')) {
-              onNavigate('student-dashboard');
-            } else if (nextTarget.startsWith('/tests')) {
-              onNavigate('tests');
-            } else if (nextTarget.startsWith('/mcqs')) {
-              onNavigate('mcqs');
-            } else {
-              onNavigate('student-dashboard');
-            }
-          } else if (isAuthAdmin) {
-            updateBrowserUrl('/admin', true);
-            onNavigate('admin-panel', undefined, 'dashboard');
+          updateBrowserUrl(finalDest, true);
+          if (finalDest.startsWith('/admin')) {
+            onNavigate('admin-panel', undefined, finalDest.replace('/admin/', '').replace('/admin', '') || 'dashboard');
           } else {
-            updateBrowserUrl('/dashboard', true);
             onNavigate('student-dashboard');
           }
-        }, 600);
+        }, 500);
       } catch (err: any) {
-        console.error('Error during authentication callback processing:', err);
+        console.error('[AuthCallback] Error during authentication callback processing:', err);
         setStatus('error');
         setErrorMessage(err?.message || 'An unexpected error occurred while completing authentication.');
       }
