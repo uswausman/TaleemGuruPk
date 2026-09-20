@@ -9,7 +9,12 @@ export type BadgeVariant =
   | 'purple'
   | 'slate'
   | 'indigo'
-  | 'dark';
+  | 'dark'
+  | 'neutral'
+  | 'success'
+  | 'info'
+  | 'warning'
+  | 'secondary';
 
 export type BadgeSize = 'xs' | 'sm' | 'md';
 
@@ -74,6 +79,26 @@ export const Badge: React.FC<BadgeProps> = ({
     dark: {
       bg: 'bg-slate-900 text-slate-200 border border-slate-700',
       dot: 'bg-cyan-400',
+    },
+    neutral: {
+      bg: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700',
+      dot: 'bg-slate-400',
+    },
+    success: {
+      bg: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60',
+      dot: 'bg-emerald-500',
+    },
+    info: {
+      bg: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60',
+      dot: 'bg-cyan-400',
+    },
+    warning: {
+      bg: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60',
+      dot: 'bg-amber-500',
+    },
+    secondary: {
+      bg: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700',
+      dot: 'bg-slate-400',
     },
   };
 

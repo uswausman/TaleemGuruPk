@@ -34,7 +34,15 @@ export interface ContentReportItem {
   updatedAt: string;
 }
 
-export const AdminReportsTab: React.FC = () => {
+export interface AdminReportsTabProps {
+  onNavigateToQuestion?: () => void;
+  onNavigateToTest?: () => void;
+}
+
+export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
+  onNavigateToQuestion,
+  onNavigateToTest,
+}) => {
   const [reports, setReports] = useState<ContentReportItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('All');

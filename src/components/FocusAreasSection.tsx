@@ -79,6 +79,7 @@ export const FocusAreasSection: React.FC<FocusAreasSectionProps> = ({
       totalMarks: 10,
       testType: 'Practice Test',
       passPercentage: 70,
+      negativeMarking: false,
       questions: filteredQuestions.length >= 10 ? filteredQuestions.slice(0, 10) : qPool.slice(0, 10),
     });
   };

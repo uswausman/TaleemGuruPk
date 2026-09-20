@@ -8,6 +8,7 @@ export type ButtonVariant =
   | 'success'
   | 'danger'
   | 'amber'
+  | 'warning'
   | 'cyan'
   | 'admin';
 
@@ -65,6 +66,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       danger:
         'bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/25 hover:shadow-lg hover:shadow-rose-600/35 focus:ring-rose-500 border border-rose-500/30',
       amber:
+        'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/25 focus:ring-amber-500 border border-amber-500/30',
+      warning:
         'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/25 focus:ring-amber-500 border border-amber-500/30',
       cyan:
         'bg-cyan-600 hover:bg-cyan-500 text-white shadow-md shadow-cyan-600/25 focus:ring-cyan-500 border border-cyan-500/30',

@@ -97,6 +97,8 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
             name: res.user.name,
             email: res.user.email,
             role: res.user.role as any,
+            roles: [res.user.role as any],
+            testsCompleted: 0,
             targetExam: res.user.targetExam || 'MDCAT',
             classLevel: res.user.classLevel || 'Class 10',
             board: res.user.board || 'Punjab',

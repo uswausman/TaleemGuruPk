@@ -641,7 +641,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             historyResults={studentResults}
             allMCQs={allMCQs}
             onStartTestConfig={onStartTestConfig || (() => {})}
-            onNavigateToProgress={() => setActiveTab('reports')}
+            onNavigateToProgress={() => setActiveTab('analytics')}
           />
 
           {/* Recommended Quizzes Section */}

@@ -76,6 +76,7 @@ interface StudyRoadmapViewProps {
   student: StudentProfile | null;
   historyResults: TestResult[];
   allMCQs: MCQ[];
+  onStartQuiz?: () => void;
   onStartTestConfig?: (config: TestConfig) => void;
   onNavigateNotes?: () => void;
   onNavigatePastPapers?: () => void;
@@ -86,6 +87,7 @@ export const StudyRoadmapView: React.FC<StudyRoadmapViewProps> = ({
   student,
   historyResults = [],
   allMCQs = [],
+  onStartQuiz,
   onStartTestConfig,
   onNavigateNotes,
   onNavigatePastPapers,

@@ -362,7 +362,7 @@ export const AdminAcademicTabs: React.FC<AdminAcademicTabsProps> = ({
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl">
                     <div className="text-[10px] text-slate-400">Total MCQs</div>
                     <div className="text-xs font-bold text-slate-900 dark:text-white">
-                      {subMCQs > 0 ? subMCQs : sub.totalQuestions}
+                      {subMCQs > 0 ? subMCQs : ((sub as any).totalQuestions ?? sub.mcqsCount ?? 0)}
                     </div>
                   </div>
                   <div className="bg-slate-50 dark:bg-slate-800/60 p-2 rounded-xl">

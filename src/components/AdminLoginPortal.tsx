@@ -23,6 +23,7 @@ import {
   isUserAdminInCloud,
   getUserProfile,
 } from '../lib/supabaseService';
+import { getAuthRedirectUrl } from '../lib/config';
 
 export interface AdminLoginPortalProps {
   onLoginSuccess?: (admin: AdminUser) => void;
@@ -127,11 +128,14 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
             if (data.success && data.user) {
               adminVerified = true;
               sessionToken = data.token;
+              const isTeacher = (data.user.roles || []).includes('Teacher') || data.user.role === 'Teacher';
+              const resolvedRoles: any = isTeacher ? ['Teacher'] : ['Admin'];
               adminData = {
                 id: data.user.uid,
                 name: data.user.name || 'Administrator',
                 email: data.user.email || cleanEmail,
-                roles: (data.user.roles.includes('Teacher') ? ['Teacher'] : ['Admin']) as any,
+                role: isTeacher ? 'Teacher' : 'Admin',
+                roles: resolvedRoles,
                 status: 'Active',
                 testsCompleted: 0,
                 points: 9999,
@@ -178,7 +182,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
     setSuccessMsg(null);
 
     try {
-      const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/admin` : undefined;
+      const redirectUrl = getAuthRedirectUrl('/admin');
       const result = await loginWithGoogle(redirectUrl);
       if (result.url) {
         setSuccessMsg('Redirecting to Google for authentication...');

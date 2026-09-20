@@ -33,6 +33,7 @@ interface AdminQuestionsTabProps {
   onAddQuestion: (mcq: MCQ) => void;
   onUpdateQuestion: (mcq: MCQ) => void;
   onDeleteQuestion: (id: string) => void;
+  onExportPDF?: (filteredQuestions?: MCQ[]) => void;
 }
 
 export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
@@ -40,6 +41,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
   onAddQuestion,
   onUpdateQuestion,
   onDeleteQuestion,
+  onExportPDF,
 }) => {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');

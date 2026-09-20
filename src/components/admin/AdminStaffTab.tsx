@@ -107,7 +107,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
       s.email.toLowerCase().includes(q) ||
       s.roles.some(r => r.toLowerCase().includes(q));
 
-    const matchesRole = roleFilter === 'All' || s.roles.includes(roleFilter);
+    const matchesRole = roleFilter === 'All' || s.roles.includes(roleFilter as StaffRole);
     const matchesStatus = statusFilter === 'All' || s.status === statusFilter;
 
     return matchesQuery && matchesRole && matchesStatus;
@@ -1059,7 +1059,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
               </div>
 
               <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <StaffAcademicAssignments userUid={editTarget.uid} />
+                <StaffAcademicAssignments userUid={editTarget.uid || editTarget.id} />
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -1133,7 +1133,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                 <div className="text-slate-500 dark:text-slate-400 font-mono text-[11px]">{roleChangeTarget.email}</div>
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-slate-500 dark:text-slate-400">Current Role:</span>
-                  {getRoleBadge(roleChangeTarget.role)}
+                  {getRoleBadge(roleChangeTarget.role || roleChangeTarget.roles?.[0] || 'Teacher')}
                 </div>
               </div>
 
@@ -1217,7 +1217,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
         message={
           statusConfirmTarget?.status === 'Active'
             ? `Are you sure you want to deactivate ${statusConfirmTarget?.name} (${statusConfirmTarget?.email})? This staff member will not be able to log into the staff portal until reactivated.`
-            : `Are you sure you want to reactivate ${statusConfirmTarget?.name} (${statusConfirmTarget?.email})? This staff member will regain access to their assigned ${statusConfirmTarget?.role} privileges.`
+            : `Are you sure you want to reactivate ${statusConfirmTarget?.name} (${statusConfirmTarget?.email})? This staff member will regain access to their assigned ${statusConfirmTarget?.role || statusConfirmTarget?.roles?.join(', ') || 'Staff'} privileges.`
         }
         confirmLabel={
           statusConfirmTarget?.status === 'Active' ? 'Deactivate Account' : 'Activate Account'

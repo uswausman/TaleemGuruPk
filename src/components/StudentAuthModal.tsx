@@ -31,6 +31,7 @@ import {
   mapSupabaseUserToStudentProfile,
   isSupabaseConfigured,
 } from '../lib/supabaseService';
+import { getAuthRedirectUrl } from '../lib/config';
 
 interface StudentAuthModalProps {
   isOpen: boolean;
@@ -94,7 +95,8 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
     setSuccessMsg(null);
     setIsUnauthorizedDomain(false);
     try {
-      const result = await loginWithGoogle();
+      const redirectUrl = getAuthRedirectUrl('/auth/callback');
+      const result = await loginWithGoogle(redirectUrl);
       if (result.url) {
         setSuccessMsg('Redirecting to Google for authentication...');
         window.location.href = result.url;

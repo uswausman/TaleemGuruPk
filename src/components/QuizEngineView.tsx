@@ -18,14 +18,18 @@ import confetti from 'canvas-confetti';
 
 interface QuizEngineViewProps {
   allMCQs: MCQ[];
-  onStartCustomQuiz: (mcqs: MCQ[], title: string, durationMinutes: number) => void;
-  onIncrementPoints: (pts: number) => void;
+  onStartCustomQuiz?: (mcqs: MCQ[], title: string, durationMinutes: number) => void;
+  onStartQuiz?: (mcqs: MCQ[], title: string, durationMinutes: number) => void;
+  onIncrementPoints?: (pts: number) => void;
+  studentName?: string;
 }
 
 export const QuizEngineView: React.FC<QuizEngineViewProps> = ({
   allMCQs,
   onStartCustomQuiz,
-  onIncrementPoints,
+  onStartQuiz,
+  onIncrementPoints = () => {},
+  studentName = 'Student',
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [selectedMode, setSelectedMode] = useState<number>(10);

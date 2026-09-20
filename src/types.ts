@@ -177,6 +177,7 @@ export interface TopicInfo {
   title: string;
   description?: string;
   keyPoints?: string[];
+  important?: boolean;
 }
 
 export interface ChapterInfo {
@@ -207,8 +208,10 @@ export interface StaffAssignment {
 
 export interface AdminUser {
   id: string;
+  uid?: string;
   name: string;
   email: string;
+  role?: StaffRole | string;
   roles: StaffRole[];
   classLevel?: string;
   board?: string;
@@ -221,6 +224,9 @@ export interface AdminUser {
   assignments?: StaffAssignment[];
   lastLogin?: string;
   createdAt?: string;
+  targetExam?: string;
+  testsTaken?: number;
+  streakDays?: number;
 }
 
 export interface PastPaper {
@@ -388,13 +394,16 @@ export interface WeeklyStudyGoal {
 
 export interface StudentProfile {
   uid?: string;
+  id?: string;
   name: string;
   email: string;
+  role?: string;
   roles?: StaffRole[];
   targetExam: string;
   classLevel: string;
   board: string;
   points: number;
+  streak?: number;
   streakDays: number;
   testsTaken: number;
   savedQuestionIds: string[];
