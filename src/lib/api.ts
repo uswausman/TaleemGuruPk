@@ -12,18 +12,6 @@ async function getAuthHeader(): Promise<Record<string, string>> {
     }
   }
 
-  // Fallback to active administrative token if available in local storage
-  if (typeof window !== 'undefined') {
-    try {
-      const adminToken = localStorage.getItem('taleemguru_admin_token');
-      if (adminToken) {
-        return { Authorization: `Bearer ${adminToken}` };
-      }
-    } catch (storageErr) {
-      // Ignore storage errors
-    }
-  }
-
   return {};
 }
 
