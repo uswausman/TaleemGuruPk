@@ -215,8 +215,8 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         {/* Logo / Admin Header */}
         <div className="px-3 pb-3 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white flex items-center justify-center font-black text-base shadow-sm">
-              TG
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-sm overflow-hidden">
+              <img src="/favicon.svg" alt="Taleem Guru Logo" className="w-6 h-6 object-contain" />
             </div>
             <div>
               <div className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
