@@ -28,8 +28,8 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           {/* Col 1: Brand & Purpose */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center text-white font-black text-lg shadow-lg shadow-blue-500/20">
-                TG
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden">
+                <img src="/favicon.svg" alt="Taleem Guru Logo" className="w-7 h-7 object-contain" />
               </div>
               <div>
                 <span className="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
