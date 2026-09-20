@@ -116,7 +116,7 @@ export const requireAuth = async (
         dbUser = await getOrCreateUser(user.id, normalizedEmail, {
           name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : (user.user_metadata?.name || user.user_metadata?.full_name),
         });
-      } else if (dbUser && isBootstrap && dbUser.role !== 'Admin') {
+      } else if (dbUser && isBootstrap && (!dbUser.roles || !dbUser.roles.includes('Admin') || dbUser.name !== (bootstrapConfig?.name || 'Admin'))) {
         dbUser = await getOrCreateUser(user.id, normalizedEmail, {
           name: bootstrapConfig?.name || 'Admin',
         });
