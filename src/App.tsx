@@ -1,1314 +1,686 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ViewMode, TestConfig, TestResult, StudentProfile, AdminUser, MCQ, PastPaper, StudyNote, RouteAuthResult } from './types';
-import {
-  MCQS_DATABASE,
-  POPULAR_TESTS,
-  PAST_PAPERS_DATA,
-  STUDY_NOTES_DATA,
-  SAMPLE_PAST_RESULTS,
-} from './data/mockData';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
-// Component imports
-import { Navbar } from './components/Navbar';
-import { Footer } from './components/Footer';
-import { Homepage } from './components/Homepage';
-import { TestsExplorerView } from './components/TestsExplorerView';
-import { QuizEngineView } from './components/QuizEngineView';
-import { MCQBankView } from './components/MCQBankView';
-import { BoardsView } from './components/BoardsView';
-import { ClassesView } from './components/ClassesView';
-import { EntryTestsView } from './components/EntryTestsView';
-import { CompetitiveExamsView } from './components/CompetitiveExamsView';
-import { ArmedForcesView } from './components/ArmedForcesView';
-import { PastPapersView } from './components/PastPapersView';
-import { StudentDashboard } from './components/StudentDashboard';
-import { StudyMaterialView } from './components/StudyMaterialView';
-import { LeaderboardView } from './components/LeaderboardView';
-import { AdminTeacherPanel } from './components/AdminTeacherPanel';
-import { OnlineTestView } from './components/OnlineTestView';
-import { ResultModal } from './components/ResultModal';
-import { UniversalSearchModal } from './components/UniversalSearchModal';
-import { StudentAuthModal } from './components/StudentAuthModal';
-import { AccessDeniedView } from './components/AccessDeniedView';
-import { SubjectsView } from './components/SubjectsView';
-import { NotesView } from './components/NotesView';
-import { PrivacyPolicyView } from './components/PrivacyPolicyView';
-import { TermsOfServiceView } from './components/TermsOfServiceView';
-import { CertificateVerificationView } from './components/CertificateVerificationView';
-import { ErrorBoundary } from './components/ErrorBoundary';
-import {
-  saveTestResultToCloud,
-  subscribeToAuthState,
-  getUserProfile,
-  logoutUser,
-  isUserAdminInCloud,
-  verifyUserRoleWithServer,
-  updateUserProfileCloud,
-} from './lib/supabaseService';
-import {
-  resolveRoute,
-  evaluateAccess,
-  getBrowserPath,
-  updateBrowserUrl,
-  viewToCanonicalPath,
-} from './lib/routeGuards';
-
-import { ToastProvider, useToast } from './components/ui/Toast';
-import { SEOHead } from './components/SEOHead';
-import { checkDuplicateMCQ } from './utils/duplicateDetector';
-
-export default function App() {
-  const { showToast } = useToast();
-  // Navigation & View State
-  const [currentView, setCurrentView] = useState<ViewMode>('home');
-  const [activeSubFilter, setActiveSubFilter] = useState<string | undefined>(undefined);
-  const [activeAdminTab, setActiveAdminTab] = useState<string>('dashboard');
-  const [authAccessResult, setAuthAccessResult] = useState<RouteAuthResult | null>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+async function getAuthHeader(): Promise<Record<string, string>> {
+  if (isSupabaseConfigured) {
     try {
-      return localStorage.getItem('taleem_guru_theme') === 'dark';
-    } catch (e) {
-      return false;
-    }
-  });
-
-  // Apply dark mode class to document
-  useEffect(() => {
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('taleem_guru_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('taleem_guru_theme', 'light');
-    }
-  }, [isDarkMode]);
-
-  const handleToggleDarkMode = () => {
-    setIsDarkMode((prev) => !prev);
-  };
-
-  // Global Ctrl+K / Cmd+K listener to open Search
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsSearchOpen(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        return { Authorization: `Bearer ${session.access_token}` };
       }
-    };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, []);
-
-  // Student Profile State - Supabase Auth is the sole source of authentication truth
-  const [student, setStudent] = useState<StudentProfile | null>(null);
-
-  // Admin User State - Supabase Auth is the sole source of authentication truth
-  const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
-
-  // Initial Auth session hydration state
-  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-
-  // State refs to ensure checkAndApplyRoute is referentially stable across renders
-  const studentRef = useRef<StudentProfile | null>(null);
-  const adminUserRef = useRef<AdminUser | null>(null);
-  const isAuthLoadingRef = useRef<boolean>(true);
-  const currentViewRef = useRef<ViewMode>(currentView);
-  const activeSubFilterRef = useRef<string | undefined>(activeSubFilter);
-  const activeAdminTabRef = useRef<string | undefined>(activeAdminTab);
-
-  studentRef.current = student;
-  adminUserRef.current = adminUser;
-  isAuthLoadingRef.current = isAuthLoading;
-  currentViewRef.current = currentView;
-  activeSubFilterRef.current = activeSubFilter;
-  activeAdminTabRef.current = activeAdminTab;
-
-  // Central Route & Authorization Evaluator
-  const checkAndApplyRoute = useCallback(
-    (
-      targetPath: string,
-      userOverride?: { student?: StudentProfile | null; adminUser?: AdminUser | null; isInitializing?: boolean }
-    ) => {
-      const activeStudent = userOverride?.student !== undefined ? userOverride.student : studentRef.current;
-      const activeAdmin = userOverride?.adminUser !== undefined ? userOverride.adminUser : adminUserRef.current;
-
-      const currentUser = activeAdmin || activeStudent;
-      const isAuthenticated = Boolean(currentUser);
-
-      const route = resolveRoute(targetPath);
-
-      // If initial auth session is still hydrating from Supabase, defer blocking protected views
-      const initializing = userOverride?.isInitializing !== undefined ? userOverride.isInitializing : isAuthLoadingRef.current;
-      if (initializing && route.isProtected) {
-        return;
-      }
-
-      const authResult = evaluateAccess(targetPath, currentUser, isAuthenticated);
-
-      if (!authResult.isAllowed) {
-        setAuthAccessResult(authResult);
-        if (currentViewRef.current !== 'access-denied') {
-          setCurrentView('access-denied');
-        }
-        setActiveSubFilter(undefined);
-        return;
-      }
-
-      setAuthAccessResult(null);
-      if (currentViewRef.current !== route.view) {
-        setCurrentView(route.view);
-      }
-      if (route.subFilter !== undefined) {
-        if (activeSubFilterRef.current !== route.subFilter) {
-          setActiveSubFilter(route.subFilter);
-        }
-      } else {
-        if (activeSubFilterRef.current !== undefined) {
-          setActiveSubFilter(undefined);
-        }
-      }
-      if (route.adminTab !== undefined) {
-        if (activeAdminTabRef.current !== route.adminTab) {
-          setActiveAdminTab(route.adminTab);
-        }
-      } else {
-        if (activeAdminTabRef.current !== undefined) {
-          setActiveAdminTab(undefined);
-        }
-      }
-    },
-    []
-  );
-
-  const handleNavigateWithFilter = (view: ViewMode, subFilter?: string, adminTab?: string) => {
-    const canonical = viewToCanonicalPath(view, subFilter, adminTab);
-    updateBrowserUrl(canonical);
-    checkAndApplyRoute(canonical);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // URL Change / Browser Popstate & Hashchange Listener
-  useEffect(() => {
-    const handleUrlChange = () => {
-      const currentPath = getBrowserPath();
-      checkAndApplyRoute(currentPath);
-    };
-
-    handleUrlChange();
-
-    window.addEventListener('popstate', handleUrlChange);
-    window.addEventListener('hashchange', handleUrlChange);
-
-    return () => {
-      window.removeEventListener('popstate', handleUrlChange);
-      window.removeEventListener('hashchange', handleUrlChange);
-    };
-  }, [checkAndApplyRoute]);
-
-  // Active Test & Result State
-  const [activeTest, setActiveTest] = useState<TestConfig | null>(null);
-  const [activeResult, setActiveResult] = useState<TestResult | null>(null);
-
-  // MCQ Question Database
-  const [mcqBank, setMcqBank] = useState<MCQ[]>(() => {
-    try {
-      const saved = localStorage.getItem('taleem_guru_mcqs');
-      return saved ? JSON.parse(saved) : MCQS_DATABASE;
-    } catch (e) {
-      return MCQS_DATABASE;
+    } catch (error) {
+      console.warn('Failed to retrieve Supabase session token:', error);
     }
-  });
+  }
 
-  // Tests & Mocks Database
-  const [allTests, setAllTests] = useState<TestConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem('taleem_guru_tests');
-      return saved ? JSON.parse(saved) : POPULAR_TESTS;
-    } catch (e) {
-      return POPULAR_TESTS;
-    }
-  });
-
-  // Past Papers Database
-  const [allPastPapers, setAllPastPapers] = useState<PastPaper[]>(() => {
-    try {
-      const saved = localStorage.getItem('taleem_guru_past_papers');
-      return saved ? JSON.parse(saved) : PAST_PAPERS_DATA;
-    } catch (e) {
-      return PAST_PAPERS_DATA;
-    }
-  });
-
-  // Study Notes Database
-  const [allStudyNotes, setAllStudyNotes] = useState<StudyNote[]>(() => {
-    try {
-      const saved = localStorage.getItem('taleem_guru_study_notes');
-      return saved ? JSON.parse(saved) : STUDY_NOTES_DATA;
-    } catch (e) {
-      return STUDY_NOTES_DATA;
-    }
-  });
-
-  // Test Results History
-  const [historyResults, setHistoryResults] = useState<TestResult[]>(() => {
-    try {
-      const saved = localStorage.getItem('taleem_guru_results');
-      return saved ? JSON.parse(saved) : SAMPLE_PAST_RESULTS;
-    } catch (e) {
-      return SAMPLE_PAST_RESULTS;
-    }
-  });
-
-  // Supabase Auth State Listener with DB Role Verification
-  useEffect(() => {
-    let unsubscribe: any;
-    subscribeToAuthState(async (authUser, session, event) => {
-      if (authUser && event !== 'SIGNED_OUT') {
-        const token = session?.access_token;
-        const normalizedAuthEmail = (authUser.email || '').toLowerCase().trim();
-        const serverAuth = await verifyUserRoleWithServer(authUser.uid, normalizedAuthEmail, token);
-        const cloudProfile = await getUserProfile(authUser.uid);
-
-        // Server authoritative decision:
-        // If server verification says Admin, role is Admin.
-        // Authoritative role resolution from backend database:
-        const authoritativeRole: 'Admin' | 'Student' = serverAuth.isAdmin ? 'Admin' : 'Student';
-        const isAuthAdmin = serverAuth.isAdmin || normalizedAuthEmail === 'admin@taleemguru.pk';
-        const rawResolvedName = (
-          (serverAuth.serverUser?.name && serverAuth.serverUser.name !== 'avatar-1' ? serverAuth.serverUser.name : null) ||
-          (cloudProfile?.name && cloudProfile.name !== 'avatar-1' ? cloudProfile.name : null) ||
-          (authUser.displayName && authUser.displayName !== 'avatar-1' ? authUser.displayName : null) ||
-          (isAuthAdmin ? 'Admin' : (normalizedAuthEmail ? normalizedAuthEmail.split('@')[0] : 'Student Candidate'))
-        );
-        const resolvedName = isAuthAdmin ? 'Admin' : rawResolvedName;
-
-        let activeStudentProfile: StudentProfile;
-
-        if (cloudProfile) {
-          activeStudentProfile = {
-            ...cloudProfile,
-            name: isAuthAdmin ? 'Admin' : (cloudProfile.name === 'avatar-1' ? (normalizedAuthEmail ? normalizedAuthEmail.split('@')[0] : 'Learner') : cloudProfile.name),
-            email: (cloudProfile.email || normalizedAuthEmail).toLowerCase().trim(),
-            avatar: cloudProfile.avatar && cloudProfile.avatar !== 'avatar-1' ? cloudProfile.avatar : (isAuthAdmin ? '👨‍💼' : '🎓'),
-            roles: authoritativeRole === 'Admin' ? ['Admin'] : ['Student'],
-          };
-        } else {
-          activeStudentProfile = {
-            uid: authUser.uid,
-            name: resolvedName,
-            email: normalizedAuthEmail,
-            targetExam: 'MDCAT / BISE Board Exam',
-            classLevel: 'Class 10 (Matric Pt 2)',
-            board: 'BISE Lahore',
-            points: isAuthAdmin ? 9999 : 100,
-            streakDays: 1,
-            testsTaken: 0,
-            savedQuestionIds: [],
-            wrongQuestionIds: [],
-            certificates: [],
-            avatar: isAuthAdmin ? '👨‍💼' : '👨‍🎓',
-            roles: authoritativeRole === 'Admin' ? ['Admin'] : ['Student'],
-          };
-        }
-
-        setStudent((prev) => {
-          if (
-            prev &&
-            prev.uid === activeStudentProfile.uid &&
-            prev.roles.join(',') === activeStudentProfile.roles.join(',') &&
-            prev.name === activeStudentProfile.name &&
-            prev.points === activeStudentProfile.points &&
-            prev.email === activeStudentProfile.email
-          ) {
-            return prev;
-          }
-          return activeStudentProfile;
-        });
-
-        // Administrative authority is strictly granted via server-side verification:
-        let verifiedAdmin: AdminUser | null = null;
-        if (serverAuth.isAdmin || isAuthAdmin) {
-          verifiedAdmin = {
-            id: authUser.uid,
-            name: resolvedName,
-            email: normalizedAuthEmail || activeStudentProfile.email || '',
-            roles: (serverAuth.serverUser?.roles || ['Admin']) as any,
-            status: 'Active',
-            testsCompleted: 0,
-            points: 9999,
-            joinedDate: new Date().toLocaleDateString('en-GB'),
-          };
-        }
-
-        setAdminUser((prev) => {
-          if (!verifiedAdmin && !prev) return null;
-          if (
-            prev &&
-            verifiedAdmin &&
-            prev.id === verifiedAdmin.id &&
-            prev.roles.join(',') === verifiedAdmin.roles.join(',') &&
-            prev.name === verifiedAdmin.name &&
-            prev.email === verifiedAdmin.email
-          ) {
-            return prev;
-          }
-          return verifiedAdmin;
-        });
-
-        setIsAuthLoading(false);
-
-        // Re-evaluate current URL authorization upon session hydration
-        const currentPath = getBrowserPath();
-        checkAndApplyRoute(currentPath, {
-          student: activeStudentProfile,
-          adminUser: verifiedAdmin,
-          isInitializing: false,
-        });
-      } else {
-        // SIGNED_OUT or unauthenticated state across all tabs
-        // Check if there is an active administrative session in storage
-        let restoredAdmin: AdminUser | null = null;
-        try {
-          const savedToken = localStorage.getItem('taleemguru_admin_token');
-          const savedProfile = localStorage.getItem('taleemguru_admin_profile');
-          if (savedToken && savedProfile) {
-            const parts = savedToken.split('.');
-            if (parts.length === 3) {
-              const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-              if (payload.exp && payload.exp > Math.floor(Date.now() / 1000)) {
-                restoredAdmin = JSON.parse(savedProfile);
-              } else {
-                localStorage.removeItem('taleemguru_admin_token');
-                localStorage.removeItem('taleemguru_admin_profile');
-              }
-            }
-          }
-        } catch (e) {}
-
-        if (restoredAdmin) {
-          setAdminUser((prev) => {
-            if (
-              prev &&
-              prev.id === restoredAdmin?.id &&
-              prev.roles.join(',') === restoredAdmin?.roles.join(',') &&
-              prev.email === restoredAdmin?.email
-            ) {
-              return prev;
-            }
-            return restoredAdmin;
-          });
-          setIsAuthLoading(false);
-          const currentPath = getBrowserPath();
-          checkAndApplyRoute(currentPath, {
-            student: null,
-            adminUser: restoredAdmin,
-            isInitializing: false,
-          });
-          return;
-        }
-
-        setStudent((prev) => (prev ? null : null));
-        setAdminUser((prev) => (prev ? null : null));
-        setIsAuthLoading(false);
-
-        const currentPath = getBrowserPath();
-        const isCurrentlyProtected =
-          currentPath.startsWith('/admin') ||
-          currentPath.startsWith('/dashboard') ||
-          currentPath.startsWith('/student-dashboard') ||
-          currentPath.startsWith('/profile') ||
-          currentPath.startsWith('/results') ||
-          currentPath.startsWith('/attempts') ||
-          currentPath.startsWith('/certificates');
-
-        if (isCurrentlyProtected) {
-          updateBrowserUrl('/home');
-          setCurrentView('home');
-          setAuthAccessResult(null);
-        } else {
-          checkAndApplyRoute(currentPath, {
-            student: null,
-            adminUser: null,
-            isInitializing: false,
-          });
-        }
-      }
-    }).then((unsub) => {
-      unsubscribe = unsub;
-    });
-
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, []);
-
-  // Purge any legacy localStorage authentication records on mount
-  useEffect(() => {
-    try {
-      localStorage.removeItem('taleem_guru_student');
-      localStorage.removeItem('taleem_guru_admin');
-      localStorage.removeItem('taleem_candidate_user');
-      localStorage.removeItem('taleem_active_user');
-    } catch (e) {}
-  }, []);
-
-  // Save MCQs updates
-  useEffect(() => {
-    try {
-      localStorage.setItem('taleem_guru_mcqs', JSON.stringify(mcqBank));
-    } catch (e) {}
-  }, [mcqBank]);
-
-  // Save Tests updates
-  useEffect(() => {
-    try {
-      localStorage.setItem('taleem_guru_tests', JSON.stringify(allTests));
-    } catch (e) {}
-  }, [allTests]);
-
-  // Save Past Papers updates
-  useEffect(() => {
-    try {
-      localStorage.setItem('taleem_guru_past_papers', JSON.stringify(allPastPapers));
-    } catch (e) {}
-  }, [allPastPapers]);
-
-  // Save Study Notes updates
-  useEffect(() => {
-    try {
-      localStorage.setItem('taleem_guru_study_notes', JSON.stringify(allStudyNotes));
-    } catch (e) {}
-  }, [allStudyNotes]);
-
-  // Save Results updates
-  useEffect(() => {
-    try {
-      localStorage.setItem('taleem_guru_results', JSON.stringify(historyResults));
-    } catch (e) {}
-  }, [historyResults]);
-
-  // Single Central Logout Function
-  const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
-
-  const handleCentralLogout = useCallback(
-    async (redirectPath: string = '/home') => {
-      if (isLoggingOut) return;
-      setIsLoggingOut(true);
-
-      try {
-        await logoutUser();
-      } catch (err) {
-        console.error('Logout error:', err);
-      } finally {
-        // 1. Immediately purge both Student and Admin state (prevent cross-role leakage)
-        setStudent(null);
-        setAdminUser(null);
-
-        // 2. Clear any residual legacy auth records
-        try {
-          localStorage.removeItem('taleem_guru_student');
-          localStorage.removeItem('taleem_guru_admin');
-          localStorage.removeItem('taleem_candidate_user');
-          localStorage.removeItem('taleem_active_user');
-          localStorage.removeItem('taleemguru_admin_token');
-          localStorage.removeItem('taleemguru_admin_profile');
-        } catch (e) {}
-
-        // 3. Clear auth access denial state and redirect away from protected views
-        const currentPath = getBrowserPath();
-        const isCurrentlyProtected =
-          currentPath.startsWith('/admin') ||
-          currentPath.startsWith('/dashboard') ||
-          currentPath.startsWith('/student-dashboard') ||
-          currentPath.startsWith('/profile') ||
-          currentPath.startsWith('/results') ||
-          currentPath.startsWith('/attempts') ||
-          currentPath.startsWith('/certificates');
-
-        if (isCurrentlyProtected) {
-          updateBrowserUrl(redirectPath);
-          setCurrentView('home');
-          setAuthAccessResult(null);
-        } else {
-          checkAndApplyRoute(currentPath, { student: null, adminUser: null, isInitializing: false });
-        }
-
-        setIsLoggingOut(false);
-      }
-    },
-    [isLoggingOut, checkAndApplyRoute]
-  );
-
-  const handleStudentLogout = useCallback(async () => {
-    await handleCentralLogout('/home');
-  }, [handleCentralLogout]);
-
-  const handleAdminLogout = useCallback(async () => {
-    await handleCentralLogout('/home');
-  }, [handleCentralLogout]);
-
-  // Bulk Import Handlers
-  const handleBulkImportMCQs = (imported: MCQ[], replace?: boolean) => {
-    setMcqBank((prev) => (replace ? imported : [...imported, ...prev]));
-  };
-
-  const handleBulkImportTests = (imported: TestConfig[], replace?: boolean) => {
-    setAllTests((prev) => (replace ? imported : [...imported, ...prev]));
-  };
-
-  const handleBulkImportPastPapers = (imported: PastPaper[], replace?: boolean) => {
-    setAllPastPapers((prev) => (replace ? imported : [...imported, ...prev]));
-  };
-
-  const handleBulkImportStudyNotes = (imported: StudyNote[], replace?: boolean) => {
-    setAllStudyNotes((prev) => (replace ? imported : [...imported, ...prev]));
-  };
-
-  const handleBulkImportBundle = (
-    bundle: { mcqs?: MCQ[]; tests?: TestConfig[]; pastPapers?: PastPaper[]; studyNotes?: StudyNote[] },
-    replace?: boolean
-  ) => {
-    if (bundle.mcqs && bundle.mcqs.length > 0) {
-      setMcqBank((prev) => (replace ? bundle.mcqs! : [...bundle.mcqs!, ...prev]));
-    }
-    if (bundle.tests && bundle.tests.length > 0) {
-      setAllTests((prev) => (replace ? bundle.tests! : [...bundle.tests!, ...prev]));
-    }
-    if (bundle.pastPapers && bundle.pastPapers.length > 0) {
-      setAllPastPapers((prev) => (replace ? bundle.pastPapers! : [...bundle.pastPapers!, ...prev]));
-    }
-    if (bundle.studyNotes && bundle.studyNotes.length > 0) {
-      setAllStudyNotes((prev) => (replace ? bundle.studyNotes! : [...bundle.studyNotes!, ...prev]));
-    }
-  };
-
-  // Handle Start Test
-  const handleStartTest = (config: TestConfig) => {
-    setActiveTest(config);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Handle Finish Test
-  const handleFinishTest = (result: TestResult) => {
-    setActiveTest(null);
-    const enrichedResult: TestResult = {
-      ...result,
-      userId: student?.uid,
-      userEmail: student?.email,
-    };
-    setActiveResult(enrichedResult);
-    setHistoryResults((prev) => [enrichedResult, ...prev]);
-
-    // Save to Firestore Cloud Results Collection with candidate UID/Email
-    saveTestResultToCloud(enrichedResult, student?.email || 'anonymous');
-
-    // Automated Certificate Toast
-    if (result.percentage >= 60) {
-      showToast({
-        type: 'success',
-        title: 'Achievement Unlocked!',
-        message: 'Congratulations! You have earned a Merit Certificate. Check the Admin panel or Student Dashboard to download.'
-      });
-    }
-
-    // Update student stats if authenticated
-    if (student) {
-      setStudent((prev) => {
-        if (!prev) return null;
-        const newPoints = (prev.points || 0) + result.marksObtained * 10;
-        const wrongIds = result.answers
-          .filter((a) => {
-            const q = result.questions.find((x) => x.id === a.questionId);
-            return q && a.selectedOption !== q.correctAnswer;
-          })
-          .map((a) => a.questionId);
-
-        const updatedWrong = Array.from(new Set([...(prev.wrongQuestionIds || []), ...wrongIds]));
-
-        return {
-          ...prev,
-          points: newPoints,
-          testsTaken: (prev.testsTaken || 0) + 1,
-          wrongQuestionIds: updatedWrong,
-        };
-      });
-    }
-  };
-
-  // Handle Retake Test
-  const handleRetakeCurrentTest = () => {
-    if (activeResult) {
-      const matching = POPULAR_TESTS.find((t) => t.id === activeResult.testId);
-      setActiveResult(null);
-      if (matching) {
-        setActiveTest(matching);
-      } else {
-        setActiveTest({
-          id: `retest-${Date.now()}`,
-          title: `Retake: ${activeResult.testTitle}`,
-          description: 'Retake test attempt with full review',
-          subject: activeResult.subject,
-          category: activeResult.category || 'Practice',
-          durationMinutes: Math.max(5, Math.ceil(activeResult.timeUsedSeconds / 60)),
-          totalQuestions: activeResult.questions.length,
-          totalMarks: activeResult.totalMarks,
-          testType: activeResult.testType,
-          negativeMarking: false,
-          passPercentage: 50,
-          questions: activeResult.questions,
-        });
-      }
-    }
-  };
-
-  // Handle Start Custom Quiz from Quiz Engine
-  const handleStartCustomQuiz = (mcqs: MCQ[], title: string, durationMinutes: number) => {
-    const customTest: TestConfig = {
-      id: `quiz-run-${Date.now()}`,
-      title,
-      description: 'Quick Custom Quiz',
-      category: 'Quiz',
-      subject: mcqs[0]?.subject || 'General',
-      durationMinutes,
-      totalQuestions: mcqs.length,
-      totalMarks: mcqs.length,
-      testType: 'Practice Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions: mcqs,
-    };
-    handleStartTest(customTest);
-  };
-
-  // Handle Start Class Test
-  const handleStartClassTest = (className: string, subjectName: string) => {
-    const filtered = mcqBank.filter(
-      (m) =>
-        m.subject.toLowerCase().includes(subjectName.toLowerCase()) ||
-        m.classLevel.toLowerCase().includes(className.toLowerCase())
-    );
-    const questions = filtered.length >= 5 ? filtered.slice(0, 10) : mcqBank.slice(0, 10);
-
-    const test: TestConfig = {
-      id: `class-test-${Date.now()}`,
-      title: `${className} ${subjectName} Practice Test`,
-      description: `Class and syllabus curriculum revision assessment for ${className}`,
-      category: 'Classroom',
-      subject: subjectName,
-      classLevel: className,
-      durationMinutes: 15,
-      totalQuestions: questions.length,
-      totalMarks: questions.length,
-      testType: 'Chapter Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions,
-    };
-    handleStartTest(test);
-  };
-
-  // Handle Start Board Test
-  const handleStartBoardTest = (boardName: string) => {
-    const questions = mcqBank.slice(0, 10);
-    const test: TestConfig = {
-      id: `board-test-${Date.now()}`,
-      title: `${boardName} Model Assessment`,
-      description: `Official pattern examination for ${boardName}`,
-      category: 'Board Examination',
-      subject: 'Science & Core',
-      board: boardName,
-      durationMinutes: 20,
-      totalQuestions: questions.length,
-      totalMarks: questions.length,
-      testType: 'Board Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions,
-    };
-    handleStartTest(test);
-  };
-
-  // Handle Solve Past Paper Online
-  const handleSolvePastPaper = (paper: PastPaper) => {
-    const questions = paper.questions && paper.questions.length > 0 ? paper.questions : mcqBank.slice(0, 10);
-    const test: TestConfig = {
-      id: `paper-solve-${paper.id}`,
-      title: `Solved Online: ${paper.title}`,
-      description: `Complete authentic online past paper simulation for ${paper.board} (${paper.year})`,
-      category: 'Past Paper',
-      subject: paper.subject,
-      classLevel: paper.classLevel,
-      board: paper.board,
-      durationMinutes: 20,
-      totalQuestions: questions.length,
-      totalMarks: questions.length,
-      testType: 'Board Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions,
-    };
-    handleStartTest(test);
-  };
-
-  // Handle Practice Wrong Questions
-  const handlePracticeWrongQuestions = (wrongMCQs: MCQ[]) => {
-    if (wrongMCQs.length === 0) return;
-    const test: TestConfig = {
-      id: `wrong-mcqs-${Date.now()}`,
-      title: 'Mistake Revision & Targeted Practice Test',
-      description: 'Review questions answered incorrectly in previous attempts',
-      category: 'Revision',
-      subject: 'Revision',
-      durationMinutes: Math.max(5, wrongMCQs.length * 2),
-      totalQuestions: wrongMCQs.length,
-      totalMarks: wrongMCQs.length,
-      testType: 'Practice Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions: wrongMCQs,
-    };
-    handleStartTest(test);
-  };
-
-  // Toggle Save Question
-  const handleToggleSaveQuestion = (mcqId: string) => {
-    if (!student) {
-      setIsAuthModalOpen(true);
-      return;
-    }
-    setStudent((prev) => {
-      if (!prev) return null;
-      const isSaved = (prev.savedQuestionIds || []).includes(mcqId);
-      return {
-        ...prev,
-        savedQuestionIds: isSaved
-          ? prev.savedQuestionIds.filter((id) => id !== mcqId)
-          : [...(prev.savedQuestionIds || []), mcqId],
-      };
-    });
-  };
-
-  // Persist Profile Updates Authoritatively to PostgreSQL Database
-  const handleUpdateProfile = async (updated: Partial<StudentProfile>) => {
-    setStudent((prev) => (prev ? { ...prev, ...updated } : null));
-
-    if (!student?.uid) return;
-
-    try {
-      await updateUserProfileCloud(student.uid, updated);
-      const refreshed = await getUserProfile(student.uid);
-      if (refreshed) {
-        setStudent(refreshed);
-      }
-    } catch (err) {
-      console.error('Failed to update student profile in database:', err);
-    }
-  };
-
-  // Admin MCQ Management
-  const handleAddMCQ = (newMCQ: MCQ) => {
-    const dup = checkDuplicateMCQ(
-      newMCQ.question,
-      newMCQ.subject,
-      newMCQ.classLevel,
-      newMCQ.board,
-      undefined,
-      mcqBank
-    );
-    if (dup.isDuplicate) {
-      showToast({
-        type: 'error',
-        title: 'Submission Blocked: Duplicate MCQ',
-        message: dup.reason,
-        duration: 5000,
-      });
-      return;
-    }
-    setMcqBank((prev) => [newMCQ, ...prev]);
-  };
-
-  const handleUpdateMCQ = (updatedMCQ: MCQ) => {
-    setMcqBank((prev) => prev.map((m) => (m.id === updatedMCQ.id ? updatedMCQ : m)));
-  };
-
-  const handleDeleteMCQ = (id: string) => {
-    setMcqBank((prev) => prev.filter((m) => m.id !== id));
-  };
-
-  const handleUpdateTest = (updatedTest: TestConfig) => {
-    setAllTests((prev) => prev.map((t) => (t.id === updatedTest.id ? updatedTest : t)));
-  };
-
-  const handleDeleteTest = (id: string) => {
-    setAllTests((prev) => prev.filter((t) => t.id !== id));
-  };
-
-  const currentStudentName = student?.name || 'Candidate';
-
-  return (
-    <ToastProvider>
-      <SEOHead currentView={currentView} subFilter={activeSubFilter} />
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-xl focus:shadow-lg focus:outline-hidden"
-      >
-        Skip to main content
-      </a>
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white antialiased">
-        {/* Session verification indicator for protected routes */}
-        {isAuthLoading && resolveRoute(getBrowserPath()).isProtected ? (
-          <div className="flex-1 flex flex-col items-center justify-center min-h-[60vh] p-8 text-center">
-            <div className="w-10 h-10 rounded-full border-4 border-blue-500/30 border-t-blue-600 animate-spin mb-4" />
-            <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-              Verifying session credentials...
-            </p>
-          </div>
-        ) : activeTest ? (
-        <OnlineTestView
-          test={activeTest}
-          onFinishTest={handleFinishTest}
-          onExitTest={() => setActiveTest(null)}
-          studentName={currentStudentName}
-        />
-      ) : (
-        <>
-          {/* Main Website Navigation */}
-          <Navbar
-            currentView={currentView}
-            onNavigate={handleNavigateWithFilter}
-            onOpenSearch={() => setIsSearchOpen(true)}
-            onOpenPremium={() => setIsAuthModalOpen(true)}
-            onOpenAuth={() => setIsAuthModalOpen(true)}
-            onLogout={handleStudentLogout}
-            student={student}
-            adminUser={adminUser}
-            isDarkMode={isDarkMode}
-            onToggleDarkMode={handleToggleDarkMode}
-          />
-
-          {/* Main Content Render by Active View */}
-          <main id="main-content" className="flex-1" tabIndex={-1}>
-            <ErrorBoundary>
-            {currentView === 'home' && (
-              <Homepage
-                onStartTest={handleStartTest}
-                onNavigateTab={(tab) => {
-                  handleNavigateWithFilter(tab as ViewMode);
-                }}
-                onOpenSearch={() => setIsSearchOpen(true)}
-                allTests={allTests}
-                historyResults={historyResults}
-              />
-            )}
-
-            {currentView === 'tests' && (
-              <TestsExplorerView
-                onStartTest={handleStartTest}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-                tests={allTests}
-              />
-            )}
-
-            {currentView === 'quizzes' && (
-              <QuizEngineView
-                allMCQs={mcqBank}
-                onStartQuiz={handleStartCustomQuiz}
-                studentName={currentStudentName}
-              />
-            )}
-
-            {currentView === 'mcqs' && (
-              <MCQBankView
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-                initialSubject={activeSubFilter || 'All'}
-              />
-            )}
-
-            {currentView === 'past-papers' && (
-              <PastPapersView
-                pastPapers={allPastPapers}
-                papers={allPastPapers}
-                allMCQs={mcqBank}
-                onSolvePaper={handleSolvePastPaper}
-                onSolveOnline={handleSolvePastPaper}
-                studentName={currentStudentName}
-                initialSubject={activeSubFilter || 'All'}
-                subFilter={activeSubFilter}
-                onNavigate={(view, filter) => handleNavigateWithFilter(view as ViewMode, filter)}
-              />
-            )}
-
-            {currentView === 'boards' && (
-              <BoardsView
-                pastPapers={allPastPapers}
-                papers={allPastPapers}
-                onSelectBoardTest={handleStartBoardTest}
-                onStartBoardTest={handleStartBoardTest}
-                onSelectPaper={handleSolvePastPaper}
-                onSolveOnline={handleSolvePastPaper}
-                onNavigateMCQBank={(boardName) => handleNavigateWithFilter('mcqs', boardName)}
-                onNavigatePastPapers={(boardName) => handleNavigateWithFilter('past-papers', boardName)}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-                initialProvince={activeSubFilter || 'All'}
-                subFilter={activeSubFilter}
-              />
-            )}
-
-            {currentView === 'classes' && (
-              <ClassesView
-                onStartClassTest={handleStartClassTest}
-                onNavigateMCQBank={(className) => handleNavigateWithFilter('mcqs', className)}
-                onNavigatePastPapers={(className) => handleNavigateWithFilter('past-papers', className)}
-                onNavigateNotes={(className) => handleNavigateWithFilter('notes', className)}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-              />
-            )}
-
-            {currentView === 'subjects' && (
-              <SubjectsView
-                onStartSubjectTest={(subjectName) => {
-                  const filtered = mcqBank.filter(
-                    (m) => m.subject.toLowerCase() === subjectName.toLowerCase()
-                  );
-                  const questions = filtered.length >= 5 ? filtered.slice(0, 10) : mcqBank.slice(0, 10);
-                  handleStartTest({
-                    id: `subj-test-${Date.now()}`,
-                    title: `${subjectName} Assessment Test`,
-                    description: `Chapter and topic comprehensive evaluation for ${subjectName}`,
-                    category: 'Subject Assessment',
-                    subject: subjectName,
-                    durationMinutes: 15,
-                    totalQuestions: questions.length,
-                    totalMarks: questions.length,
-                    testType: 'Chapter Test',
-                    negativeMarking: false,
-                    passPercentage: 50,
-                    questions,
-                  });
-                }}
-                onNavigateMCQBank={(subjectName) => handleNavigateWithFilter('mcqs', subjectName)}
-                onNavigatePastPapers={(subjectName) => handleNavigateWithFilter('past-papers', subjectName)}
-                onNavigateNotes={(subjectName) => handleNavigateWithFilter('notes', subjectName)}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-              />
-            )}
-
-            {(currentView === 'notes' || currentView === 'study-material') && (
-              <NotesView
-                notes={allStudyNotes}
-                onSelectNote={(n) => {}}
-                studentName={currentStudentName}
-                initialSubject={activeSubFilter || 'All'}
-              />
-            )}
-
-            {currentView === 'entry-tests' && (
-              <EntryTestsView
-                onStartEntryTest={(testId) => {
-                  const qPool = mcqBank.filter((m) => m.exam === 'MDCAT' || m.subject === 'Biology' || m.subject === 'Physics');
-                  handleStartTest({
-                    id: `entry-mock-${testId}`,
-                    title: `Official Mock: ${testId.toUpperCase()}`,
-                    description: 'Full syllabus mock paper with negative marking',
-                    category: 'Entry Test',
-                    subject: 'MDCAT & ECAT Core',
-                    durationMinutes: 30,
-                    totalQuestions: 15,
-                    totalMarks: 15,
-                    testType: 'Entry Test',
-                    negativeMarking: true,
-                    passPercentage: 60,
-                    questions: qPool.length >= 10 ? qPool.slice(0, 15) : mcqBank.slice(0, 15),
-                  });
-                }}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-                initialCategory={activeSubFilter || 'All'}
-              />
-            )}
-
-            {currentView === 'competitive-exams' && (
-              <CompetitiveExamsView
-                onStartExamTest={(examId) => {
-                  const qPool = mcqBank.filter((m) => m.exam === 'CSS' || m.subject === 'Pakistan Studies');
-                  handleStartTest({
-                    id: `comp-mock-${examId}`,
-                    title: `${examId.toUpperCase()} Screening Mock Examination`,
-                    description: 'FPSC / PPSC competitive recruitment screening practice test',
-                    category: 'Competitive Exam',
-                    subject: 'General Knowledge & Pakistan Affairs',
-                    durationMinutes: 30,
-                    totalQuestions: 15,
-                    totalMarks: 15,
-                    testType: 'Competitive Exam Test',
-                    negativeMarking: true,
-                    passPercentage: 50,
-                    questions: qPool.length >= 10 ? qPool.slice(0, 15) : mcqBank.slice(0, 15),
-                  });
-                }}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-              />
-            )}
-
-            {currentView === 'armed-forces' && (
-              <ArmedForcesView
-                onStartForceTest={(force, testType) => {
-                  const qPool = mcqBank.filter((m) => m.subject === 'IQ & Intelligence' || m.subject === 'Physics');
-                  handleStartTest({
-                    id: `force-test-${Date.now()}`,
-                    title: `${force} Computer Initial E-Test (${testType})`,
-                    description: `Automated testing console simulating computerized armed forces screening`,
-                    category: 'Armed Forces',
-                    subject: 'Intelligence & Academic',
-                    durationMinutes: 20,
-                    totalQuestions: 12,
-                    totalMarks: 12,
-                    testType: 'Practice Test',
-                    negativeMarking: false,
-                    passPercentage: 60,
-                    questions: qPool.length >= 5 ? qPool.slice(0, 12) : mcqBank.slice(0, 12),
-                  });
-                }}
-                allMCQs={mcqBank}
-                studentName={currentStudentName}
-              />
-            )}
-
-            {/* Access Denied / Unauthorized Security Interceptor */}
-            {authAccessResult && !authAccessResult.isAllowed && (
-              <AccessDeniedView
-                authResult={authAccessResult}
-                currentUser={adminUser || student}
-                onNavigateHome={() => handleNavigateWithFilter('home')}
-                onNavigateDashboard={() => handleNavigateWithFilter('student-dashboard')}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
-                onOpenAdminLogin={() => handleNavigateWithFilter('admin-panel')}
-                onOpenLogin={() => {
-                  if (authAccessResult.path.startsWith('/admin')) {
-                    handleNavigateWithFilter('admin-panel');
-                  } else {
-                    setIsAuthModalOpen(true);
-                  }
-                }}
-                onSwitchAccount={async () => {
-                  await handleCentralLogout();
-                  setIsAuthModalOpen(true);
-                }}
-              />
-            )}
-
-            {(!authAccessResult || authAccessResult.isAllowed) && (currentView === 'results' || currentView === 'student-login' || currentView === 'student-dashboard') && (
-              <StudentDashboard
-                student={student}
-                historyResults={historyResults}
-                allMCQs={mcqBank}
-                onReviewResult={(res) => setActiveResult(res)}
-                onPracticeWrongQuestions={handlePracticeWrongQuestions}
-                onRemoveSavedQuestion={handleToggleSaveQuestion}
-                onStartQuiz={() => handleNavigateWithFilter('quizzes')}
-                onStartTestConfig={(cfg) => handleStartTest(cfg)}
-                onNavigateNotes={() => handleNavigateWithFilter('notes')}
-                onNavigatePastPapers={() => handleNavigateWithFilter('past-papers')}
-                onUpdateProfile={handleUpdateProfile}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
-                onLogout={handleStudentLogout}
-              />
-            )}
-
-            {(!authAccessResult || authAccessResult.isAllowed) && currentView === 'leaderboard' && (
-              <LeaderboardView
-                currentStudentPoints={student?.points || 0}
-                currentStudentName={currentStudentName}
-              />
-            )}
-
-            {(!authAccessResult || authAccessResult.isAllowed) && (currentView === 'admin-panel' || currentView === 'teacher-panel') && (
-              <AdminTeacherPanel
-                allMCQs={mcqBank}
-                allTests={allTests}
-                allPastPapers={allPastPapers}
-                allStudyNotes={allStudyNotes}
-                historyResults={historyResults}
-                adminUser={adminUser}
-                initialTab={activeAdminTab as any}
-                onAdminLogin={(admin) => {
-                  const safeAdmin: AdminUser = {
-                    ...admin,
-                    name: (admin.email?.toLowerCase().trim() === 'admin@taleemguru.pk' || admin.name === 'avatar-1' || !admin.name)
-                      ? 'Admin'
-                      : admin.name,
-                  };
-                  setAdminUser(safeAdmin);
-                  const currentPath = getBrowserPath();
-                  if (currentPath.startsWith('/admin')) {
-                    checkAndApplyRoute(currentPath, { adminUser: safeAdmin });
-                  } else {
-                    handleNavigateWithFilter('admin-panel', undefined, 'dashboard');
-                  }
-                }}
-                onAdminLogout={handleAdminLogout}
-                onBackToHome={() => handleNavigateWithFilter('home')}
-                onAddMCQ={handleAddMCQ}
-                onUpdateMCQ={handleUpdateMCQ}
-                onDeleteMCQ={handleDeleteMCQ}
-                onCreateCustomTest={handleStartTest}
-                onUpdateCustomTest={handleUpdateTest}
-                onDeleteCustomTest={handleDeleteTest}
-                onBulkImportMCQs={handleBulkImportMCQs}
-                onBulkImportTests={handleBulkImportTests}
-                onBulkImportPastPapers={handleBulkImportPastPapers}
-                onBulkImportStudyNotes={handleBulkImportStudyNotes}
-                onBulkImportBundle={handleBulkImportBundle}
-                onNavigateTab={(tab) => {
-                  handleNavigateWithFilter('admin-panel', undefined, tab);
-                }}
-              />
-            )}
-
-            {currentView === 'privacy-policy' && (
-              <PrivacyPolicyView
-                onNavigateHome={() => handleNavigateWithFilter('home')}
-                onNavigateTerms={() => handleNavigateWithFilter('terms-of-service')}
-              />
-            )}
-
-            {currentView === 'verify-certificate' && (
-              <CertificateVerificationView />
-            )}
-
-            {currentView === 'terms-of-service' && (
-              <TermsOfServiceView
-                onNavigateHome={() => handleNavigateWithFilter('home')}
-                onNavigatePrivacy={() => handleNavigateWithFilter('privacy-policy')}
-              />
-            )}
-            </ErrorBoundary>
-          </main>
-
-          {/* Footer Component */}
-          <Footer onNavigate={(view) => {
-            handleNavigateWithFilter(view);
-          }} />
-        </>
-      )}
-
-      {/* Result & Scorecard Modal with Watermarked PDF Download */}
-      {activeResult && (
-        <ResultModal
-          result={activeResult}
-          studentName={currentStudentName}
-          onRetake={handleRetakeCurrentTest}
-          onClose={() => setActiveResult(null)}
-          onNextQuiz={() => {
-            setActiveResult(null);
-            handleNavigateWithFilter('quizzes');
-          }}
-          onGoDashboard={() => {
-            setActiveResult(null);
-            handleNavigateWithFilter('student-dashboard');
-          }}
-          onSaveQuestion={handleToggleSaveQuestion}
-          savedQuestionIds={student?.savedQuestionIds || []}
-        />
-      )}
-
-      {/* Universal Search Modal */}
-      <UniversalSearchModal
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        mcqs={mcqBank}
-        tests={POPULAR_TESTS}
-        pastPapers={PAST_PAPERS_DATA}
-        notes={STUDY_NOTES_DATA}
-        videos={[]}
-        onSelectTest={(t) => {
-          setIsSearchOpen(false);
-          handleStartTest(t);
-        }}
-        onSelectMCQ={(m) => {
-          setIsSearchOpen(false);
-          setCurrentView('mcqs');
-        }}
-        onSelectPastPaper={(p) => {
-          setIsSearchOpen(false);
-          handleSolvePastPaper(p);
-        }}
-        onSelectNote={() => {
-          setIsSearchOpen(false);
-          setCurrentView('study-material');
-        }}
-        onNavigate={(v, sub) => {
-          setIsSearchOpen(false);
-          handleNavigateWithFilter(v, sub);
-        }}
-      />
-
-      {/* Student Account & Profile Modal */}
-      <StudentAuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentStudent={student}
-        onUpdateStudent={(updated) => {
-          const isUserAdmin = updated.role === 'Admin' || updated.email?.toLowerCase().trim() === 'admin@taleemguru.pk';
-          const isUserStaff = ['Teacher', 'Editor', 'ContentManager', 'Moderator'].includes(updated.role);
-          const safeName = isUserAdmin
-            ? 'Admin'
-            : (updated.name === 'avatar-1' || !updated.name ? (updated.email ? updated.email.split('@')[0] : 'Learner') : updated.name);
-
-          const safeStudent: StudentProfile = {
-            ...updated,
-            name: safeName,
-            role: isUserAdmin ? 'Admin' : updated.role,
-            avatar: updated.avatar && updated.avatar !== 'avatar-1' ? updated.avatar : (isUserAdmin ? '👨‍💼' : '🎓'),
-          };
-
-          setStudent(safeStudent);
-
-          let currentAdmin: AdminUser | null = adminUser;
-          if (!isUserAdmin && !isUserStaff) {
-            setAdminUser(null);
-            currentAdmin = null;
-          } else {
-            currentAdmin = {
-              id: updated.uid || '',
-              name: safeName,
-              email: updated.email || '',
-              roles: isUserAdmin ? ['Admin'] : (updated.roles || ['Student']),
-              status: 'Active',
-              testsCompleted: 0,
-              points: isUserAdmin ? 9999 : (updated.points || 100),
-              joinedDate: new Date().toLocaleDateString('en-GB'),
-            };
-            setAdminUser(currentAdmin);
-          }
-
-          const currentPath = getBrowserPath();
-          if (isUserAdmin) {
-            handleNavigateWithFilter('admin-panel', undefined, 'dashboard');
-          } else if (isUserStaff) {
-            handleNavigateWithFilter('admin-panel');
-          } else if (currentPath === '/' || currentPath === '/home' || currentPath === '/student-login' || currentPath === '/login') {
-            handleNavigateWithFilter('student-dashboard');
-          } else {
-            checkAndApplyRoute(currentPath, {
-              student: safeStudent,
-              adminUser: currentAdmin,
-              isInitializing: false,
-            });
-          }
-        }}
-      />
-      </div>
-    </ToastProvider>
-  );
+  return {};
 }
+
+export async function syncUserProfileWithDb(profileData?: {
+  name?: string;
+  avatar?: string;
+  targetExam?: string;
+  classLevel?: string;
+  board?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/auth/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(profileData || {}),
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error syncing profile with Cloud SQL backend:', error);
+    return null;
+  }
+}
+
+export async function updateUserProfileApi(updates: {
+  name?: string;
+  avatar?: string;
+  targetExam?: string;
+  classLevel?: string;
+  board?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/user/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(updates),
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error updating profile in backend:', error);
+    return null;
+  }
+}
+
+export async function fetchUserProfileApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/user/profile', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.profile || null;
+  } catch (error) {
+    console.error('Error fetching profile from backend:', error);
+    return null;
+  }
+}
+
+export async function saveTestResultApi(result: any) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/user/results', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(result),
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error saving result to backend:', error);
+    return null;
+  }
+}
+
+export async function fetchUserTestResultsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/user/results', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch (error) {
+    console.error('Error fetching test results:', error);
+    return [];
+  }
+}
+
+export async function toggleBookmarkApi(questionId: string) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/user/bookmarks/toggle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ questionId }),
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error toggling bookmark:', error);
+    return null;
+  }
+}
+
+export async function fetchLeaderboardApi() {
+  try {
+    const url = '/api/leaderboard';
+    console.log('Fetching leaderboard from:', url);
+    const res = await fetch(url);
+    if (!res.ok) {
+        console.error('Leaderboard fetch failed with status:', res.status);
+        return [];
+    }
+    const data = await res.json();
+    return data.leaderboard || [];
+  } catch (error) {
+    console.error('Error fetching leaderboard:', error);
+    return [];
+  }
+}
+
+export async function verifyAdminStatusApi(): Promise<{ authorized: boolean; role?: string; user?: any }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return { authorized: false, role: 'Student' };
+
+    let res = await fetch('/api/admin/verify', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok && res.status !== 403 && res.status !== 401) {
+      try {
+        const altRes = await fetch('/admin/verify', {
+          headers: {
+            ...headers,
+          },
+        });
+        if (altRes.ok || altRes.status === 403 || altRes.status === 401) {
+          res = altRes;
+        }
+      } catch {}
+    }
+
+    if (res.ok) {
+      const data = await res.json();
+      return { authorized: Boolean(data.authorized), role: data.role || (data.authorized ? 'Admin' : 'Student'), user: data };
+    }
+
+    if (res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      return { authorized: false, role: data.role || 'Student' };
+    }
+
+    return { authorized: false, role: 'Student' };
+  } catch (error) {
+    console.error('Error verifying admin authorization API:', error);
+    return { authorized: false, role: 'Student' };
+  }
+}
+
+export async function fetchAdminUsersApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/admin/users', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.users || [];
+  } catch (error) {
+    console.warn('Notice: Unable to fetch admin users from backend:', error);
+    return [];
+  }
+}
+
+export async function fetchAdminStatsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/admin/stats', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.warn('Notice: Unable to fetch admin stats from backend:', error);
+    return null;
+  }
+}
+
+export async function fetchUserCertificatesApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/user/certificates', {
+      headers: {
+        ...headers,
+      },
+    });
+
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.certificates || [];
+  } catch (error) {
+    console.error('Error fetching certificates:', error);
+    return [];
+  }
+}
+
+export async function saveCertificateApi(certData: {
+  resultId: string;
+  testName: string;
+  score: number;
+  totalMarks: number;
+  percentage: number;
+  grade: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/user/certificates', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(certData),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.certificate || null;
+  } catch (error) {
+    console.error('Error saving certificate:', error);
+    return null;
+  }
+}
+
+export async function verifyCertificateApi(certId: string) {
+  try {
+    const res = await fetch(`/api/certificates/verify/${encodeURIComponent(certId)}`);
+    if (!res.ok) return { verified: false };
+    return await res.json();
+  } catch (error) {
+    console.error('Error verifying certificate:', error);
+    return { verified: false };
+  }
+}
+
+export async function fetchPublicStatsApi() {
+  try {
+    const url = '/api/public-stats';
+    console.log('Fetching public stats from:', url);
+    const res = await fetch(url);
+    if (!res.ok) {
+        console.error('Public stats fetch failed with status:', res.status);
+        return null;
+    }
+    const json = await res.json();
+    return json.data || null;
+  } catch (error) {
+    console.error('Error fetching public stats:', error);
+    return null;
+  }
+}
+
+// 1. Fetch Real Database Comprehensive Admin Platform Statistics
+export async function fetchAdminComprehensiveStatsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/admin/comprehensive-stats', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.stats || null;
+  } catch (error) {
+    console.warn('Notice: Unable to fetch comprehensive admin stats from backend:', error);
+    return null;
+  }
+}
+
+// 2. Fetch All Genuine Test Submissions for Admin Audit
+export async function fetchAdminTestResultsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/admin/results', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.results || [];
+  } catch (error) {
+    console.warn('Notice: Unable to fetch admin test results from backend:', error);
+    return [];
+  }
+}
+
+// 3. Fetch All Content / Question Reports for Admin Review
+export async function fetchAdminReportsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/admin/reports', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.reports || [];
+  } catch (error) {
+    console.warn('Notice: Unable to fetch content reports from backend:', error);
+    return [];
+  }
+}
+
+// 4. Update Content Report Status (OPEN, IN_REVIEW, RESOLVED, REJECTED)
+export async function updateAdminReportStatusApi(
+  reportId: string,
+  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'REJECTED',
+  adminNotes?: string
+) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch(`/api/admin/reports/${encodeURIComponent(reportId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ status, adminNotes }),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.report || null;
+  } catch (error) {
+    console.error('Error updating report status:', error);
+    return null;
+  }
+}
+
+// 5. Fetch Admin Audit Logs
+export async function fetchAdminAuditLogsApi(queryString: string = '') {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const url = queryString ? `/api/admin/audit-logs?${queryString}` : '/api/admin/audit-logs';
+    const res = await fetch(url, {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.logs || [];
+  } catch (error) {
+    console.error('Error fetching audit logs:', error);
+    return [];
+  }
+}
+
+// 6. Record Admin Action in Audit Log
+export async function recordAdminAuditLogApi(log: {
+  action: string;
+  targetType: string;
+  targetId?: string;
+  details?: string;
+  board?: string;
+  classLevel?: string;
+  subject?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/admin/audit-logs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(log),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.log || null;
+  } catch (error) {
+    console.error('Error recording audit log:', error);
+    return null;
+  }
+}
+
+// 7. Update User Role
+export async function updateAdminUserRoleApi(uid: string, roles: string[] | string) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const rolesArray = Array.isArray(roles) ? roles : [roles];
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/roles`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ roles: rolesArray }),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.user || null;
+  } catch (error) {
+    console.error('Error updating user role:', error);
+    return null;
+  }
+}
+
+// 7b. Update User Status (Active | Inactive | Suspended)
+export async function updateAdminUserStatusApi(uid: string, status: 'Active' | 'Inactive' | 'Suspended') {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/status`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ status }),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.user || null;
+  } catch (error) {
+    console.error('Error updating user status:', error);
+    return null;
+  }
+}
+
+// 7c. Update User Profile by Admin
+export async function updateAdminUserProfileApi(uid: string, profile: { name?: string; classLevel?: string; board?: string; targetExam?: string }) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/profile`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(profile),
+    });
+
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.user || null;
+  } catch (error) {
+    console.error('Error updating user profile by admin:', error);
+    return null;
+  }
+}
+
+// 8. Fetch System Health
+export async function fetchAdminSystemHealthApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/admin/system-health', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching system health:', error);
+    return null;
+  }
+}
+
+// 9. Create New Staff or User Account
+export async function createAdminUserApi(userData: {
+  name: string;
+  email: string;
+  roles: string[];
+  password?: string;
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return { success: false, error: 'Authentication required' };
+
+    const res = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(userData),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      return { success: false, error: json.error || 'Failed to create staff account' };
+    }
+    return { success: true, user: json.user };
+  } catch (error: any) {
+    console.error('Error creating staff user:', error);
+    return { success: false, error: error.message || 'Network error creating staff account' };
+  }
+}
+
+// 10. Fetch Available Roles Matrix
+export async function fetchAdminRolesApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+
+    const res = await fetch('/api/admin/roles', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.roles || [];
+  } catch (error) {
+    console.error('Error fetching admin roles:', error);
+    return [];
+  }
+}
+
+// 11. Fetch Active Permissions
+export async function fetchAdminPermissionsApi() {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+
+    const res = await fetch('/api/admin/permissions', {
+      headers: { ...headers },
+    });
+
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching admin permissions:', error);
+    return null;
+  }
+}
+
+// 12. Staff Assignments
+export async function fetchStaffAssignmentsApi(uid: string) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return [];
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/assignments`, {
+      headers: { ...headers },
+    });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.assignments || [];
+  } catch (error) {
+    console.error('Error fetching assignments:', error);
+    return [];
+  }
+}
+
+export async function addStaffAssignmentApi(assignment: {
+  userUid: string;
+  role: string;
+  board: string;
+  classLevel: string;
+  subject: string;
+  contentTypes?: string[];
+}) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return null;
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(assignment.userUid)}/assignments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(assignment),
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.assignment;
+  } catch (error) {
+    console.error('Error adding assignment:', error);
+    return null;
+  }
+}
+
+export async function deleteStaffAssignmentApi(assignmentId: number) {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return false;
+    const res = await fetch(`/api/admin/assignments/${encodeURIComponent(assignmentId)}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Error deleting assignment:', error);
+    return false;
+  }
+}
+
