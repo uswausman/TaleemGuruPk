@@ -198,8 +198,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             onClick={() => onNavigate('home')}
             className="flex items-center gap-3 cursor-pointer select-none shrink-0 group"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 text-white font-black text-xl tracking-tighter group-hover:scale-105 transition-transform">
-              TG
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden group-hover:scale-105 transition-transform">
+              <img src="/favicon.svg" alt="Taleem Guru Logo" className="w-7 h-7 object-contain" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
