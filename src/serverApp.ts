@@ -517,12 +517,10 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
     const bootstrapAdmins = getTrustedBootstrapAdmins();
     const bootstrapConfig = bootstrapAdmins[userEmail];
 
-    let authoritativeRole = 'Student';
-    if (isBootstrap) {
-      authoritativeRole = 'Admin';
-    } else if (dbUser?.role) {
-      authoritativeRole = dbUser.role;
-    }
+    const userRoles = dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0
+      ? dbUser.roles
+      : (dbUser?.role ? [dbUser.role] : ['Student']);
+    const authoritativeRole = isBootstrap ? 'Admin' : (userRoles[0] || 'Student');
 
     // Check account status
     const accountStatus = (dbUser?.status || 'Active').trim();
@@ -545,9 +543,11 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       'moderator',
     ];
 
-    if (!allowedRoles.includes(authoritativeRole.toLowerCase().trim())) {
+    const isAuthorizedStaff = isBootstrap || userRoles.some((r: string) => allowedRoles.includes(r.trim().toLowerCase().replace(/\s+/g, '_')));
+
+    if (!isAuthorizedStaff) {
       return res.status(403).json({
-        error: `Access Denied: The account ${userEmail} is registered with role "${authoritativeRole}" and does not possess administrative or staff privileges.`,
+        error: `Access Denied: The account ${userEmail} is registered with roles "${userRoles.join(', ')}" and does not possess administrative or staff privileges.`,
       });
     }
 
@@ -1076,7 +1076,7 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
         dbUser = await getOrCreateUser(uid, normalizedEmail, {
           name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : req.user?.name,
         });
-      } else if (dbUser && isBootstrap && dbUser.role !== 'Admin') {
+      } else if (dbUser && isBootstrap && (!dbUser.roles || !dbUser.roles.includes('Admin') || dbUser.name !== (bootstrapConfig?.name || 'Admin'))) {
         dbUser = await getOrCreateUser(uid, normalizedEmail, {
           name: bootstrapConfig?.name || 'Admin',
         });
@@ -1085,12 +1085,31 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
       console.warn('Notice in /api/admin/verify database lookup:', dbErr);
     }
 
+    const userRoles = dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0
+      ? dbUser.roles
+      : (dbUser?.role ? [dbUser.role] : (isBootstrap ? ['Admin'] : ['Student']));
+    const primaryRole = isBootstrap ? 'Admin' : (userRoles[0] || 'Student');
+
+    const staffRolesToCheck = [
+      'admin',
+      'superadmin',
+      'super_admin',
+      'administrator',
+      'teacher',
+      'editor',
+      'contentmanager',
+      'content_manager',
+      'moderator',
+    ];
+
+    const isAdmin = isBootstrap || userRoles.some((r: string) => staffRolesToCheck.includes(r.trim().toLowerCase().replace(/\s+/g, '_')));
+
     if (isBootstrap) {
       console.log('[/api/admin/verify Diagnostic]', {
         normalizedEmail,
         tokenVerificationSuccess: true,
         trustedAdminMatch: true,
-        dbProfileRole: dbUser?.role || 'none',
+        dbProfileRoles: dbUser?.roles || [],
         finalAuthoritativeRole: 'Admin',
         finalIsAdminBoolean: true,
       });
@@ -1108,32 +1127,19 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
       return res.status(403).json({ authorized: false, role: 'Student', error: 'User record not found in system' });
     }
 
-    const normalizedRole = (dbUser.role || '').trim().toLowerCase().replace(/\s+/g, '_');
-    const isAdmin = [
-      'admin',
-      'superadmin',
-      'super_admin',
-      'administrator',
-      'teacher',
-      'editor',
-      'contentmanager',
-      'content_manager',
-      'moderator',
-    ].includes(normalizedRole);
-
     console.log('[/api/admin/verify Diagnostic]', {
       normalizedEmail,
       tokenVerificationSuccess: true,
       trustedAdminMatch: false,
-      dbProfileRole: dbUser?.role || 'none',
-      finalAuthoritativeRole: isAdmin ? dbUser.role : 'Student',
+      dbProfileRoles: userRoles,
+      finalAuthoritativeRole: isAdmin ? primaryRole : 'Student',
       finalIsAdminBoolean: isAdmin,
     });
 
     if (!isAdmin) {
       return res.status(403).json({
         authorized: false,
-        role: dbUser.role,
+        role: primaryRole,
         message: 'Account does not possess administrative privileges.',
       });
     }
@@ -1141,7 +1147,7 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
     res.json({
       authorized: true,
       uid: dbUser.uid,
-      role: dbUser.role,
+      role: primaryRole,
       name: dbUser.name,
       email: dbUser.email,
     });
