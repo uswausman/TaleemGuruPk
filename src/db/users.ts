@@ -210,83 +210,80 @@ export async function getOrCreateUser(
   try {
     const normalizedEmail = (email || '').toLowerCase().trim();
     const bootstrapConfig = TRUSTED_BOOTSTRAP_ADMINS[normalizedEmail];
-    const isBootstrapAdmin = Boolean(bootstrapConfig);
+    const isBootstrapAdmin = Boolean(bootstrapConfig || isTrustedBootstrapAdminEmail(normalizedEmail));
     const designatedRoles = bootstrapConfig ? bootstrapConfig.roles : ['Student'];
 
-    // 1. Authoritative check: if user already exists in database by UID
-    let existing = await getUserByUid(uid);
+    let existing: any = null;
 
-    // If not found by UID, check if an existing record exists with this email (e.g. from prior setup/auth)
+    // For bootstrap admins, prioritize lookup by email first
+    if (isBootstrapAdmin && normalizedEmail) {
+      existing = await getUserByEmail(normalizedEmail);
+    }
+
+    if (!existing) {
+      existing = await getUserByUid(uid);
+    }
+
     if (!existing && normalizedEmail) {
       existing = await getUserByEmail(normalizedEmail);
-      if (existing) {
-        // Link authenticated Supabase UID to existing user record without creating a duplicate
-        const shouldPromoteAdmin = isBootstrapAdmin && (!(existing as any).roles?.some((r: string) => designatedRoles.includes(r)));
-        const shouldEnforceAdminName = isBootstrapAdmin && existing.name !== bootstrapConfig.name;
+    }
 
+    if (existing) {
+      const existingEmail = (existing.email || '').toLowerCase().trim();
+      const isAccountBootstrapAdmin = isBootstrapAdmin || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(existingEmail) || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(normalizedEmail);
+      const effectiveBootstrap = bootstrapConfig || TRUSTED_BOOTSTRAP_ADMINS[existingEmail] || TRUSTED_BOOTSTRAP_ADMINS[normalizedEmail];
+
+      const shouldUpdateEmail = Boolean(normalizedEmail && existingEmail !== normalizedEmail);
+      const rolesArray = Array.isArray(existing.roles) ? existing.roles : (existing.role ? [existing.role] : ['Student']);
+      const hasRequiredAdminRole = isAccountBootstrapAdmin && effectiveBootstrap 
+        ? effectiveBootstrap.roles.every((r: string) => rolesArray.some((er: string) => er.toLowerCase() === r.toLowerCase()))
+        : true;
+      const shouldPromoteAdmin = isAccountBootstrapAdmin && effectiveBootstrap && !hasRequiredAdminRole;
+      const shouldEnforceAdminName = isAccountBootstrapAdmin && effectiveBootstrap && existing.name !== effectiveBootstrap.name;
+      const shouldUpdateUid = existing.uid !== uid;
+
+      if (shouldUpdateEmail || shouldPromoteAdmin || shouldEnforceAdminName || shouldUpdateUid) {
+        const newRoles = shouldPromoteAdmin ? effectiveBootstrap.roles : rolesArray;
+        const newName = shouldEnforceAdminName ? effectiveBootstrap.name : existing.name;
         try {
           const [updated] = await db
             .update(users)
             .set({
-              uid, // Update to authenticated Supabase UID
-              ...(shouldPromoteAdmin ? { roles: designatedRoles } : {}),
-              ...(shouldEnforceAdminName ? { name: bootstrapConfig.name } : {}),
+              uid,
+              ...(shouldUpdateEmail ? { email: normalizedEmail } : {}),
+              ...(shouldPromoteAdmin ? { roles: newRoles } : {}),
+              ...(shouldEnforceAdminName ? { name: newName } : {}),
               updatedAt: new Date(),
             })
             .where(eq(users.id, existing.id))
             .returning();
           return updated || existing;
         } catch (updateErr) {
-          console.warn('Notice: Updating user UID encountered constraint, updating role/name directly:', updateErr);
-          if (shouldPromoteAdmin || shouldEnforceAdminName) {
+          console.warn('Notice updating user record:', updateErr);
+          try {
             const [promoted] = await db
               .update(users)
               .set({
-                ...(shouldPromoteAdmin ? { roles: designatedRoles } : {}),
-                ...(shouldEnforceAdminName ? { name: bootstrapConfig.name } : {}),
+                ...(shouldPromoteAdmin ? { roles: newRoles } : {}),
+                ...(shouldEnforceAdminName ? { name: newName } : {}),
                 updatedAt: new Date(),
               })
-              .where(eq(users.id, existing.id))
+              .where(eq(users.uid, uid))
               .returning();
             return promoted || existing;
+          } catch (e2) {
+            return existing;
           }
-          return existing;
         }
-      }
-    }
-
-    if (existing) {
-      // Existing DB name is authoritative for regular users. NEVER overwrite existing.name with provider metadata or email prefix.
-      const existingEmail = (existing.email || '').toLowerCase().trim();
-      const isAccountBootstrapAdmin = isBootstrapAdmin || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(existingEmail);
-      const effectiveBootstrap = bootstrapConfig || TRUSTED_BOOTSTRAP_ADMINS[existingEmail];
-
-      const shouldUpdateEmail = Boolean(normalizedEmail && existingEmail !== normalizedEmail);
-      const shouldPromoteAdmin = isAccountBootstrapAdmin && effectiveBootstrap && !existing.roles.some(r => effectiveBootstrap.roles.includes(r));
-      const shouldEnforceAdminName = isAccountBootstrapAdmin && effectiveBootstrap && existing.name !== effectiveBootstrap.name;
-
-      if (shouldUpdateEmail || shouldPromoteAdmin || shouldEnforceAdminName) {
-        const [updated] = await db
-          .update(users)
-          .set({
-            ...(shouldUpdateEmail ? { email: normalizedEmail } : {}),
-            ...(shouldPromoteAdmin ? { roles: effectiveBootstrap.roles } : {}),
-            ...(shouldEnforceAdminName ? { name: effectiveBootstrap.name } : {}),
-            updatedAt: new Date(),
-          })
-          .where(eq(users.uid, uid))
-          .returning();
-        return updated || existing;
       }
 
       return existing;
     }
 
     // 2. Brand-new user creation:
-    // For bootstrap administrator, strictly set their configured name ('Admin') and role ('Admin').
-    // For normal learners, provider name (extra?.name) is used as the initial fallback on initial creation.
+    const finalRoles = isBootstrapAdmin ? (bootstrapConfig?.roles || ['Admin']) : ['Student'];
     const initialName = isBootstrapAdmin
-      ? bootstrapConfig.name
+      ? (bootstrapConfig?.name || 'Admin')
       : (extra?.name?.trim() || 'Learner');
 
     const result = await db
@@ -295,7 +292,7 @@ export async function getOrCreateUser(
         uid,
         email: normalizedEmail,
         name: initialName,
-        roles: designatedRoles,
+        roles: finalRoles,
         targetExam: extra?.targetExam || 'MDCAT',
         classLevel: extra?.classLevel || 'Class 10',
         board: extra?.board || 'Punjab',
@@ -303,12 +300,9 @@ export async function getOrCreateUser(
       })
       .onConflictDoUpdate({
         target: users.uid,
-        // On conflict (e.g. concurrent insert race condition):
-        // NEVER overwrite a student's custom name with incoming extra.name.
-        // For bootstrap admins, ensure their authoritative role and name are enforced.
         set: {
           email: normalizedEmail,
-          ...(isBootstrapAdmin ? { roles: bootstrapConfig.roles, name: bootstrapConfig.name } : {}),
+          ...(isBootstrapAdmin ? { roles: finalRoles, name: initialName } : {}),
           updatedAt: new Date(),
         },
       })
@@ -326,8 +320,9 @@ export async function isUserAdminInDatabase(uid: string): Promise<boolean> {
   try {
     const user = await getUserByUid(uid);
     if (!user) return false;
-    const role = (user.roles[0] || '').trim().toLowerCase();
-    return ['admin', 'superadmin', 'administrator'].includes(role);
+    const roles = Array.isArray(user.roles) ? user.roles : ((user as any).role ? [(user as any).role] : ['Student']);
+    const normalizedRoles = roles.map((r: string) => r.trim().toLowerCase().replace(/\s+/g, '_'));
+    return normalizedRoles.some((role: string) => ['admin', 'superadmin', 'administrator'].includes(role));
   } catch (error) {
     console.error('Failed to verify admin status in database:', error);
     return false; // Fail closed
