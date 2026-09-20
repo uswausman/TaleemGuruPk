@@ -1,0 +1,6 @@
+{
+  "name": "TALEEM GURU - Learn. Practice. Test. Improve.",
+  "description": "Pakistan's smart online test & quiz platform for BISE Boards, MDCAT, ECAT, CSS, PMS, Armed Forces, and comprehensive MCQ bank.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

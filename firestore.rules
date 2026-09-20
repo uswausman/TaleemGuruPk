@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    // Helper function to check admin role securely via custom claims or dedicated admins collection
+    function isAdmin() {
+      return isSignedIn() && 
+        (request.auth.token.role == 'admin' || 
+         request.auth.token.role == 'superadmin' || 
+         exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // Secure Admins registry: Read only by authenticated Admins, write restricted to console/admin SDK
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Users collection: Private profiles with privilege escalation prevention
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && (!('role' in request.resource.data) || request.resource.data.role == 'Student');
+      allow update: if isAdmin() || (
+        isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isAdmin', 'permissions', 'email'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Public Educational Content: MCQs, Tests, Boards, Classes, Subjects, Past Papers, Notes
+    match /mcqs/{mcqId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /tests/{testId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /boards/{boardId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /pastPapers/{paperId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /notes/{noteId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Test Attempts & Results: Private to the authenticated student and admins
+    match /attempts/{attemptId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid != null && (resource.data.userId == request.auth.uid || isAdmin()));
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /results/{resultId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid != null && (resource.data.userId == request.auth.uid || isAdmin()));
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // Sanitized Public Leaderboard: Publicly viewable, writes restricted to Admin
+    match /leaderboard/{entryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Site settings & notifications
+    match /siteSettings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /notifications/{notifId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Student or Admin user profile in Taleem Guru",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "board": { "type": "string" },
+        "classLevel": { "type": "string" },
+        "targetExam": { "type": "string" },
+        "points": { "type": "number" },
+        "streakDays": { "type": "number" },
+        "testsTaken": { "type": "number" },
+        "savedQuestionIds": { "type": "array" },
+        "wrongQuestionIds": { "type": "array" },
+        "certificates": { "type": "array" },
+        "avatar": { "type": "string" },
+        "role": { "type": "string", "enum": ["Student", "Admin", "Teacher", "Editor"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Secure admin authorization record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["Admin", "Teacher", "SuperAdmin"] },
+        "status": { "type": "string" }
+      },
+      "required": ["uid", "role"]
+    },
+    "TestResultRecord": {
+      "title": "TestResultRecord",
+      "description": "Student test result record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "testId": { "type": "string" },
+        "testTitle": { "type": "string" },
+        "marksObtained": { "type": "number" },
+        "totalMarks": { "type": "number" },
+        "percentage": { "type": "number" }
+      },
+      "required": ["id", "userId", "testId"]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Sanitized public leaderboard ranking item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "points": { "type": "number" },
+        "rank": { "type": "number" },
+        "badge": { "type": "string" }
+      },
+      "required": ["id", "name", "points", "rank"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private student profiles with owner/admin access"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/AdminRole" },
+      "description": "Privileged administrator registry for ABAC verification"
+    },
+    "/results/{resultId}": {
+      "schema": { "$ref": "#/entities/TestResultRecord" },
+      "description": "Detailed student test results"
+    },
+    "/attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/TestResultRecord" },
+      "description": "Student test attempt history"
+    },
+    "/leaderboard/{entryId}": {
+      "schema": { "$ref": "#/entities/LeaderboardEntry" },
+      "description": "Public sanitized leaderboard ranking"
+    }
+  }
+}

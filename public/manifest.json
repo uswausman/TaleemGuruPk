@@ -1,0 +1,16 @@
+{
+  "name": "Taleem Guru",
+  "short_name": "Taleem Guru",
+  "description": "Pakistan's Smart Online Test & Quiz Platform for BISE Boards, MDCAT, ECAT, CSS, PMS and Armed Forces.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#1d4ed8",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
