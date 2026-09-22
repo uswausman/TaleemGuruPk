@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 92" fill="none" width="100%" height="100%">
+  <defs>
+    <!-- Cap Gradients -->
+    <linearGradient id="hw_capTop" x1="45" y1="5" x2="45" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="40%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <linearGradient id="hw_capHighlight" x1="20" y1="10" x2="70" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="hw_capBase" x1="45" y1="30" x2="45" y2="45" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0c4a6e"/>
+    </linearGradient>
+    <linearGradient id="hw_tassel" x1="72" y1="25" x2="72" y2="45" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <!-- Figures Gradients -->
+    <linearGradient id="hw_blueFig" x1="30" y1="35" x2="45" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="hw_greenFig" x1="60" y1="35" x2="45" y2="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="50%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+
+    <!-- Book Gradients -->
+    <linearGradient id="hw_leftPage" x1="15" y1="50" x2="45" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="60%" stop-color="#16a34a"/>
+      <stop offset="100%" stop-color="#15803d"/>
+    </linearGradient>
+    <linearGradient id="hw_rightPage" x1="75" y1="50" x2="45" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="60%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="hw_bookBlue" x1="45" y1="70" x2="45" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#0c4a6e"/>
+    </linearGradient>
+    <linearGradient id="hw_cyanStripe" x1="15" y1="75" x2="75" y2="75" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#0ea5e9"/>
+    </linearGradient>
+
+    <!-- Text Gradients -->
+    <linearGradient id="hw_taleemText" x1="105" y1="20" x2="240" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f0f9ff"/>
+    </linearGradient>
+    <linearGradient id="hw_guruText" x1="250" y1="20" x2="370" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ade80"/>
+      <stop offset="100%" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ==================== MINI EMBLEM (Left) ==================== -->
+  <g transform="translate(2, 2) scale(0.2)">
+    <!-- Bottom Deep Blue Spine & Wings -->
+    <path d="M 85 328 C 145 310, 205 325, 256 358 C 307 325, 367 310, 427 328 C 405 348, 335 372, 256 368 C 177 372, 107 348, 85 328 Z" fill="url(#hw_bookBlue)" />
+    <path d="M 92 322 C 148 306, 204 320, 256 350 C 308 320, 364 306, 420 322 C 375 342, 318 355, 256 352 C 194 355, 137 342, 92 322 Z" fill="url(#hw_cyanStripe)" />
+
+    <!-- White Inner Pages Layer -->
+    <path d="M 98 312 C 150 292, 206 306, 256 338 C 306 306, 362 292, 414 312 C 372 328, 316 338, 256 336 C 196 338, 140 328, 98 312 Z" fill="#ffffff" />
+    <path d="M 104 298 C 152 278, 208 290, 256 322 C 304 290, 360 278, 408 298 C 368 314, 314 324, 256 322 C 198 324, 144 314, 104 298 Z" fill="#f8fafc" />
+
+    <!-- Top Green/Teal Outer Pages -->
+    <path d="M 86 302 C 112 245, 178 238, 250 310 C 195 282, 136 278, 86 302 Z" fill="url(#hw_leftPage)" />
+    <path d="M 426 302 C 400 245, 334 238, 262 310 C 317 282, 376 278, 426 302 Z" fill="url(#hw_rightPage)" />
+    <path d="M 256 310 L 256 365" stroke="#ffffff" stroke-width="3" stroke-linecap="round" opacity="0.9" />
+
+    <!-- Left Blue Learner -->
+    <path d="M 130 172 C 158 205, 192 238, 254 295 C 238 236, 200 190, 182 178 C 168 195, 148 185, 130 172 Z" fill="url(#hw_blueFig)" />
+    <circle cx="206" cy="188" r="28" fill="url(#hw_blueFig)" />
+
+    <!-- Right Green Learner -->
+    <path d="M 382 172 C 354 205, 320 238, 258 295 C 274 236, 312 190, 330 178 C 344 195, 364 185, 382 172 Z" fill="url(#hw_greenFig)" />
+    <circle cx="306" cy="188" r="28" fill="url(#hw_greenFig)" />
+
+    <!-- Graduation Cap -->
+    <path d="M 176 128 L 176 162 C 176 178, 212 192, 256 192 C 300 192, 336 178, 336 162 L 336 128 Z" fill="url(#hw_capBase)" />
+    <path d="M 180 156 C 202 168, 230 174, 256 174 C 282 174, 310 168, 332 156" stroke="#bae6fd" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.8" />
+
+    <!-- Cap Top & Button -->
+    <path d="M 256 32 L 396 102 L 256 156 L 116 102 Z" fill="url(#hw_capTop)" />
+    <path d="M 256 32 L 396 102 L 256 156 L 116 102 Z" fill="url(#hw_capHighlight)" />
+    <ellipse cx="256" cy="94" rx="8" ry="5" fill="#0369a1" />
+    <ellipse cx="256" cy="93" rx="6" ry="3.5" fill="#7dd3fc" />
+
+    <!-- Tassel -->
+    <path d="M 256 94 C 298 94, 375 106, 376 138 L 374 154" stroke="#38bdf8" stroke-width="4" stroke-linecap="round" fill="none" />
+    <circle cx="374" cy="155" r="5" fill="#0284c7" />
+    <circle cx="374" cy="154" r="3" fill="#bae6fd" />
+    <path d="M 368 160 L 380 160 L 384 192 C 384 195, 364 195, 364 192 Z" fill="url(#hw_tassel)" />
+  </g>
+
+  <!-- ==================== HORIZONTAL WORDMARK ==================== -->
+  <text x="100" y="52" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Montserrat, Arial, sans-serif" font-size="43" font-weight="900" letter-spacing="-1" fill="url(#hw_taleemText)">Taleem</text>
+  <text x="252" y="52" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Montserrat, Arial, sans-serif" font-size="43" font-weight="900" letter-spacing="-1" fill="url(#hw_guruText)">Guru</text>
+
+  <!-- ==================== HORIZONTAL TAGLINE ==================== -->
+  <line x1="102" y1="72" x2="124" y2="72" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round" opacity="0.8" />
+  <text x="242" y="76" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Montserrat, Arial, sans-serif" font-size="12" font-weight="800" letter-spacing="0.1" fill="#cbd5e1">Learn. Practice. Test. Improve.</text>
+  <line x1="360" y1="72" x2="382" y2="72" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round" opacity="0.8" />
+</svg>
