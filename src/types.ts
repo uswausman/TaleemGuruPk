@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'admin' | 'teacher' | 'editor';
+export type UserRole = 'student' | 'admin' | 'teacher' | 'editor' | 'staff';
 
 export type ViewMode =
   | 'home'
@@ -192,7 +192,7 @@ export interface ChapterInfo {
   topics: TopicInfo[];
 }
 
-export type StaffRole = 'Student' | 'Teacher' | 'Admin' | 'Editor' | 'ContentManager' | 'Moderator' | 'SuperAdmin';
+export type StaffRole = 'Student' | 'Teacher' | 'Staff' | 'Admin' | 'Editor' | 'ContentManager' | 'Moderator' | 'SuperAdmin';
 
 export interface StaffAssignment {
   id?: number;

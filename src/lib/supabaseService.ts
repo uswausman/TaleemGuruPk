@@ -86,13 +86,17 @@ export function formatAuthErrorMessage(error: any): string {
     return 'No account found with this email. Please check your credentials or register a new account.';
   }
   if (
-    message.includes('rate limit') ||
-    message.includes('over_email_send_rate_limit') ||
-    message.includes('over_request_rate_limit') ||
-    message.includes('Too many requests') ||
-    message.includes('too_many_requests')
+    lower.includes('rate limit') ||
+    lower.includes('rate_limit') ||
+    lower.includes('over_email_send_rate_limit') ||
+    lower.includes('over_request_rate_limit') ||
+    lower.includes('too many requests') ||
+    lower.includes('too_many_requests') ||
+    lower.includes('once every') ||
+    lower.includes('email rate limit exceeded') ||
+    error?.status === 429
   ) {
-    return 'Too many attempts. Please wait a few minutes before trying again.';
+    return 'Password reset email was requested recently. For security purposes, please wait 60 seconds before requesting another email.';
   }
   if (message.includes('network') || message.includes('Failed to fetch') || message.includes('NetworkError')) {
     return 'Network connection failed. Please check your internet connection.';

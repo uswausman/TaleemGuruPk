@@ -66,6 +66,7 @@ import {
   getTrustedBootstrapAdmins,
   getUserByEmail,
   verifyPassword,
+  setUserPasswordInDb,
 } from './db/users.ts';
 
 const app = express();
@@ -536,6 +537,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       'superadmin',
       'super_admin',
       'administrator',
+      'staff',
       'teacher',
       'editor',
       'contentmanager',
@@ -690,6 +692,119 @@ apiRouter.put('/user/profile', requireAuth, async (req: AuthRequest, res: Respon
   } catch (error: any) {
     console.error('Error updating profile:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// 4a. Update Profile (PATCH support)
+apiRouter.patch('/user/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { name, targetExam, classLevel, board, avatar } = req.body;
+    const updated = await updateUserProfile(uid, {
+      ...(name ? { name: name.trim() } : {}),
+      targetExam,
+      classLevel,
+      board,
+      avatar,
+    });
+
+    res.json({ success: true, profile: updated });
+  } catch (error: any) {
+    console.error('Error updating profile with PATCH:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// 4b. Student / User Self Password Change
+apiRouter.post('/user/change-password', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    const userEmail = (req.user?.email || '').toLowerCase().trim();
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current password is required.' });
+    }
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password.' });
+    }
+
+    // 1. Verify current password
+    let isCurrentPasswordValid = false;
+
+    // Check Supabase Auth
+    const supabaseClient = getSupabaseServerClient();
+    if (supabaseClient && userEmail) {
+      try {
+        const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+          email: userEmail,
+          password: currentPassword,
+        });
+        if (!authError && authData?.user) {
+          isCurrentPasswordValid = true;
+        }
+      } catch (e) {
+        // Continue to check database hash
+      }
+    }
+
+    // Check Database hashed password token
+    if (!isCurrentPasswordValid) {
+      try {
+        const dbUser = await getUserByUid(uid);
+        if (dbUser) {
+          const pwdToken = (dbUser.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
+          if (pwdToken && verifyPassword(currentPassword, pwdToken)) {
+            isCurrentPasswordValid = true;
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Notice in db password verification:', dbErr);
+      }
+    }
+
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ error: 'Current password is incorrect. Please verify and try again.' });
+    }
+
+    // 2. Update password in Supabase Auth if available
+    if (supabaseClient && (supabaseClient as any).auth?.admin?.updateUserById) {
+      try {
+        await (supabaseClient as any).auth.admin.updateUserById(uid, { password: newPassword });
+      } catch (authErr) {
+        console.warn('Supabase updateUserById notice:', authErr);
+      }
+    }
+
+    // 3. Update hashed password in database
+    const updated = await setUserPasswordInDb(uid, newPassword);
+    if (!updated) {
+      return res.status(500).json({ error: 'Failed to update password in database.' });
+    }
+
+    // 4. Save audit log
+    await saveAuditLogToDb({
+      adminUid: uid,
+      adminEmail: userEmail,
+      adminName: req.user?.name,
+      action: 'PASSWORD_CHANGED',
+      targetType: 'user',
+      targetId: uid,
+      details: `User changed their account password`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, message: 'Password changed successfully.' });
+  } catch (error: any) {
+    console.error('Error changing student password:', error);
+    return res.status(500).json({ error: 'Failed to change password. Please try again.' });
   }
 });
 
@@ -1189,7 +1304,7 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
 
-    const allowedRoles = ['Student', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'Admin', 'SuperAdmin'];
+    const allowedRoles = ['Student', 'Teacher', 'Staff', 'Editor', 'ContentManager', 'Moderator', 'Admin', 'SuperAdmin'];
     const invalidRoles = cleanRoles.filter(r => !allowedRoles.includes(r));
     if (invalidRoles.length > 0) {
       return res.status(400).json({ error: `Invalid roles: ${invalidRoles.join(', ')}. Allowed roles: ${allowedRoles.join(', ')}` });
@@ -1294,7 +1409,7 @@ apiRouter.patch('/admin/users/:uid/roles', requireHighAdmin, async (req: AuthReq
       return res.status(403).json({ error: 'Forbidden: You cannot modify your own roles.' });
     }
 
-    const allowedRoles = ['Student', 'Admin', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'SuperAdmin'];
+    const allowedRoles = ['Student', 'Staff', 'Admin', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'SuperAdmin'];
     if (!roles || !Array.isArray(roles) || !roles.every(r => allowedRoles.includes(r))) {
       return res.status(400).json({ error: `Invalid roles. Allowed roles: ${allowedRoles.join(', ')}` });
     }
@@ -1429,6 +1544,66 @@ apiRouter.patch('/admin/users/:uid/profile', requireHighAdmin, async (req: AuthR
   } catch (error: any) {
     console.error('Error editing user profile by admin:', error);
     res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
+// 18a2b. Admin Management: Reset User / Staff Password (Requires verified High Admin)
+apiRouter.post('/admin/users/:uid/reset-password', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { password } = req.body || {};
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found.' });
+    }
+
+    const callerRoles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    const isCallerSuperAdmin = callerRoles.includes('superadmin') || callerRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+    const targetRoles = (targetUser.roles || []).map((r: string) => r.toLowerCase().trim());
+    const targetIsSuperAdmin = targetRoles.includes('superadmin') || targetRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(targetUser.email);
+
+    // Regular admin cannot reset password of a SuperAdmin unless caller is SuperAdmin
+    if (targetIsSuperAdmin && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Administrators cannot reset credentials for a SuperAdmin.' });
+    }
+
+    // 1. Update in Supabase Auth if server client is available
+    const supabaseClient = getSupabaseServerClient();
+    if (supabaseClient && (supabaseClient as any).auth?.admin?.updateUserById) {
+      try {
+        await (supabaseClient as any).auth.admin.updateUserById(targetUid, { password });
+      } catch (authErr) {
+        console.warn('Supabase admin updateUserById notice:', authErr);
+      }
+    }
+
+    // 2. Authoritatively store hashed password in application database
+    const updated = await setUserPasswordInDb(targetUid, password);
+    if (!updated) {
+      return res.status(500).json({ error: 'Failed to update user password in database.' });
+    }
+
+    // 3. Record secure audit log
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'STAFF_PASSWORD_RESET_BY_ADMIN',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Admin reset password for account ${targetUser.email} (${targetUser.name})`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, message: 'Password has been reset successfully.' });
+  } catch (error: any) {
+    console.error('Error resetting staff password by admin:', error);
+    return res.status(500).json({ error: 'Failed to reset user password.' });
   }
 });
 
@@ -1578,6 +1753,13 @@ apiRouter.get('/admin/roles', requireAdmin, async (req: AuthRequest, res: Respon
         level: 50,
         description: 'Create custom classroom tests, review test analytics, and track student scores.',
         permissions: ['create_tests', 'view_results', 'view_quizzes'],
+      },
+      {
+        id: 'Staff',
+        name: 'Staff / Operations',
+        level: 45,
+        description: 'Manage institutional operations, content maintenance, and administrative assistance.',
+        permissions: ['manage_content', 'view_reports', 'view_results'],
       },
       {
         id: 'Editor',

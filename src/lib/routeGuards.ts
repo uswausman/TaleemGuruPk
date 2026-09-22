@@ -684,12 +684,15 @@ export function evaluateAccess(
     };
   }
 
-  // Determine user's highest normalized role from verified profile
-  const userRoles = user.roles || [(user as any).role];
-  const userRole = normalizeRole(userRoles[0]);
+  // Determine user's normalized roles from verified profile
+  const rawRoles = (user.roles && user.roles.length > 0) ? user.roles : [(user as any).role || 'Student'];
+  const normalizedRoles = rawRoles.map((r) => normalizeRole(r));
 
-  // Check if user's role is in the allowedRoles list
-  const hasPermission = route.allowedRoles.includes(userRole);
+  // Check if ANY of the user's assigned roles is in the allowedRoles list
+  const hasPermission = normalizedRoles.some((r) => route.allowedRoles.includes(r));
+  const primaryRole = normalizedRoles.includes('admin')
+    ? 'admin'
+    : (normalizedRoles.includes('teacher') ? 'teacher' : (normalizedRoles.includes('editor') ? 'editor' : 'student'));
 
   if (!hasPermission) {
     return {
@@ -697,8 +700,8 @@ export function evaluateAccess(
       status: 'FORBIDDEN',
       path: route.path,
       requiredRoles: route.allowedRoles,
-      currentRole: userRole,
-      message: `Access Denied: You are signed in as a ${userRole.toUpperCase()}, but this section requires ${route.allowedRoles.map(r => r.toUpperCase()).join(' or ')} privileges.`,
+      currentRole: primaryRole,
+      message: `Access Denied: You are signed in as [${rawRoles.join(', ')}], but this section requires ${route.allowedRoles.map(r => r.toUpperCase()).join(' or ')} privileges.`,
     };
   }
 
@@ -707,7 +710,7 @@ export function evaluateAccess(
     status: 'AUTHORIZED',
     path: route.path,
     requiredRoles: route.allowedRoles,
-    currentRole: userRole,
+    currentRole: primaryRole,
   };
 }
 

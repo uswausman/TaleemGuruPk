@@ -293,6 +293,12 @@ export default function App() {
         );
         const resolvedName = isAuthAdmin ? 'Admin' : rawResolvedName;
 
+        const userAssignedRoles: string[] = (
+          (serverAuth.serverUser?.roles && Array.isArray(serverAuth.serverUser.roles) && serverAuth.serverUser.roles.length > 0 ? serverAuth.serverUser.roles : null) ||
+          (cloudProfile?.roles && Array.isArray(cloudProfile.roles) && cloudProfile.roles.length > 0 ? cloudProfile.roles : null) ||
+          (authoritativeRole === 'Admin' ? ['Admin'] : ['Student'])
+        );
+
         let activeStudentProfile: StudentProfile;
 
         if (cloudProfile) {
@@ -301,7 +307,7 @@ export default function App() {
             name: isAuthAdmin ? 'Admin' : (cloudProfile.name === 'avatar-1' ? (normalizedAuthEmail ? normalizedAuthEmail.split('@')[0] : 'Learner') : cloudProfile.name),
             email: (cloudProfile.email || normalizedAuthEmail).toLowerCase().trim(),
             avatar: cloudProfile.avatar && cloudProfile.avatar !== 'avatar-1' ? cloudProfile.avatar : (isAuthAdmin ? '👨‍💼' : '🎓'),
-            roles: authoritativeRole === 'Admin' ? ['Admin'] : ['Student'],
+            roles: userAssignedRoles as any,
           };
         } else {
           activeStudentProfile = {
@@ -318,7 +324,7 @@ export default function App() {
             wrongQuestionIds: [],
             certificates: [],
             avatar: isAuthAdmin ? '👨‍💼' : '👨‍🎓',
-            roles: authoritativeRole === 'Admin' ? ['Admin'] : ['Student'],
+            roles: userAssignedRoles as any,
           };
         }
 
@@ -816,6 +822,10 @@ export default function App() {
     setMcqBank((prev) => prev.filter((m) => m.id !== id));
   };
 
+  const handleCreateTest = (newTest: TestConfig) => {
+    setAllTests((prev) => [newTest, ...prev]);
+  };
+
   const handleUpdateTest = (updatedTest: TestConfig) => {
     setAllTests((prev) => prev.map((t) => (t.id === updatedTest.id ? updatedTest : t)));
   };
@@ -1138,9 +1148,10 @@ export default function App() {
                 onAddMCQ={handleAddMCQ}
                 onUpdateMCQ={handleUpdateMCQ}
                 onDeleteMCQ={handleDeleteMCQ}
-                onCreateCustomTest={handleStartTest}
+                onCreateCustomTest={handleCreateTest}
                 onUpdateCustomTest={handleUpdateTest}
                 onDeleteCustomTest={handleDeleteTest}
+                onStartTest={handleStartTest}
                 onBulkImportMCQs={handleBulkImportMCQs}
                 onBulkImportTests={handleBulkImportTests}
                 onBulkImportPastPapers={handleBulkImportPastPapers}
@@ -1249,21 +1260,27 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
         currentStudent={student}
         onUpdateStudent={(updated) => {
+          const rawRoles: string[] = (updated.roles && updated.roles.length > 0)
+            ? updated.roles
+            : ((updated as any).role ? [(updated as any).role] : ['Student']);
           const isUserAdmin =
-            (updated.roles && updated.roles.includes('Admin')) ||
-            (updated as any).role === 'Admin' ||
+            rawRoles.includes('Admin') ||
             updated.email?.toLowerCase().trim() === 'admin@taleemguru.pk';
-          const isUserStaff = (updated.roles || []).some((r: string) =>
+          const isUserStaff = rawRoles.some((r: string) =>
             ['Teacher', 'Editor', 'ContentManager', 'Moderator'].includes(r)
-          ) || ['Teacher', 'Editor', 'ContentManager', 'Moderator'].includes((updated as any).role);
-          const safeName = isUserAdmin
+          );
+          const effectiveRoles: any[] = isUserAdmin && !rawRoles.includes('Admin')
+            ? [...rawRoles, 'Admin']
+            : rawRoles;
+
+          const safeName = isUserAdmin && !updated.name
             ? 'Admin'
             : (updated.name === 'avatar-1' || !updated.name ? (updated.email ? updated.email.split('@')[0] : 'Learner') : updated.name);
 
           const safeStudent: StudentProfile = {
             ...updated,
             name: safeName,
-            roles: isUserAdmin ? ['Admin'] : (updated.roles || ['Student']),
+            roles: effectiveRoles,
             avatar: updated.avatar && updated.avatar !== 'avatar-1' ? updated.avatar : (isUserAdmin ? '👨‍💼' : '🎓'),
           };
 
@@ -1278,7 +1295,7 @@ export default function App() {
               id: updated.uid || '',
               name: safeName,
               email: updated.email || '',
-              roles: isUserAdmin ? ['Admin'] : (updated.roles || ['Student']),
+              roles: effectiveRoles,
               status: 'Active',
               testsCompleted: 0,
               points: isUserAdmin ? 9999 : (updated.points || 100),

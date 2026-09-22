@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { MCQ, TestResult, StudyNote, PastPaper, Certificate } from '../types';
+import { TALEEMGURU_LOGO_BASE64 } from './logoBase64';
 
 export const BRAND_NAME = 'TaleemGuru.pk';
 export const BRAND_TAGLINE = "Pakistan's Online Testing, Quiz & Exam Preparation Platform";
@@ -369,11 +370,18 @@ export function exportCertificateToPDF(
   doc.setLineWidth(1);
   doc.rect(12, 12, width - 24, height - 24);
 
-  // Crest & Header
+  // Crest & Header Logo
+  try {
+    doc.addImage(TALEEMGURU_LOGO_BASE64, 'PNG', 20, 16, 18, 18);
+    doc.addImage(TALEEMGURU_LOGO_BASE64, 'PNG', width - 38, 16, 18, 18);
+  } catch (_e) {
+    // Graceful fallback if image decoding is unavailable in environment
+  }
+
   doc.setTextColor(16, 110, 68);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(22);
-  doc.text('TALEEM GURU PAKISTAN', width / 2, 28, { align: 'center' });
+  doc.text('TALEEM GURU PAKISTAN', width / 2, 26, { align: 'center' });
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');

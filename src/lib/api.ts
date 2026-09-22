@@ -155,19 +155,33 @@ export async function toggleBookmarkApi(questionId: string) {
   }
 }
 
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 1, delayMs = 500): Promise<Response | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok) return res;
+      if (res.status === 404 || res.status === 401 || res.status === 403) return res;
+    } catch {
+      if (attempt === retries) return null;
+    }
+    if (attempt < retries) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
+}
+
 export async function fetchLeaderboardApi() {
   try {
     const url = '/api/leaderboard';
-    console.log('Fetching leaderboard from:', url);
-    const res = await fetch(url);
-    if (!res.ok) {
-        console.error('Leaderboard fetch failed with status:', res.status);
-        return [];
+    const res = await fetchWithRetry(url);
+    if (!res || !res.ok) {
+      return [];
     }
     const data = await res.json();
-    return data.leaderboard || [];
+    return Array.isArray(data?.leaderboard) ? data.leaderboard : [];
   } catch (error) {
-    console.error('Error fetching leaderboard:', error);
+    console.warn('Notice: Leaderboard fetch fallback to local/cached state:', error);
     return [];
   }
 }
@@ -316,16 +330,14 @@ export async function verifyCertificateApi(certId: string) {
 export async function fetchPublicStatsApi() {
   try {
     const url = '/api/public-stats';
-    console.log('Fetching public stats from:', url);
-    const res = await fetch(url);
-    if (!res.ok) {
-        console.error('Public stats fetch failed with status:', res.status);
-        return null;
+    const res = await fetchWithRetry(url);
+    if (!res || !res.ok) {
+      return null;
     }
     const json = await res.json();
-    return json.data || null;
+    return json?.data || null;
   } catch (error) {
-    console.error('Error fetching public stats:', error);
+    console.warn('Notice: Public stats fetch fallback to local/default state:', error);
     return null;
   }
 }
@@ -683,4 +695,57 @@ export async function deleteStaffAssignmentApi(assignmentId: number) {
     return false;
   }
 }
+
+// 13. Admin Reset User / Staff Password
+export async function adminResetUserPasswordApi(uid: string, newPassword: string): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return { success: false, error: 'Authentication required' };
+
+    const res = await fetch(`/api/admin/users/${encodeURIComponent(uid)}/reset-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ password: newPassword }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      return { success: false, error: json.error || 'Failed to reset password' };
+    }
+    return { success: true, message: json.message || 'Password reset successfully' };
+  } catch (error: any) {
+    console.error('Error resetting user password by admin:', error);
+    return { success: false, error: error.message || 'Network error resetting password' };
+  }
+}
+
+// 14. Student / User Self Password Change
+export async function changeStudentPasswordApi(currentPassword: string, newPassword: string): Promise<{ success: boolean; error?: string; message?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) return { success: false, error: 'Authentication required' };
+
+    const res = await fetch('/api/user/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      return { success: false, error: json.error || 'Failed to change password' };
+    }
+    return { success: true, message: json.message || 'Password changed successfully' };
+  } catch (error: any) {
+    console.error('Error changing user password:', error);
+    return { success: false, error: error.message || 'Network error changing password' };
+  }
+}
+
 
