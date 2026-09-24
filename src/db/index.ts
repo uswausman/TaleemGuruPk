@@ -60,6 +60,7 @@ export const createPool = (): Pool => {
       // 2. Authoritative Database / Postgres URL (Vercel, Supabase, Neon, Cloud SQL TCP)
       else {
         const connectionString = resolveDatabaseConnectionString();
+        const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
         if (connectionString) {
           const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
           const hasSslDisabled = connectionString.includes('sslmode=disable') || process.env.SQL_SSL === 'false';
@@ -67,7 +68,7 @@ export const createPool = (): Pool => {
           global._postgresPool = new Pool({
             connectionString,
             ssl: isLocal || hasSslDisabled ? false : { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
@@ -81,7 +82,7 @@ export const createPool = (): Pool => {
             database: process.env.POSTGRES_DATABASE,
             port: process.env.POSTGRES_PORT ? parseInt(process.env.POSTGRES_PORT, 10) : 5432,
             ssl: { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
@@ -93,7 +94,7 @@ export const createPool = (): Pool => {
             database: process.env.PGDATABASE,
             port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
             ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
