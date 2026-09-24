@@ -945,6 +945,17 @@ export async function createUserInDb(data: {
         streakDays: 0,
         testsTaken: 0,
       })
+      .onConflictDoUpdate({
+        target: users.uid,
+        set: {
+          email: cleanEmail,
+          name: data.name || cleanEmail.split('@')[0],
+          roles: data.roles || ['Student'],
+          status: data.status || 'Active',
+          permissions: initialPermissions,
+          updatedAt: new Date(),
+        },
+      })
       .returning();
     return created;
   } catch (error) {
