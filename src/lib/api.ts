@@ -12,6 +12,13 @@ async function getAuthHeader(): Promise<Record<string, string>> {
     }
   }
 
+  try {
+    const adminToken = typeof localStorage !== 'undefined' ? localStorage.getItem('taleemguru_admin_token') : null;
+    if (adminToken && adminToken.trim()) {
+      return { Authorization: `Bearer ${adminToken.trim()}` };
+    }
+  } catch (e) {}
+
   return {};
 }
 
