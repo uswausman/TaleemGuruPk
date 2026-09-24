@@ -3931,7 +3931,9 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
   } catch (error: any) {
     console.error('Error creating staff user:', error);
     const detailMsg = error?.cause?.message || error?.message || 'Failed to create staff account';
-    return res.status(500).json({ error: detailMsg });
+    const isConflict = error?.statusCode === 409 || error?.cause?.statusCode === 409 || detailMsg.toLowerCase().includes('already exists') || detailMsg.toLowerCase().includes('duplicate');
+    const statusCode = isConflict ? 409 : 500;
+    return res.status(statusCode).json({ error: detailMsg });
   }
 });
 
