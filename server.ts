@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 
 // Normalize Supabase URLs at process boot to prevent /rest/v1/ suffix issues
 if (process.env.VITE_SUPABASE_URL) {
@@ -14,28 +13,57 @@ if (process.env.SUPABASE_URL) {
 import app from './src/serverApp.ts';
 import { migrateExistingDocuments } from './src/server/migrateDocuments.ts';
 
+function resolvePort(): number {
+  const cliPortIndex = process.argv.indexOf('--port');
+  if (cliPortIndex !== -1 && process.argv[cliPortIndex + 1]) {
+    const parsed = parseInt(process.argv[cliPortIndex + 1], 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const parsed = parseInt(process.env.DEFAULT_APP_PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  // In AI Studio / Cloud Run container, Nginx binds to 8080 and proxies to 3000.
+  // Never bind Node directly to 8080 to prevent EADDRINUSE crash.
+  if (process.env.PORT && process.env.PORT !== '8080') {
+    const parsed = parseInt(process.env.PORT, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 3000;
+}
+
 async function startServer() {
-  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const PORT = resolvePort();
+  const cwd = process.cwd();
+  const distDir = path.join(cwd, 'dist');
+  const buildDir = path.join(cwd, 'build');
+  const distIndexHtml = path.join(distDir, 'index.html');
+  const buildIndexHtml = path.join(buildDir, 'index.html');
+  const hasBuiltAssets = fs.existsSync(distIndexHtml) || fs.existsSync(buildIndexHtml);
+
+  const isExplicitDev =
+    process.env.npm_lifecycle_event === 'dev' ||
+    process.argv.includes('--dev') ||
+    (!hasBuiltAssets && process.env.NODE_ENV !== 'production');
 
   // Vite middleware for development or static serving for production container
-  if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+  if (isExplicitDev && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else if (!process.env.VERCEL) {
-    const distPath = fs.existsSync(path.join(process.cwd(), 'dist', 'index.html'))
-      ? path.join(process.cwd(), 'dist')
-      : path.join(process.cwd(), 'build');
-    app.use(express.static(distPath));
+    const staticDir = fs.existsSync(distIndexHtml) ? distDir : buildDir;
+    app.use(express.static(staticDir));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(path.join(staticDir, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[TaleemGuru] Server running on http://localhost:${PORT} (PID: ${process.pid})`);
 
     // Run safe, idempotent document migration in the background
     migrateExistingDocuments()
@@ -48,10 +76,21 @@ async function startServer() {
         console.error('[Document Migration] Error during background migration:', err);
       });
   });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[TaleemGuru] FATAL: Port ${PORT} is already in use. Retrying or terminating...`);
+    } else {
+      console.error('[TaleemGuru] Server error:', err);
+    }
+  });
 }
 
 if (!process.env.VERCEL) {
-  startServer();
+  startServer().catch((err) => {
+    console.error('[TaleemGuru] Failed to start server:', err);
+    process.exit(1);
+  });
 }
 
 export default app;
