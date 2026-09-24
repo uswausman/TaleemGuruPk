@@ -1,6 +1,4 @@
-import serverModule from '../dist/server.cjs';
-
-const app = (serverModule && serverModule.default) ? serverModule.default : serverModule;
+import app from '../src/serverApp.ts';
 
 export default app;
 
