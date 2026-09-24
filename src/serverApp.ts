@@ -148,6 +148,7 @@ import {
   getTrustedBootstrapAdmins,
   getUserByEmail,
   verifyPassword,
+  hashPassword,
   setUserPasswordInDb,
 } from './db/users.ts';
 import {
@@ -1296,10 +1297,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
           const pwdHash = hashPassword(cleanPassword);
           
           if (dbCandidate) {
-            await db.update(users).set({
-              permissions: [pwdHash, ...(dbCandidate.permissions || [])],
-              updatedAt: new Date(),
-            }).where(eq(users.id, dbCandidate.id));
+            await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...(dbCandidate.permissions || [])]);
           } else {
             await createUserInDb({
               uid: newUid,
@@ -3836,7 +3834,7 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
     // Check if user already exists in database
     const existingUser = await getUserByEmail(cleanEmail);
     if (existingUser) {
-      return res.status(409).json({ error: `A user with email ${cleanEmail} already exists in the system.` });
+      return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in the system.` });
     }
 
     // Attempt to register with Supabase Auth if client is configured
@@ -3856,6 +3854,11 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
           });
           if (!authError && authData?.user?.id) {
             authUid = authData.user.id;
+          } else if (authError) {
+            console.warn('Notice from Supabase admin createUser:', authError.message);
+            if (authError.message?.toLowerCase().includes('already') || authError.status === 422 || authError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
           }
         }
         
@@ -3875,6 +3878,9 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
             authUid = signUpData.user.id;
           } else if (signUpError) {
             console.warn('Notice from Supabase signUp:', signUpError.message);
+            if (signUpError.message?.toLowerCase().includes('already') || signUpError.status === 422 || signUpError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
           }
         }
       } catch (authCreateErr) {
@@ -3882,15 +3888,29 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
       }
     }
 
-    // Authoritative profile insertion into application database with securely hashed credentials
-    const createdUser = await createUserInDb({
-      uid: authUid,
-      email: cleanEmail,
-      name: cleanName,
-      roles: cleanRoles,
-      password: password,
-      status: initialStatus,
-    });
+    let createdUser;
+    try {
+      // Authoritative profile insertion into application database with securely hashed credentials
+      createdUser = await createUserInDb({
+        uid: authUid,
+        email: cleanEmail,
+        name: cleanName,
+        roles: cleanRoles,
+        password: password,
+        status: initialStatus,
+      });
+    } catch (dbInsertErr: any) {
+      // Rollback safety: if Supabase Auth created a user but DB insert failed, cleanup orphaned Auth user
+      if (supabaseClient && authUid && !authUid.startsWith('staff-') && (supabaseClient as any).auth?.admin?.deleteUser) {
+        try {
+          await (supabaseClient as any).auth.admin.deleteUser(authUid);
+          console.warn(`Rolled back orphaned Supabase Auth user ${authUid} due to DB insert failure.`);
+        } catch (rollbackErr) {
+          console.error('Failed to rollback orphaned Supabase Auth user:', rollbackErr);
+        }
+      }
+      throw dbInsertErr;
+    }
 
     // Record audit log
     await saveAuditLogToDb({
@@ -3910,7 +3930,8 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
     });
   } catch (error: any) {
     console.error('Error creating staff user:', error);
-    return res.status(500).json({ error: error?.message || 'Failed to create staff account' });
+    const detailMsg = error?.cause?.message || error?.message || 'Failed to create staff account';
+    return res.status(500).json({ error: detailMsg });
   }
 });
 
