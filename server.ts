@@ -11,6 +11,7 @@ if (process.env.SUPABASE_URL) {
 }
 
 import app from './src/serverApp.ts';
+import { migrateExistingDocuments } from './src/server/migrateDocuments.ts';
 
 async function startServer() {
   const PORT = 3000;
@@ -32,6 +33,17 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
+
+    // Run safe, idempotent document migration in the background
+    migrateExistingDocuments()
+      .then((summary) => {
+        console.log(
+          `[Document Migration] Finished. Papers migrated: ${summary.pastPapersMigrated} (skipped: ${summary.pastPapersSkipped}), Notes migrated: ${summary.studyNotesMigrated} (skipped: ${summary.studyNotesSkipped})`
+        );
+      })
+      .catch((err) => {
+        console.error('[Document Migration] Error during background migration:', err);
+      });
   });
 }
 
