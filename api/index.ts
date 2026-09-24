@@ -1,4 +1,5 @@
-import app from '../src/serverApp.ts';
+// @ts-ignore
+import app from './server.js';
 
 export default app;
 
