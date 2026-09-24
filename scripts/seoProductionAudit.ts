@@ -177,6 +177,43 @@ export async function runProductionSeoAudit(): Promise<{
   }
 
   // -------------------------------------------------------------
+  // 4B. Live Googlebot Sitemap Accessibility & Protocol Verification
+  // -------------------------------------------------------------
+  try {
+    const googlebotUa = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+    const sitemapRes = await fetch('https://www.taleemguru.pk/sitemap.xml', {
+      headers: { 'User-Agent': googlebotUa },
+      redirect: 'manual',
+    });
+
+    const sitemapContentType = sitemapRes.headers.get('content-type') || '';
+    const sitemapText = await sitemapRes.text();
+
+    const isHttp200 = sitemapRes.status === 200;
+    const isValidContentType = sitemapContentType.includes('application/xml') || sitemapContentType.includes('text/xml');
+    const isNotHtml = !sitemapText.toLowerCase().includes('<!doctype html') && !sitemapText.toLowerCase().includes('<html');
+    const hasXmlDeclaration = sitemapText.startsWith('<?xml');
+    const hasUrlset = sitemapText.includes('<urlset') && sitemapText.includes('</urlset>');
+    const hasOnlyWwwUrls = !sitemapText.includes('<loc>https://taleemguru.pk/') && sitemapText.includes('<loc>https://www.taleemguru.pk/');
+    const hasNoCurriculum = !sitemapText.includes('/curriculum');
+
+    record('Live Googlebot Sitemap HTTP 200', isHttp200, `Returned HTTP ${sitemapRes.status} for Googlebot`);
+    record(
+      'Live Googlebot Sitemap Content-Type',
+      isValidContentType,
+      `Content-Type: "${sitemapContentType}" (valid XML sitemap type)`
+    );
+    record('Live Googlebot Sitemap Not HTML Error', isNotHtml, 'Direct XML payload served (no HTML/error page)');
+    record(
+      'Live Googlebot Sitemap Protocol & Canonical Domain',
+      hasXmlDeclaration && hasUrlset && hasOnlyWwwUrls && hasNoCurriculum,
+      `Valid XML schema, www canonical prefix verified, 0 apex URLs, 0 obsolete URLs`
+    );
+  } catch (err: any) {
+    record('Live Googlebot Sitemap Audit', false, `Error fetching sitemap as Googlebot: ${err.message}`);
+  }
+
+  // -------------------------------------------------------------
   // 5. Local Server Live Endpoints Verification (Latest Codebase)
   // -------------------------------------------------------------
   try {
