@@ -12,12 +12,12 @@ declare global {
  */
 export function resolveDatabaseConnectionString(): string | undefined {
   const candidates = [
+    process.env.SUPABASE_DATABASE_URL,
+    process.env.SUPABASE_DB_URL,
     process.env.DATABASE_URL,
     process.env.POSTGRES_URL,
     process.env.POSTGRES_PRISMA_URL,
     process.env.POSTGRES_URL_NON_POOLING,
-    process.env.SUPABASE_DATABASE_URL,
-    process.env.SUPABASE_DB_URL,
     process.env.PG_CONNECTION_STRING,
   ];
 
@@ -27,6 +27,17 @@ export function resolveDatabaseConnectionString(): string | undefined {
     }
   }
   return undefined;
+}
+
+function redactConnectionString(url?: string): string {
+  if (!url) return 'none';
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//***:***@${parsed.host}${parsed.pathname}`;
+  } catch (e) {
+    // Fallback simple redactor if not a standard URL string
+    return url.replace(/postgres(?:ql)?:\/\/([^:]+):([^@]+)@/gi, 'postgres://***:***@');
+  }
 }
 
 function isLocalHost(host?: string): boolean {
@@ -46,6 +57,7 @@ export const createPool = (): Pool => {
       // 1. Authoritative Cloud SQL / Socket Configuration (AI Studio / GCP / Cloud Run)
       if (process.env.SQL_HOST) {
         const isUnixSocket = process.env.SQL_HOST.startsWith('/');
+        console.info(`[Database] Initializing connection pool with SQL_HOST: ${process.env.SQL_HOST}`);
         global._postgresPool = new Pool({
           host: process.env.SQL_HOST,
           user: process.env.SQL_USER,
@@ -65,6 +77,9 @@ export const createPool = (): Pool => {
           const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
           const hasSslDisabled = connectionString.includes('sslmode=disable') || process.env.SQL_SSL === 'false';
 
+          const redacted = redactConnectionString(connectionString);
+          console.info(`[Database] Initializing connection pool with connectionString: ${redacted}`);
+
           global._postgresPool = new Pool({
             connectionString,
             ssl: isLocal || hasSslDisabled ? false : { rejectUnauthorized: false },
@@ -75,6 +90,7 @@ export const createPool = (): Pool => {
         }
         // 3. Discrete Remote Parameters (POSTGRES_HOST / PGHOST)
         else if (process.env.POSTGRES_HOST && !isLocalHost(process.env.POSTGRES_HOST)) {
+          console.info(`[Database] Initializing connection pool with POSTGRES_HOST: ${process.env.POSTGRES_HOST}`);
           global._postgresPool = new Pool({
             host: process.env.POSTGRES_HOST,
             user: process.env.POSTGRES_USER,
@@ -87,6 +103,7 @@ export const createPool = (): Pool => {
             connectionTimeoutMillis: 15000,
           });
         } else if (process.env.PGHOST && !isLocalHost(process.env.PGHOST)) {
+          console.info(`[Database] Initializing connection pool with PGHOST: ${process.env.PGHOST}`);
           global._postgresPool = new Pool({
             host: process.env.PGHOST,
             user: process.env.PGUSER,
