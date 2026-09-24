@@ -11,9 +11,17 @@ declare global {
  * Supports standard Vercel, Supabase, Neon, and general PostgreSQL configurations.
  */
 export function resolveDatabaseConnectionString(): string | undefined {
+  const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
+  const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+
+  // 1. Authoritative Supabase connection variables
+  const supabaseUrl = process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL;
+  if (supabaseUrl && supabaseUrl.trim().length > 0) {
+    return supabaseUrl.trim();
+  }
+
+  // 2. Fallback candidate connection variables (like DATABASE_URL, POSTGRES_URL)
   const candidates = [
-    process.env.SUPABASE_DATABASE_URL,
-    process.env.SUPABASE_DB_URL,
     process.env.DATABASE_URL,
     process.env.POSTGRES_URL,
     process.env.POSTGRES_PRISMA_URL,
@@ -23,9 +31,36 @@ export function resolveDatabaseConnectionString(): string | undefined {
 
   for (const candidate of candidates) {
     if (candidate && typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
+      const urlStr = candidate.trim();
+      
+      // If we are on Vercel or in Production, check if this candidate connection string points to Supabase.
+      // If it doesn't (e.g. points to Neon or Vercel Postgres), do NOT silently override/use it.
+      if (isVercel || isProd) {
+        try {
+          const host = new URL(urlStr).host.toLowerCase();
+          if (host.includes('supabase')) {
+            return urlStr;
+          } else {
+            // Log warning that we are skipping non-Supabase database candidate in production to prevent silent override
+            console.warn(`[Database] WARNING: Skipping non-Supabase connection string candidate (host: ${host}) to prevent silent override of authoritative Supabase database.`);
+            continue;
+          }
+        } catch (e) {
+          // If URL parsing fails, check substring
+          if (urlStr.toLowerCase().includes('supabase')) {
+            return urlStr;
+          } else {
+            console.warn(`[Database] WARNING: Skipping unparseable non-Supabase connection string candidate to prevent silent override of authoritative Supabase database.`);
+            continue;
+          }
+        }
+      }
+
+      // In non-production/local environments, we can return the candidate
+      return urlStr;
     }
   }
+
   return undefined;
 }
 
@@ -33,10 +68,16 @@ function redactConnectionString(url?: string): string {
   if (!url) return 'none';
   try {
     const parsed = new URL(url);
+    // This perfectly extracts protocol, host, and pathname, completely excluding credentials and search query params
     return `${parsed.protocol}//***:***@${parsed.host}${parsed.pathname}`;
   } catch (e) {
-    // Fallback simple redactor if not a standard URL string
-    return url.replace(/postgres(?:ql)?:\/\/([^:]+):([^@]+)@/gi, 'postgres://***:***@');
+    // Fallback simple redactor: strip credentials and query params
+    let cleaned = url.replace(/postgres(?:ql)?:\/\/([^:]+):([^@]+)@/gi, 'postgres://***:***@');
+    const qIndex = cleaned.indexOf('?');
+    if (qIndex !== -1) {
+      cleaned = cleaned.substring(0, qIndex);
+    }
+    return cleaned;
   }
 }
 
