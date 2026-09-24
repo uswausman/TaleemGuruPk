@@ -400,7 +400,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
   '/admin/quizzes': {
     path: '/admin/quizzes',
     view: 'admin-panel',
-    adminTab: 'tests',
+    adminTab: 'quizzes',
     isProtected: true,
     allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Quiz & Test Builder',
@@ -408,7 +408,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
   '/admin/tests': {
     path: '/admin/tests',
     view: 'admin-panel',
-    adminTab: 'tests',
+    adminTab: 'quizzes',
     isProtected: true,
     allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Test Management',
