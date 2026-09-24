@@ -12,13 +12,14 @@ export interface DocumentFilters {
   chapter?: string;
   year?: number;
   search?: string;
+  createdBy?: string;
   limit?: number;
   offset?: number;
 }
 
 /**
  * Retrieves documents with authoritative server-side role filtering
- * Non-staff callers can ONLY see Published documents.
+ * Non-staff callers can ONLY see Published documents unless querying their own items.
  */
 export async function getDocumentsFromDb(filters: DocumentFilters = {}, isStaff: boolean = false): Promise<{ items: DocumentItem[]; total: number }> {
   if (!db) return { items: [], total: 0 };
@@ -26,11 +27,15 @@ export async function getDocumentsFromDb(filters: DocumentFilters = {}, isStaff:
   try {
     const conditions = [];
 
-    // Role-enforced status: non-staff can ONLY access 'Published' documents
-    if (!isStaff) {
+    // Role-enforced status: non-staff can ONLY access 'Published' documents unless creator
+    if (!isStaff && !filters.createdBy) {
       conditions.push(eq(documents.status, 'Published'));
     } else if (filters.status && filters.status !== 'All') {
       conditions.push(eq(documents.status, filters.status));
+    }
+
+    if (filters.createdBy) {
+      conditions.push(eq(documents.createdBy, filters.createdBy));
     }
 
     if (filters.documentType && filters.documentType !== 'All') {
@@ -102,6 +107,11 @@ export async function getDocumentsFromDb(filters: DocumentFilters = {}, isStaff:
       year: r.year || undefined,
       language: r.language || 'English',
       status: r.status as any,
+      submittedBy: r.submittedBy || undefined,
+      reviewedBy: r.reviewedBy || undefined,
+      reviewedAt: r.reviewedAt ? new Date(r.reviewedAt).toISOString() : undefined,
+      rejectionReason: r.rejectionReason || undefined,
+      changeNotes: r.changeNotes || undefined,
       version: r.version,
       brandingStatus: r.brandingStatus as any,
       brandingVersion: r.brandingVersion || undefined,
@@ -159,6 +169,11 @@ export async function getDocumentByIdFromDb(id: string, isStaff: boolean = false
       year: r.year || undefined,
       language: r.language || 'English',
       status: r.status as any,
+      submittedBy: r.submittedBy || undefined,
+      reviewedBy: r.reviewedBy || undefined,
+      reviewedAt: r.reviewedAt ? new Date(r.reviewedAt).toISOString() : undefined,
+      rejectionReason: r.rejectionReason || undefined,
+      changeNotes: r.changeNotes || undefined,
       version: r.version,
       brandingStatus: r.brandingStatus as any,
       brandingVersion: r.brandingVersion || undefined,

@@ -1922,6 +1922,84 @@ export async function fetchTeacherDashboardApi() {
   }
 }
 
+export async function moderateContentApi(params: {
+  contentType: 'MCQ' | 'Test' | 'PastPaper' | 'StudyNote' | 'Document';
+  id: string;
+  targetStatus: 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived';
+  rejectionReason?: string;
+  changeNotes?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/content/moderate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(params),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to moderate content');
+    }
+    return { success: true, item: data.item, message: data.message };
+  } catch (error: any) {
+    console.error('Error moderating content:', error);
+    return { success: false, error: error.message || 'Failed to moderate content' };
+  }
+}
+
+export async function bulkModerateContentApi(params: {
+  contentType: 'MCQ' | 'Test' | 'PastPaper' | 'StudyNote' | 'Document';
+  ids: string[];
+  targetStatus: 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived';
+  rejectionReason?: string;
+  changeNotes?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/content/bulk-moderate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(params),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to bulk moderate content');
+    }
+    return { success: true, ...data };
+  } catch (error: any) {
+    console.error('Error bulk moderating content:', error);
+    return { success: false, error: error.message || 'Failed to bulk moderate content' };
+  }
+}
+
+export async function fetchContentVersionsApi(contentType: string, id: string) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/content/versions/${contentType}/${id}`, {
+      headers: {
+        ...headers,
+      },
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Failed to fetch version history');
+    }
+    return data.versions || [];
+  } catch (error: any) {
+    console.error('Error fetching content version history:', error);
+    return [];
+  }
+}
+
 
 
 

@@ -14,7 +14,10 @@ import {
   testResults,
   contentReports,
   auditLogs,
+  documents,
+  contentVersions,
 } from './schema';
+import { saveAuditLogToDb } from './users';
 import type { MCQ, TestConfig, PastPaper, StudyNote } from '../types';
 import { MCQS_DATABASE, POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData';
 import {
@@ -34,6 +37,8 @@ export interface MCQFilters {
   exam?: string;
   difficulty?: string;
   status?: string;
+  isStaff?: boolean;
+  createdBy?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -46,6 +51,8 @@ export interface TestFilters {
   category?: string;
   testType?: string;
   status?: string;
+  isStaff?: boolean;
+  createdBy?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -62,6 +69,7 @@ export interface PastPaperFilters {
   exam?: string;
   language?: string;
   isStaff?: boolean;
+  createdBy?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -77,6 +85,7 @@ export interface StudyNoteFilters {
   status?: string;
   language?: string;
   isStaff?: boolean;
+  createdBy?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -108,8 +117,13 @@ export async function getMCQsFromDb(filters: MCQFilters = {}): Promise<MCQ[]> {
     if (filters.difficulty && filters.difficulty !== 'All') {
       conditions.push(eq(mcqs.difficulty, filters.difficulty));
     }
-    if (filters.status) {
+    if (filters.status && filters.status !== 'All') {
       conditions.push(eq(mcqs.status, filters.status));
+    } else if (!filters.isStaff && !filters.createdBy) {
+      conditions.push(eq(mcqs.status, 'Published'));
+    }
+    if (filters.createdBy) {
+      conditions.push(eq(mcqs.createdBy, filters.createdBy));
     }
     if (filters.search) {
       conditions.push(ilike(mcqs.question, `%${filters.search}%`));
@@ -140,6 +154,14 @@ export async function getMCQsFromDb(filters: MCQFilters = {}): Promise<MCQ[]> {
       tags: r.tags || [],
       language: (r.language as any) || 'English',
       status: (r.status as any) || 'Published',
+      submittedBy: r.submittedBy || undefined,
+      reviewedBy: r.reviewedBy || undefined,
+      reviewedAt: r.reviewedAt ? new Date(r.reviewedAt).toISOString() : undefined,
+      rejectionReason: r.rejectionReason || undefined,
+      changeNotes: r.changeNotes || undefined,
+      version: r.version || 1,
+      createdBy: r.createdBy || undefined,
+      updatedBy: r.updatedBy || undefined,
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
     }));
   } catch (error) {
@@ -171,6 +193,14 @@ export async function getMCQByIdFromDb(id: string): Promise<MCQ | null> {
       tags: r.tags || [],
       language: (r.language as any) || 'English',
       status: (r.status as any) || 'Published',
+      submittedBy: r.submittedBy || undefined,
+      reviewedBy: r.reviewedBy || undefined,
+      reviewedAt: r.reviewedAt ? new Date(r.reviewedAt).toISOString() : undefined,
+      rejectionReason: r.rejectionReason || undefined,
+      changeNotes: r.changeNotes || undefined,
+      version: r.version || 1,
+      createdBy: r.createdBy || undefined,
+      updatedBy: r.updatedBy || undefined,
       createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
     };
   } catch (error) {
@@ -302,8 +332,13 @@ export async function getTestsFromDb(filters: TestFilters = {}): Promise<TestCon
     if (filters.testType && filters.testType !== 'All') {
       conditions.push(ilike(tests.testType, `%${filters.testType}%`));
     }
-    if (filters.status) {
+    if (filters.status && filters.status !== 'All') {
       conditions.push(eq(tests.status, filters.status));
+    } else if (!filters.isStaff && !filters.createdBy) {
+      conditions.push(eq(tests.status, 'Published'));
+    }
+    if (filters.createdBy) {
+      conditions.push(eq(tests.createdBy, filters.createdBy));
     }
     if (filters.search) {
       conditions.push(ilike(tests.title, `%${filters.search}%`));
@@ -383,6 +418,12 @@ export async function getTestsFromDb(filters: TestFilters = {}): Promise<TestCon
       reviewPolicy: (t.reviewPolicy as any) || 'immediate',
       isPremium: t.isPremium,
       status: (t.status as any) || 'Published',
+      submittedBy: t.submittedBy || undefined,
+      reviewedBy: t.reviewedBy || undefined,
+      reviewedAt: t.reviewedAt ? new Date(t.reviewedAt).toISOString() : undefined,
+      rejectionReason: t.rejectionReason || undefined,
+      changeNotes: t.changeNotes || undefined,
+      version: t.version || 1,
       createdBy: t.createdBy || undefined,
       updatedBy: t.updatedBy || undefined,
       questions: questionsByTestId[t.id] || [],
@@ -454,6 +495,12 @@ export async function getTestByIdFromDb(id: string): Promise<TestConfig | null> 
       reviewPolicy: (t.reviewPolicy as any) || 'immediate',
       isPremium: t.isPremium,
       status: (t.status as any) || 'Published',
+      submittedBy: t.submittedBy || undefined,
+      reviewedBy: t.reviewedBy || undefined,
+      reviewedAt: t.reviewedAt ? new Date(t.reviewedAt).toISOString() : undefined,
+      rejectionReason: t.rejectionReason || undefined,
+      changeNotes: t.changeNotes || undefined,
+      version: t.version || 1,
       createdBy: t.createdBy || undefined,
       updatedBy: t.updatedBy || undefined,
       questions,
@@ -646,10 +693,13 @@ export async function getPastPapersFromDb(filters: PastPaperFilters = {}): Promi
     const conditions = [];
 
     // Strictly enforce published status for non-staff
-    if (!filters.isStaff) {
-      conditions.push(eq(pastPapers.status, 'Published'));
-    } else if (filters.status && filters.status !== 'All') {
+    if (filters.status && filters.status !== 'All') {
       conditions.push(eq(pastPapers.status, filters.status));
+    } else if (!filters.isStaff && !filters.createdBy) {
+      conditions.push(eq(pastPapers.status, 'Published'));
+    }
+    if (filters.createdBy) {
+      conditions.push(eq(pastPapers.createdBy, filters.createdBy));
     }
 
     if (filters.board && filters.board !== 'All') {
@@ -950,10 +1000,13 @@ export async function getStudyNotesFromDb(filters: StudyNoteFilters = {}): Promi
     const conditions = [];
 
     // Strictly enforce published status for non-staff
-    if (!filters.isStaff) {
-      conditions.push(eq(studyNotes.status, 'Published'));
-    } else if (filters.status && filters.status !== 'All') {
+    if (filters.status && filters.status !== 'All') {
       conditions.push(eq(studyNotes.status, filters.status));
+    } else if (!filters.isStaff && !filters.createdBy) {
+      conditions.push(eq(studyNotes.status, 'Published'));
+    }
+    if (filters.createdBy) {
+      conditions.push(eq(studyNotes.createdBy, filters.createdBy));
     }
 
     if (filters.subject && filters.subject !== 'All') {
@@ -1911,5 +1964,171 @@ export async function seedInitialHierarchy(): Promise<{
   }
 
   return { boardsCount, classesCount, subjectsCount, chaptersCount };
+}
+
+// ============================================================================
+// 5. CONTENT APPROVAL & MODERATION LIFECYCLE WORKFLOW
+// ============================================================================
+
+export async function moderateContentItemInDb(params: {
+  contentType: 'MCQ' | 'Test' | 'PastPaper' | 'StudyNote' | 'Document';
+  id: string;
+  targetStatus: 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived';
+  userUid: string;
+  userRoles?: string[];
+  rejectionReason?: string;
+  changeNotes?: string;
+}): Promise<{ success: boolean; item: any; message?: string }> {
+  if (!db) throw new Error('Database not connected');
+
+  const { contentType, id, targetStatus, userUid, userRoles = [], rejectionReason, changeNotes } = params;
+
+  let table: any;
+  let idCol: any;
+  if (contentType === 'MCQ') { table = mcqs; idCol = mcqs.id; }
+  else if (contentType === 'Test') { table = tests; idCol = tests.id; }
+  else if (contentType === 'PastPaper') { table = pastPapers; idCol = pastPapers.id; }
+  else if (contentType === 'StudyNote') { table = studyNotes; idCol = studyNotes.id; }
+  else if (contentType === 'Document') { table = documents; idCol = documents.id; }
+  else throw new Error(`Invalid contentType: ${contentType}`);
+
+  const existingRows = await db.select().from(table).where(eq(idCol, id)).limit(1);
+  if (existingRows.length === 0) {
+    return { success: false, item: null, message: 'Content item not found' };
+  }
+  const item = existingRows[0];
+
+  const normalizedRoles = userRoles.map((r) => r.toLowerCase());
+  const isCallerAdmin = normalizedRoles.includes('admin') || normalizedRoles.includes('superadmin');
+
+  // Self-Approval Prevention Rule: Creator cannot approve or publish their own content unless Admin/SuperAdmin
+  if ((targetStatus === 'Approved' || targetStatus === 'Published') && item.createdBy === userUid && !isCallerAdmin) {
+    return {
+      success: false,
+      item,
+      message: 'Forbidden: Self-approval is disabled. Independent review by an Editor or Admin is required.',
+    };
+  }
+
+  // Rejection Reason Check
+  if (targetStatus === 'Rejected' && (!rejectionReason || rejectionReason.trim().length === 0)) {
+    return {
+      success: false,
+      item,
+      message: 'A review rejection reason is required when rejecting content.',
+    };
+  }
+
+  const currentVersion = item.version || 1;
+  const newVersion = targetStatus === 'Published' || item.status === 'Published' ? currentVersion + 1 : currentVersion;
+
+  const updateFields: any = {
+    status: targetStatus,
+    updatedAt: new Date(),
+    updatedBy: userUid,
+    version: newVersion,
+  };
+
+  if (targetStatus === 'Pending Review') {
+    updateFields.submittedBy = userUid;
+  }
+  if (targetStatus === 'Approved' || targetStatus === 'Published' || targetStatus === 'Rejected') {
+    updateFields.reviewedBy = userUid;
+    updateFields.reviewedAt = new Date();
+  }
+  if (targetStatus === 'Rejected') {
+    updateFields.rejectionReason = rejectionReason?.trim();
+  } else {
+    updateFields.rejectionReason = null;
+  }
+  if (changeNotes) {
+    updateFields.changeNotes = changeNotes.trim();
+  }
+
+  await db.update(table).set(updateFields).where(eq(idCol, id));
+
+  const updatedRows = await db.select().from(table).where(eq(idCol, id)).limit(1);
+  const updatedItem = updatedRows[0];
+
+  // Record version snapshot if published or publishing
+  if (targetStatus === 'Published' || item.status === 'Published') {
+    await db.insert(contentVersions).values({
+      contentType,
+      contentId: id,
+      versionNumber: newVersion,
+      status: targetStatus,
+      snapshot: updatedItem,
+      changeNotes: changeNotes?.trim() || `Status changed to ${targetStatus}`,
+      rejectionReason: targetStatus === 'Rejected' ? rejectionReason?.trim() : null,
+      createdBy: userUid,
+      createdAt: new Date(),
+    });
+  }
+
+  // Audit log entry
+  await saveAuditLogToDb({
+    adminUid: userUid,
+    adminEmail: 'moderator@taleemguru.pk',
+    adminName: 'Staff Moderator',
+    action: `CONTENT_STATUS_${targetStatus.replace(/\s+/g, '_').toUpperCase()}`,
+    targetType: contentType.toUpperCase(),
+    targetId: id,
+    details: `Transitioned ${contentType} ${id} status from "${item.status}" to "${targetStatus}"${rejectionReason ? `. Reason: ${rejectionReason}` : ''}`,
+    subject: item.subject || undefined,
+    classLevel: item.classLevel || undefined,
+    board: item.board || undefined,
+  });
+
+  return { success: true, item: updatedItem };
+}
+
+export async function bulkModerateContentInDb(params: {
+  contentType: 'MCQ' | 'Test' | 'PastPaper' | 'StudyNote' | 'Document';
+  ids: string[];
+  targetStatus: 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived';
+  userUid: string;
+  userRoles?: string[];
+  rejectionReason?: string;
+  changeNotes?: string;
+}): Promise<{ successCount: number; failedCount: number; skippedSelfApprovalCount: number; details: any[] }> {
+  let successCount = 0;
+  let failedCount = 0;
+  let skippedSelfApprovalCount = 0;
+  const details = [];
+
+  for (const id of params.ids) {
+    try {
+      const res = await moderateContentItemInDb({ ...params, id });
+      if (res.success) {
+        successCount++;
+        details.push({ id, success: true, status: params.targetStatus });
+      } else if (res.message?.includes('Self-approval')) {
+        skippedSelfApprovalCount++;
+        details.push({ id, success: false, reason: res.message });
+      } else {
+        failedCount++;
+        details.push({ id, success: false, reason: res.message });
+      }
+    } catch (err: any) {
+      failedCount++;
+      details.push({ id, success: false, reason: err.message });
+    }
+  }
+
+  return { successCount, failedCount, skippedSelfApprovalCount, details };
+}
+
+export async function getContentVersionHistoryFromDb(contentType: string, contentId: string) {
+  if (!db) return [];
+  try {
+    return await db
+      .select()
+      .from(contentVersions)
+      .where(and(eq(contentVersions.contentType, contentType), eq(contentVersions.contentId, contentId)))
+      .orderBy(desc(contentVersions.versionNumber));
+  } catch (error) {
+    console.error('Error in getContentVersionHistoryFromDb:', error);
+    return [];
+  }
 }
 

@@ -37,6 +37,7 @@ import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
 import { CertificateVerificationView } from './components/CertificateVerificationView';
 import { AuthCallbackView } from './components/AuthCallbackView';
+import { NotFoundView } from './components/NotFoundView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CANONICAL_PRODUCTION_DOMAIN, isVercelDeployment } from './lib/config';
 import {
@@ -966,7 +967,27 @@ export default function App() {
 
   return (
     <ToastProvider>
-      <SEOHead currentView={currentView} subFilter={activeSubFilter} />
+      <SEOHead
+        currentView={currentView}
+        subFilter={activeSubFilter}
+        contentStatus={activeTest?.status || null}
+        isNotFound={currentView === 'not-found'}
+        activeItem={
+          activeTest
+            ? {
+                id: activeTest.id,
+                title: activeTest.title,
+                description: activeTest.description,
+                status: activeTest.status,
+                subject: activeTest.subject,
+                classLevel: activeTest.classLevel,
+                board: activeTest.board,
+                durationMinutes: activeTest.durationMinutes,
+                totalQuestions: activeTest.totalQuestions,
+              }
+            : null
+        }
+      />
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:px-4 focus:py-2 focus:bg-blue-600 focus:text-white focus:rounded-xl focus:shadow-lg focus:outline-hidden"
@@ -1338,6 +1359,13 @@ export default function App() {
                 onNavigate={(v, sub) => {
                   handleNavigateWithFilter(v, sub);
                 }}
+              />
+            )}
+
+            {currentView === 'not-found' && (
+              <NotFoundView
+                onNavigate={(v) => handleNavigateWithFilter(v)}
+                onOpenSearch={() => setIsSearchOpen(true)}
               />
             )}
             </ErrorBoundary>

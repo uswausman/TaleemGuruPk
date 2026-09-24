@@ -32,7 +32,8 @@ export type ViewMode =
   | 'privacy-policy'
   | 'terms-of-service'
   | 'auth-callback'
-  | 'search';
+  | 'search'
+  | 'not-found';
 
 export type SearchContentType =
   | 'all'
@@ -59,7 +60,7 @@ export interface UnifiedSearchResultItem {
   chapter?: string;
   topic?: string;
   year?: number;
-  status: 'Published' | 'Draft' | 'Archived';
+  status: ContentStatus;
   url?: string;
   badge?: string;
   difficulty?: string;
@@ -112,6 +113,8 @@ export interface RouteAuthResult {
 
 export type Difficulty = 'Easy' | 'Medium' | 'Hard';
 
+export type ContentStatus = 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived';
+
 export interface MCQ {
   id: string;
   question: string;
@@ -128,7 +131,13 @@ export interface MCQ {
   year?: number;
   tags: string[];
   language?: 'English' | 'Urdu';
-  status?: 'Published' | 'Draft';
+  status?: ContentStatus;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  changeNotes?: string;
+  version?: number;
   createdBy?: string;
   updatedBy?: string;
   createdAt?: string;
@@ -171,7 +180,13 @@ export interface TestConfig {
   questions: MCQ[];
   questionIds?: string[];
   isPremium?: boolean;
-  status?: 'Published' | 'Draft';
+  status?: ContentStatus;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  changeNotes?: string;
+  version?: number;
   createdBy?: string;
   updatedBy?: string;
   createdAt?: string;
@@ -396,7 +411,12 @@ export interface PastPaper {
   fileUrl?: string;
   pdfUrl?: string;
   thumbnail?: string;
-  status?: 'Published' | 'Draft' | 'Archived';
+  status?: ContentStatus;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  changeNotes?: string;
   version?: number;
   brandingStatus?: 'Branded' | 'Pending' | 'Not Applicable';
   brandedFileUrl?: string;
@@ -430,7 +450,12 @@ export interface StudyNote {
   pdfUrl?: string;
   fileUrl?: string;
   thumbnail?: string;
-  status?: 'Published' | 'Draft' | 'Archived';
+  status?: ContentStatus;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  changeNotes?: string;
   version?: number;
   brandingStatus?: 'Branded' | 'Pending' | 'Not Applicable';
   brandedFileUrl?: string;
@@ -468,7 +493,12 @@ export interface DocumentItem {
   topic?: string;
   year?: number;
   language?: string;
-  status: 'Published' | 'Draft' | 'Archived';
+  status: ContentStatus;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  rejectionReason?: string;
+  changeNotes?: string;
   version: number;
   brandingStatus: 'Completed' | 'Pending' | 'Failed' | 'Not Applicable';
   brandingVersion?: string;

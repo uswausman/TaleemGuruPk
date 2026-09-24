@@ -386,13 +386,13 @@ export function exportCertificateToPDF(
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text("ONLINE TESTING & ACADEMIC ASSESSMENT PLATFORM", width / 2, 34, { align: 'center' });
+  doc.text("Learn. Practice. Test. Improve.", width / 2, 34, { align: 'center' });
 
   // Main Ribbon Title
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(26);
-  doc.text('CERTIFICATE OF ACHIEVEMENT', width / 2, 50, { align: 'center' });
+  doc.text('CERTIFICATE OF MERIT', width / 2, 50, { align: 'center' });
 
   doc.setFontSize(11);
   doc.setFont('helvetica', 'italic');
@@ -414,7 +414,7 @@ export function exportCertificateToPDF(
   doc.setTextColor(51, 65, 85);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(12);
-  const certDesc = `has demonstrated commendable academic competence and successfully passed the examination for`;
+  const certDesc = `has demonstrated commendable academic competence and successfully completed the evaluation for`;
   doc.text(certDesc, width / 2, 94, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
@@ -454,12 +454,12 @@ export function exportCertificateToPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text('Director Examination', leftX + 7, 180);
+  doc.text('Academic Directorate', leftX + 7, 180);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text('Taleem Guru Examination Dept', leftX + 1, 185);
+  doc.text('TaleemGuru Evaluation Desk', leftX + 1, 185);
 
-  // Emblem / Seal in Center
+  // Emblem / Stamp in Center
   doc.setFillColor(245, 158, 11);
   doc.circle(width / 2, 172, 13, 'F');
   doc.setFillColor(217, 119, 6);
@@ -468,7 +468,7 @@ export function exportCertificateToPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.text('VERIFIED', width / 2, 170, { align: 'center' });
-  doc.text('SEAL', width / 2, 174.5, { align: 'center' });
+  doc.text('MERIT', width / 2, 174.5, { align: 'center' });
 
   // Verification Box on Right
   const rightX = width - 90;
@@ -477,10 +477,10 @@ export function exportCertificateToPDF(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text('Registrar & Verification', rightX + 4, 180);
+  doc.text('Registry & Verification', rightX + 4, 180);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text('Scan QR / Visit taleemguru.pk', rightX - 2, 185);
+  doc.text('Verify Online at taleemguru.pk', rightX - 2, 185);
 
   // Certificate Bottom Credit Banner
   doc.setFillColor(245, 247, 248);

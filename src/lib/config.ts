@@ -14,6 +14,23 @@ export const ALLOWED_PRODUCTION_DOMAINS = [
 ];
 
 /**
+ * Returns a standardized canonical URL on https://www.taleemguru.pk
+ * Strips all query parameters, trailing slashes (except root), and hash fragments.
+ */
+export const getCanonicalUrl = (pathname = '/'): string => {
+  if (!pathname || pathname === '/') return `${CANONICAL_PRODUCTION_DOMAIN}/`;
+  
+  // Strip query parameters and hash fragments
+  const cleanPath = pathname.split('?')[0].split('#')[0].trim();
+  const normalized = cleanPath.startsWith('/') ? cleanPath : `/${cleanPath}`;
+  const withoutTrailingSlash = normalized.length > 1 && normalized.endsWith('/') 
+    ? normalized.slice(0, -1) 
+    : normalized;
+    
+  return `${CANONICAL_PRODUCTION_DOMAIN}${withoutTrailingSlash}`;
+};
+
+/**
  * Detects if the current client environment is running locally or in a development container.
  */
 export const isLocalDevelopment = (): boolean => {

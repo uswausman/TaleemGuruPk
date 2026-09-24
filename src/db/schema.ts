@@ -192,7 +192,13 @@ export const mcqs = pgTable('mcqs', {
   year: integer('year'),
   tags: jsonb('tags').$type<string[]>().default([]),
   language: text('language').default('English').notNull(), // 'English' | 'Urdu'
-  status: text('status').default('Published').notNull(), // 'Published' | 'Draft'
+  status: text('status').default('Published').notNull(), // 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived'
+  submittedBy: text('submitted_by'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  changeNotes: text('change_notes'),
+  version: integer('version').default(1).notNull(),
   createdBy: text('created_by'),
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -223,7 +229,13 @@ export const tests = pgTable('tests', {
   maxAttempts: integer('max_attempts').default(0).notNull(), // 0 = unlimited
   reviewPolicy: text('review_policy').default('immediate').notNull(), // 'immediate' | 'after_submission' | 'none'
   isPremium: boolean('is_premium').default(false).notNull(),
-  status: text('status').default('Published').notNull(), // 'Published' | 'Draft'
+  status: text('status').default('Published').notNull(), // 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived'
+  submittedBy: text('submitted_by'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  changeNotes: text('change_notes'),
+  version: integer('version').default(1).notNull(),
   createdBy: text('created_by'),
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -304,6 +316,11 @@ export const pastPapers = pgTable('past_papers', {
   brandedAt: timestamp('branded_at'),
   downloadsCount: integer('downloads_count').default(0).notNull(),
   questions: jsonb('questions').$type<any[]>(), // Optional embedded questions
+  submittedBy: text('submitted_by'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  changeNotes: text('change_notes'),
   createdBy: text('created_by'),
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -328,7 +345,7 @@ export const studyNotes = pgTable('study_notes', {
   pdfUrl: text('pdf_url'),
   fileUrl: text('file_url'),
   thumbnail: text('thumbnail'),
-  status: text('status').default('Published').notNull(), // 'Published' | 'Draft' | 'Archived'
+  status: text('status').default('Published').notNull(), // 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived'
   version: integer('version').default(1).notNull(),
   brandingStatus: text('branding_status').default('Not Applicable'),
   brandedFileUrl: text('branded_file_url'),
@@ -340,6 +357,11 @@ export const studyNotes = pgTable('study_notes', {
   readTime: text('read_time'),
   downloadsCount: integer('downloads_count').default(0).notNull(),
   isPremium: boolean('is_premium').default(false).notNull(),
+  submittedBy: text('submitted_by'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  changeNotes: text('change_notes'),
   createdBy: text('created_by'),
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -367,17 +389,36 @@ export const documents = pgTable('documents', {
   topic: text('topic'),
   year: integer('year'),
   language: text('language').default('English'),
-  status: text('status').default('Published').notNull(), // 'Published' | 'Draft' | 'Archived'
+  status: text('status').default('Published').notNull(), // 'Draft' | 'Pending Review' | 'Approved' | 'Published' | 'Rejected' | 'Archived'
   version: integer('version').default(1).notNull(),
   brandingStatus: text('branding_status').default('Completed').notNull(), // 'Completed' | 'Pending' | 'Failed' | 'Not Applicable'
   brandingVersion: text('branding_version').default('2.0'),
   brandedAt: timestamp('branded_at'),
   downloadsCount: integer('downloads_count').default(0).notNull(),
   associatedEntityId: text('associated_entity_id'),
+  submittedBy: text('submitted_by'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  rejectionReason: text('rejection_reason'),
+  changeNotes: text('change_notes'),
   createdBy: text('created_by'),
   updatedBy: text('updated_by'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Content Version History for MCQs, Tests, Past Papers, Study Notes, and Documents
+export const contentVersions = pgTable('content_versions', {
+  id: serial('id').primaryKey(),
+  contentType: text('content_type').notNull(), // 'MCQ' | 'Test' | 'PastPaper' | 'StudyNote' | 'Document'
+  contentId: text('content_id').notNull(),
+  versionNumber: integer('version_number').notNull(),
+  status: text('status').notNull(),
+  snapshot: jsonb('snapshot').notNull(),
+  changeNotes: text('change_notes'),
+  rejectionReason: text('rejection_reason'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 // 6.1 Document Historical Versions

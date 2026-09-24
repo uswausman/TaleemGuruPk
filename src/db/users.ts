@@ -315,6 +315,18 @@ export async function getOrCreateUser(
   }
 }
 
+export function sanitizeUserForClient<T extends Record<string, any>>(user: T | null): T | null {
+  if (!user) return null;
+  const clone: any = { ...user };
+  delete clone.password;
+  delete clone.passwordHash;
+  delete clone.secret;
+  if (Array.isArray(clone.permissions)) {
+    clone.permissions = clone.permissions.filter((p: string) => typeof p === 'string' && !p.startsWith('__auth_pwd:'));
+  }
+  return clone as T;
+}
+
 export async function isUserAdminInDatabase(uid: string): Promise<boolean> {
   if (!uid) return false;
   try {
@@ -377,7 +389,7 @@ export async function getAllUsersFromDb(limit = 150) {
     return rawUsers.map((u) => ({
       ...u,
       status: u.status || 'Active',
-      permissions: u.permissions || [],
+      permissions: (u.permissions || []).filter((p: string) => typeof p === 'string' && !p.startsWith('__auth_pwd:')),
       assignments: assignmentsMap[u.uid] || [],
     }));
   } catch (error) {

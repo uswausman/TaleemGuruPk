@@ -8,6 +8,7 @@ export interface RouteDefinition {
   isProtected: boolean;
   allowedRoles: UserRole[];
   title: string;
+  isNotFound?: boolean;
 }
 
 // Normalize any user role string safely
@@ -49,6 +50,14 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     isProtected: false,
     allowedRoles: ['student', 'admin', 'teacher', 'editor'],
     title: 'Search & Discovery',
+  },
+  '/404': {
+    path: '/404',
+    view: 'not-found',
+    isProtected: false,
+    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    title: 'Page Not Found (404)',
+    isNotFound: true,
   },
   '/boards': {
     path: '/boards',
@@ -644,19 +653,21 @@ export function resolveRoute(rawPath: string): RouteDefinition {
     };
   }
 
-  // Fallback to home view for unknown paths
+  // Fallback to 404 Not Found for unknown paths (prevents indexing missing paths)
   return {
     path: normalized,
-    view: 'home',
+    view: 'not-found',
     isProtected: false,
     allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-    title: 'Home',
+    title: 'Page Not Found (404)',
+    isNotFound: true,
   };
 }
 
 // Convert a ViewMode and optional subFilter/adminTab to a canonical URL path
 export function viewToCanonicalPath(view: ViewMode, subFilter?: string, adminTab?: string): string {
   if (view === 'home') return '/';
+  if (view === 'not-found') return '/404';
   if (view === 'admin-panel' || view === 'teacher-panel') {
     if (adminTab && adminTab !== 'dashboard') {
       return `/admin/${adminTab}`;
