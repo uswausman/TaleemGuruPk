@@ -3805,9 +3805,10 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
     }
 
     // Attempt to register with Supabase Auth if client is configured
-    let authUid = `staff-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    let authUid: string | null = null;
     const supabaseClient = getSupabaseServerClient();
     if (supabaseClient) {
+      let lastAuthError: any = null;
       try {
         if ((supabaseClient as any).auth?.admin?.createUser) {
           const { data: authData, error: authError } = await (supabaseClient as any).auth.admin.createUser({
@@ -3821,11 +3822,14 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
           });
           if (!authError && authData?.user?.id) {
             authUid = authData.user.id;
+          } else if (authError) {
+            lastAuthError = authError;
+            console.error('Error from Supabase admin.createUser:', authError.message);
           }
         }
         
-        // Fallback to client-level signUp if admin API is not available with anon key
-        if (!authUid || authUid.startsWith('staff-')) {
+        // Fallback to client-level signUp if admin API is not available or failed
+        if (!authUid) {
           const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
             email: cleanEmail,
             password: password,
@@ -3839,12 +3843,22 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
           if (!signUpError && signUpData?.user?.id) {
             authUid = signUpData.user.id;
           } else if (signUpError) {
+            lastAuthError = signUpError;
             console.warn('Notice from Supabase signUp:', signUpError.message);
           }
         }
-      } catch (authCreateErr) {
-        console.warn('Notice during Supabase user registration execution:', authCreateErr);
+      } catch (authCreateErr: any) {
+        console.error('Fatal exception during Supabase user registration:', authCreateErr);
+        throw new Error(`Supabase Auth registration failed: ${authCreateErr.message || authCreateErr}`);
       }
+
+      if (!authUid) {
+        const errorMsg = lastAuthError?.message || 'Authentication provider rejected registration request';
+        throw new Error(`Supabase Auth registration failed: ${errorMsg}`);
+      }
+    } else {
+      // In local/offline development without Supabase, fallback to a local UID
+      authUid = `staff-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     }
 
     // Authoritative profile insertion into application database with securely hashed credentials
@@ -3875,7 +3889,7 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
     });
   } catch (error: any) {
     console.error('Error creating staff user:', error);
-    return res.status(500).json({ error: 'Failed to create staff account' });
+    return res.status(500).json({ error: error?.message || 'Failed to create staff account' });
   }
 });
 
