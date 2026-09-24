@@ -960,24 +960,42 @@ export async function createUserInDb(data: {
     if (error?.statusCode === 409) {
       throw error;
     }
-    console.error('Failed to create user in database:', error);
 
-    // Inspect Postgres error code 23505 (unique_violation)
-    const code = error?.code || error?.cause?.code;
+    const cause = error?.cause || error;
+    // Safe diagnostic server-side logging (excluding credentials, password hashes, auth tokens)
+    console.error('STAFF INSERT DATABASE ERROR', {
+      code: cause?.code || error?.code,
+      message: cause?.message || error?.message,
+      detail: cause?.detail || error?.detail,
+      constraint: cause?.constraint || error?.constraint,
+      table: cause?.table || error?.table,
+      column: cause?.column || error?.column,
+      schema: cause?.schema || error?.schema,
+      hint: cause?.hint || error?.hint,
+    });
+
+    // Inspect Postgres error code 23505 (unique_violation) ONLY for 409 mapping
+    const code = error?.code || cause?.code;
     if (code === '23505') {
-      const constraint = error?.constraint || error?.cause?.constraint || '';
-      const detail = error?.detail || error?.cause?.detail || '';
+      const constraint = error?.constraint || cause?.constraint || '';
+      const detail = error?.detail || cause?.detail || '';
       if (constraint === 'users_uid_unique' || detail.includes('uid')) {
         const err = new Error(`An account with this User ID (UID) already exists in the system.`);
         (err as any).statusCode = 409;
         throw err;
       }
-      const err = new Error(`An account with email ${data.email.toLowerCase().trim()} already exists in the system.`);
+      if (constraint === 'users_email_unique' || detail.includes('email')) {
+        const err = new Error(`An account with email ${data.email.toLowerCase().trim()} already exists in the system.`);
+        (err as any).statusCode = 409;
+        throw err;
+      }
+      const err = new Error(`A duplicate record already exists in the system.`);
       (err as any).statusCode = 409;
       throw err;
     }
 
-    const specificMessage = error?.message || (typeof error === 'string' ? error : 'Database user record creation failed');
+    // All non-duplicate errors (not-null violations, syntax errors, type mismatches) remain distinguishable 500s
+    const specificMessage = cause?.message || error?.message || 'Database user record creation failed';
     throw new Error(specificMessage, { cause: error });
   }
 }
