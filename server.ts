@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
-import { createServer as createViteServer } from 'vite';
 
 // Normalize Supabase URLs at process boot to prevent /rest/v1/ suffix issues
 if (process.env.VITE_SUPABASE_URL) {
@@ -19,6 +18,7 @@ async function startServer() {
 
   // Vite middleware for development or static serving for production container
   if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
