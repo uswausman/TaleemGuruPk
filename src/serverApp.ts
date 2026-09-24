@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -3838,7 +3839,7 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
     }
 
     // Attempt to register with Supabase Auth if client is configured
-    let authUid = `staff-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    let authUid = `staff-${Date.now()}-${randomUUID()}`;
     const supabaseClient = getSupabaseServerClient();
     if (supabaseClient) {
       try {
