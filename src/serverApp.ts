@@ -210,19 +210,21 @@ import {
 
 const app = express();
 
-// Authoritatively synchronize configured administrative identities and initial educational content
-syncBootstrapAdmins().catch((err) => {
-  console.warn('[Server] Initial admin bootstrap sync notice:', err);
-});
-initExamSystemTables().catch((err) => {
-  console.warn('[Server] Initial exam tables notice:', err);
-});
-seedInitialEducationalContent().catch((err) => {
-  console.warn('[Server] Initial educational content seeding notice:', err);
-});
-seedInitialHierarchy().catch((err) => {
-  console.warn('[Server] Initial hierarchy seeding notice:', err);
-});
+if (!process.env.VERCEL) {
+  // Authoritatively synchronize configured administrative identities and initial educational content
+  syncBootstrapAdmins().catch((err) => {
+    console.warn('[Server] Initial admin bootstrap sync notice:', err);
+  });
+  initExamSystemTables().catch((err) => {
+    console.warn('[Server] Initial exam tables notice:', err);
+  });
+  seedInitialEducationalContent().catch((err) => {
+    console.warn('[Server] Initial educational content seeding notice:', err);
+  });
+  seedInitialHierarchy().catch((err) => {
+    console.warn('[Server] Initial hierarchy seeding notice:', err);
+  });
+}
 
 // Security Headers for API responses
 app.use((req: Request, res: Response, next: NextFunction) => {
