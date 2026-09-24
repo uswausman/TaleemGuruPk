@@ -3838,7 +3838,8 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
       return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in the system.` });
     }
 
-    // Attempt to register with Supabase Auth if client is configured
+    // Server-side unique UID ownership
+    const requestId = `req-${Date.now()}-${randomUUID().substring(0, 8)}`;
     let authUid = `staff-${Date.now()}-${randomUUID()}`;
     const supabaseClient = getSupabaseServerClient();
     if (supabaseClient) {
@@ -3875,6 +3876,10 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
               },
             },
           });
+          // Supabase JS v2 returns user.id with identities: [] when email already exists without throwing signUpError
+          if (signUpData?.user && Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+            return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+          }
           if (!signUpError && signUpData?.user?.id) {
             authUid = signUpData.user.id;
           } else if (signUpError) {
@@ -3888,6 +3893,20 @@ apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: R
         console.warn('Notice during Supabase user registration execution:', authCreateErr);
       }
     }
+
+    // Pre-insert verification: check if authUid was already present in database
+    const existingByUid = await getUserByUid(authUid);
+    if (existingByUid) {
+      return res.status(409).json({ error: `An account with User ID (${authUid}) already exists in the system.` });
+    }
+
+    // Safe diagnostic log (strictly excluding passwords, hashes, JWTs, headers)
+    console.log('STAFF CREATION ATTEMPT LOG', {
+      requestId,
+      generatedUid: authUid,
+      email: cleanEmail,
+      databaseInsertAttempt: true,
+    });
 
     let createdUser;
     try {
