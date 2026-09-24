@@ -914,6 +914,91 @@ async function runStudentTeacherPortalTests() {
       );
     }
 
+    // ----------------------------------------------------------------
+    // SECTION 6: CERTIFICATE & PUBLIC VERIFICATION TESTS (STEP 19)
+    // ----------------------------------------------------------------
+
+    // 41. Public Certificate Verification: Valid Certificate ID returns authentic real DB record
+    {
+      const certId41 = `TG-CERT-TEST-${timestamp}`;
+      await saveCertificateToDb({
+        id: certId41,
+        userUid: studentAUid,
+        studentName: 'Alpha Student',
+        testId: examTest.id,
+        testName: examTest.title,
+        score: 90,
+        totalMarks: 100,
+        percentage: 90,
+        grade: 'A+',
+        className: 'Class 10',
+        subjectName: 'Physics',
+        performanceLevel: 'Outstanding',
+        status: 'VALID',
+        verificationUrl: `https://taleemguru.pk/verify/${certId41}`,
+      });
+
+      const fetched = await getCertificateByIdFromDb(certId41);
+      assert(
+        fetched !== null &&
+          fetched.id === certId41 &&
+          fetched.studentName === 'Alpha Student' &&
+          fetched.score === 90 &&
+          fetched.percentage === 90 &&
+          fetched.status === 'VALID',
+        'Test 41: Public Certificate Verification returns real database record for valid certificate ID'
+      );
+    }
+
+    // 42. Public Certificate Verification: Invalid Certificate ID returns null / false
+    {
+      const invalidCert = await getCertificateByIdFromDb('TG-CERT-NON-EXISTENT-ID-12345');
+      assert(
+        invalidCert === null,
+        'Test 42: Public Certificate Verification gracefully returns null for non-existent certificate ID'
+      );
+    }
+
+    // 43. Certificate Revocation & Public Status Update
+    {
+      const certId43 = `TG-CERT-REV-${timestamp}`;
+      await saveCertificateToDb({
+        id: certId43,
+        userUid: studentAUid,
+        studentName: 'Alpha Student',
+        testId: examTest.id,
+        testName: examTest.title,
+        score: 80,
+        totalMarks: 100,
+        percentage: 80,
+        grade: 'A',
+        status: 'VALID',
+        verificationUrl: `https://taleemguru.pk/verify/${certId43}`,
+      });
+
+      const { revokeCertificateInDb, restoreCertificateInDb } = await import('../src/db/users.ts');
+      
+      // Revoke certificate
+      const revoked = await revokeCertificateInDb(certId43, 'admin-1', 'Rule violation');
+      assert(revoked === true, 'Test 43a: Certificate successfully revoked in database');
+
+      const certAfterRevoke = await getCertificateByIdFromDb(certId43);
+      assert(
+        certAfterRevoke !== null && certAfterRevoke.status === 'REVOKED',
+        'Test 43b: Revoked certificate shows REVOKED status in authoritative DB query'
+      );
+
+      // Restore certificate
+      const restored = await restoreCertificateInDb(certId43);
+      assert(restored === true, 'Test 43c: Certificate successfully restored in database');
+
+      const certAfterRestore = await getCertificateByIdFromDb(certId43);
+      assert(
+        certAfterRestore !== null && certAfterRestore.status === 'VALID',
+        'Test 43d: Restored certificate shows VALID status in authoritative DB query'
+      );
+    }
+
   } catch (error: any) {
     console.error('Fatal execution error in studentTeacherPortalTests:', error);
     failed++;

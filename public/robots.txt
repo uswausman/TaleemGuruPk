@@ -1,7 +1,19 @@
 User-agent: *
 Allow: /
 Disallow: /admin
+Disallow: /admin/
+Disallow: /admin-panel
+Disallow: /dashboard
+Disallow: /profile
+Disallow: /certificates
+Disallow: /attempts
+Disallow: /results
+Disallow: /test-session
+Disallow: /quiz-session
+Disallow: /access-denied
+Disallow: /auth/
 Disallow: /api/
+Disallow: /*?*
 
-# Sitemap
-Sitemap: https://taleemguru.pk/sitemap.xml
+# Canonical Sitemap
+Sitemap: https://www.taleemguru.pk/sitemap.xml
