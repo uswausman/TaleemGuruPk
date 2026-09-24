@@ -3,7 +3,7 @@ import { MCQ, TestResult, StudyNote, PastPaper, Certificate } from '../types';
 import { TALEEMGURU_LOGO_BASE64 } from './logoBase64';
 
 export const BRAND_NAME = 'TaleemGuru.pk';
-export const BRAND_TAGLINE = "Pakistan's Online Testing, Quiz & Exam Preparation Platform";
+export const BRAND_TAGLINE = 'Learn. Practice. Test. Improve.';
 export const BRAND_URL = 'https://taleemguru.pk';
 
 /**
@@ -24,9 +24,9 @@ function applyWatermarkToPDF(doc: jsPDF, _watermarkText?: string) {
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text(`TaleemGuru.pk  |  ${BRAND_TAGLINE.toUpperCase()}`, 14, 9);
+    doc.text(`TaleemGuru.pk  |  ${BRAND_TAGLINE}`, 14, 9);
     doc.setFont('helvetica', 'normal');
-    doc.text(`OFFICIAL CURRICULUM RESOURCE  •  https://taleemguru.pk`, width - 14, 9, { align: 'right' });
+    doc.text(`TaleemGuru.pk  •  https://taleemguru.pk`, width - 14, 9, { align: 'right' });
 
     // Bottom Footer Banner
     doc.setFillColor(245, 247, 248);
@@ -36,11 +36,11 @@ function applyWatermarkToPDF(doc: jsPDF, _watermarkText?: string) {
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(7.5);
     doc.text(
-      `© TaleemGuru.pk | Downloaded from TaleemGuru.pk`,
+      `© TaleemGuru.pk | Learn. Practice. Test. Improve. | https://taleemguru.pk`,
       14,
       height - 4.5
     );
-    doc.text(`https://taleemguru.pk  •  Page ${i} of ${pageCount}`, width - 14, height - 4.5, { align: 'right' });
+    doc.text(`Page ${i} of ${pageCount}`, width - 14, height - 4.5, { align: 'right' });
 
     doc.restoreGraphicsState();
   }
@@ -50,7 +50,7 @@ function applyWatermarkToPDF(doc: jsPDF, _watermarkText?: string) {
     author: 'TaleemGuru.pk',
     subject: 'Downloaded from TaleemGuru.pk',
     creator: 'TaleemGuru.pk Academic Document System',
-    keywords: 'TaleemGuru, TaleemGuru.pk, Educational Resource, Pakistan Curriculum',
+    keywords: 'TaleemGuru, TaleemGuru.pk, Educational Resource',
   });
 }
 
@@ -244,7 +244,7 @@ export function exportResultCardToPDF(result: TestResult, studentName = 'Student
   doc.setTextColor(16, 110, 68);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
-  doc.text('TALEEM GURU OFFICIAL SCORECARD', 14, y);
+  doc.text('TALEEM GURU SCORECARD', 14, y);
   y += 6;
 
   doc.setFont('helvetica', 'normal');
@@ -252,7 +252,7 @@ export function exportResultCardToPDF(result: TestResult, studentName = 'Student
   doc.setTextColor(71, 85, 105);
   doc.text(`Test Name: ${result.testTitle}  •  Category: ${result.category}`, 14, y);
   y += 5;
-  doc.text(`Candidate: ${studentName}  •  Date: ${result.timestamp}  •  Verification Ref: TG-RES-${result.id.slice(-6).toUpperCase()}`, 14, y);
+  doc.text(`Candidate: ${studentName}  •  Date: ${result.timestamp}  •  Assessment Ref: TG-RES-${result.id.slice(-6).toUpperCase()}`, 14, y);
   y += 5;
 
   doc.setDrawColor(16, 110, 68);
@@ -331,12 +331,12 @@ export function exportResultCardToPDF(result: TestResult, studentName = 'Student
     }
   });
 
-  applyWatermarkToPDF(doc, 'TALEEM GURU • OFFICIAL RESULT CARD • VERIFIED EXAM');
+  applyWatermarkToPDF(doc, 'TALEEM GURU • RESULT CARD • ONLINE ASSESSMENT');
   doc.save(`TaleemGuru_Result_${result.testTitle.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
 }
 
 /**
- * Generate and download official Certificate PDF with high-res watermark & seal
+ * Generate and download Certificate PDF with clean TaleemGuru styling
  */
 export function exportCertificateToPDF(
   cert: Certificate | (Partial<Certificate> & {
@@ -386,7 +386,7 @@ export function exportCertificateToPDF(
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text("NATIONAL TESTING & ACADEMIC MERIT SYSTEM", width / 2, 34, { align: 'center' });
+  doc.text("ONLINE TESTING & ACADEMIC ASSESSMENT PLATFORM", width / 2, 34, { align: 'center' });
 
   // Main Ribbon Title
   doc.setTextColor(15, 23, 42);
@@ -397,7 +397,7 @@ export function exportCertificateToPDF(
   doc.setFontSize(11);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(71, 85, 105);
-  doc.text('This is to officially certify that', width / 2, 62, { align: 'center' });
+  doc.text('This is to certify that', width / 2, 62, { align: 'center' });
 
   // Candidate Name
   doc.setTextColor(16, 110, 68);
@@ -414,7 +414,7 @@ export function exportCertificateToPDF(
   doc.setTextColor(51, 65, 85);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(12);
-  const certDesc = `has demonstrated outstanding academic competence and successfully passed the examination for`;
+  const certDesc = `has demonstrated commendable academic competence and successfully passed the examination for`;
   doc.text(certDesc, width / 2, 94, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
@@ -457,9 +457,9 @@ export function exportCertificateToPDF(
   doc.text('Director Examination', leftX + 7, 180);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text('Taleem Guru Academic Council', leftX + 1, 185);
+  doc.text('Taleem Guru Examination Dept', leftX + 1, 185);
 
-  // Golden Emblem / Seal in Center
+  // Emblem / Seal in Center
   doc.setFillColor(245, 158, 11);
   doc.circle(width / 2, 172, 13, 'F');
   doc.setFillColor(217, 119, 6);
@@ -467,7 +467,7 @@ export function exportCertificateToPDF(
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  doc.text('OFFICIAL', width / 2, 170, { align: 'center' });
+  doc.text('VERIFIED', width / 2, 170, { align: 'center' });
   doc.text('SEAL', width / 2, 174.5, { align: 'center' });
 
   // Verification Box on Right
@@ -482,13 +482,13 @@ export function exportCertificateToPDF(
   doc.setTextColor(100, 116, 139);
   doc.text('Scan QR / Visit taleemguru.pk', rightX - 2, 185);
 
-  // Official Certificate Bottom Credit Banner
+  // Certificate Bottom Credit Banner
   doc.setFillColor(245, 247, 248);
   doc.rect(0, height - 9, width, 9, 'F');
   doc.setFontSize(7);
   doc.setTextColor(100, 116, 139);
   doc.text('© TaleemGuru.pk | Downloaded from TaleemGuru.pk', 14, height - 3);
-  doc.text('https://taleemguru.pk  •  Official Academic Council Verification', width - 14, height - 3, { align: 'right' });
+  doc.text(`https://taleemguru.pk  •  Certificate Verification: ${displayCertId}`, width - 14, height - 3, { align: 'right' });
 
   doc.save(`TaleemGuru_Certificate_${cert.studentName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
 }
@@ -499,7 +499,7 @@ export function exportCertificateToPDF(
 export function downloadTextWithWatermark(filename: string, title: string, content: string) {
   const stampedHeader = `
 ================================================================================
-           ★ TALEEM GURU PAKISTAN - OFFICIAL STUDY & EXAMINATION RESOURCE ★
+           ★ TALEEM GURU PAKISTAN - STUDY & EXAMINATION RESOURCE ★
                                  ${BRAND_URL}
 ================================================================================
 DOCUMENT: ${title}
@@ -516,7 +516,7 @@ COPYRIGHT: © TaleemGuru.pk. All rights reserved.
 
 ================================================================================
 © TaleemGuru.pk | Downloaded from TaleemGuru.pk
-Official testing, past papers, notes & exam preparation: https://taleemguru.pk
+Online testing, past papers, notes & exam preparation: https://taleemguru.pk
 ================================================================================
 `;
 

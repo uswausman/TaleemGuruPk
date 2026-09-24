@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { PDFDocument, rgb, StandardFonts, degrees } from 'pdf-lib';
 
-export const TALEEM_BRAND_FOOTER = '© TaleemGuru.pk | Downloaded from TaleemGuru.pk';
+export const TALEEM_TAGLINE = 'Learn. Practice. Test. Improve.';
+export const TALEEM_BRAND_FOOTER = '© TaleemGuru.pk | Learn. Practice. Test. Improve. | https://taleemguru.pk';
 export const TALEEM_WEBSITE_URL = 'https://taleemguru.pk';
 export const TALEEM_BRAND_KEYWORD = 'TaleemGuru.pk-Branded';
 export const TALEEM_PRODUCER_STRING = 'TaleemGuru.pk Document Branding Engine v2.0';
@@ -219,24 +220,24 @@ export async function brandPdfBuffer(
           color: rgb(0.06, 0.43, 0.27),
         });
 
-        creditPage.drawText('Official Verified Academic Curriculum Resource', {
-          x: width / 2 - 130,
+        creditPage.drawText('Learn. Practice. Test. Improve.', {
+          x: width / 2 - 100,
           y: height - 125,
-          size: 11,
-          font: helveticaFont,
+          size: 12,
+          font: helveticaBoldFont,
           color: rgb(0.3, 0.35, 0.4),
         });
 
         creditPage.drawText(TALEEM_BRAND_FOOTER, {
-          x: width / 2 - 140,
+          x: width / 2 - 150,
           y: height - 200,
-          size: 13,
+          size: 11,
           font: helveticaBoldFont,
           color: rgb(0.1, 0.15, 0.2),
         });
 
-        creditPage.drawText(`Visit ${TALEEM_WEBSITE_URL} to download and practice verified papers and study notes.`, {
-          x: width / 2 - 170,
+        creditPage.drawText(`Visit ${TALEEM_WEBSITE_URL} for past papers, practice tests, and study notes.`, {
+          x: width / 2 - 165,
           y: height - 230,
           size: 10,
           font: helveticaFont,
@@ -255,7 +256,7 @@ export async function brandPdfBuffer(
     pdfDoc.setProducer(TALEEM_PRODUCER_STRING);
     pdfDoc.setCreator(`${TALEEM_BRAND_FOOTER} • ${TALEEM_WEBSITE_URL}`);
     const currentKeywords = pdfDoc.getKeywords() || '';
-    pdfDoc.setKeywords([TALEEM_BRAND_KEYWORD, 'TaleemGuru.pk', 'Verified Educational Material', currentKeywords].filter(Boolean));
+    pdfDoc.setKeywords([TALEEM_BRAND_KEYWORD, 'TaleemGuru.pk', 'Academic Study Material', currentKeywords].filter(Boolean));
     pdfDoc.setModificationDate(new Date());
   } catch (metaErr) {
     console.warn('[Branding] Could not update PDF metadata:', metaErr);
@@ -285,13 +286,14 @@ export async function brandPdfBuffer(
  * Apply TaleemGuru branding to plain text or markdown content
  */
 export function brandTextContent(content: string, title?: string): string {
-  if (content.includes('TaleemGuru.pk') && content.includes('Downloaded from TaleemGuru.pk')) {
+  if (content.includes('TaleemGuru.pk') && content.includes(TALEEM_TAGLINE)) {
     return content; // Already branded
   }
 
   const header = `================================================================================
-          ★ TALEEM GURU PAKISTAN - OFFICIAL CURRICULUM RESOURCE ★
-                             ${TALEEM_WEBSITE_URL}
+                    ★ TALEEM GURU PAKISTAN ★
+                 Learn. Practice. Test. Improve.
+                      ${TALEEM_WEBSITE_URL}
 ================================================================================
 DOCUMENT: ${title || 'Academic Study Material'}
 SOURCE: ${TALEEM_BRAND_FOOTER}
@@ -305,7 +307,7 @@ COPYRIGHT: © ${new Date().getFullYear()} TaleemGuru.pk. All rights reserved.
 
 ================================================================================
 ${TALEEM_BRAND_FOOTER}
-Official testing, past papers, notes & exam preparation: ${TALEEM_WEBSITE_URL}
+Online testing, past papers, notes & exam preparation: ${TALEEM_WEBSITE_URL}
 ================================================================================`;
 
   return `${header}${content.trim()}${footer}`;

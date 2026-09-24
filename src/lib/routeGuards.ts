@@ -43,6 +43,13 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     allowedRoles: ['student', 'admin', 'teacher', 'editor'],
     title: 'Home',
   },
+  '/search': {
+    path: '/search',
+    view: 'search',
+    isProtected: false,
+    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    title: 'Search & Discovery',
+  },
   '/boards': {
     path: '/boards',
     view: 'boards',
@@ -619,6 +626,24 @@ export function resolveRoute(rawPath: string): RouteDefinition {
     };
   }
 
+  if (normalized.startsWith('/search')) {
+    let queryParam = '';
+    if (rawPath.includes('?')) {
+      const sp = new URLSearchParams(rawPath.split('?')[1]);
+      queryParam = sp.get('q') || '';
+    } else if (normalized.startsWith('/search/')) {
+      queryParam = decodeURIComponent(normalized.replace('/search/', '').trim());
+    }
+    return {
+      path: normalized,
+      view: 'search',
+      subFilter: queryParam || undefined,
+      isProtected: false,
+      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+      title: 'Search Educational Content',
+    };
+  }
+
   // Fallback to home view for unknown paths
   return {
     path: normalized,
@@ -650,6 +675,10 @@ export function viewToCanonicalPath(view: ViewMode, subFilter?: string, adminTab
   if (view === 'privacy-policy') return '/privacy-policy';
   if (view === 'terms-of-service') return '/terms-of-service';
   if (view === 'auth-callback') return '/auth/callback';
+  if (view === 'search') {
+    if (subFilter) return `/search?q=${encodeURIComponent(subFilter)}`;
+    return '/search';
+  }
   return `/${view}`;
 }
 

@@ -31,7 +31,75 @@ export type ViewMode =
   | 'access-denied'
   | 'privacy-policy'
   | 'terms-of-service'
-  | 'auth-callback';
+  | 'auth-callback'
+  | 'search';
+
+export type SearchContentType =
+  | 'all'
+  | 'mcqs'
+  | 'tests'
+  | 'past_papers'
+  | 'study_notes'
+  | 'documents'
+  | 'boards'
+  | 'classes'
+  | 'subjects'
+  | 'chapters'
+  | 'curriculum';
+
+export interface UnifiedSearchResultItem {
+  id: string;
+  type: 'mcq' | 'test' | 'past_paper' | 'study_note' | 'document' | 'board' | 'class' | 'subject' | 'chapter';
+  title: string;
+  subtitle?: string;
+  description?: string;
+  subject?: string;
+  classLevel?: string;
+  board?: string;
+  chapter?: string;
+  topic?: string;
+  year?: number;
+  status: 'Published' | 'Draft' | 'Archived';
+  url?: string;
+  badge?: string;
+  difficulty?: string;
+  score?: number;
+  meta?: Record<string, any>;
+}
+
+export interface UnifiedSearchFilters {
+  query?: string;
+  type?: SearchContentType;
+  board?: string;
+  classLevel?: string;
+  subject?: string;
+  chapter?: string;
+  year?: number;
+  status?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface UnifiedSearchResponse {
+  results: UnifiedSearchResultItem[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasMore: boolean;
+  countsByCategory: Record<string, number>;
+  suggestions?: string[];
+  query: string;
+  appliedFilters: {
+    type?: string;
+    board?: string;
+    classLevel?: string;
+    subject?: string;
+    chapter?: string;
+    year?: number;
+    status?: string;
+  };
+}
 
 export interface RouteAuthResult {
   isAllowed: boolean;
@@ -61,6 +129,8 @@ export interface MCQ {
   tags: string[];
   language?: 'English' | 'Urdu';
   status?: 'Published' | 'Draft';
+  createdBy?: string;
+  updatedBy?: string;
   createdAt?: string;
 }
 
@@ -93,10 +163,84 @@ export interface TestConfig {
   negativeMarking: boolean; // e.g., -0.25 per wrong answer
   negativeMarkValue?: number;
   passPercentage: number;
+  randomizeQuestions?: boolean;
+  randomizeOptions?: boolean;
+  allowRetake?: boolean;
+  maxAttempts?: number;
+  reviewPolicy?: 'immediate' | 'after_submission' | 'none';
   questions: MCQ[];
+  questionIds?: string[];
   isPremium?: boolean;
   status?: 'Published' | 'Draft';
+  createdBy?: string;
+  updatedBy?: string;
   createdAt?: string;
+}
+
+export interface ExamAttempt {
+  attemptId: string;
+  testId: string;
+  testTitle: string;
+  userUid: string;
+  studentName?: string;
+  studentEmail?: string;
+  startedAt: string;
+  expiresAt: string;
+  submittedAt?: string;
+  status: 'IN_PROGRESS' | 'COMPLETED' | 'EXPIRED' | 'ABANDONED';
+  questionOrder: string[];
+  answers: Record<string, { selectedOption: number | null; markedForReview?: boolean; timeSpentSeconds?: number; savedAt?: string }>;
+  score?: number;
+  totalMarks?: number;
+  percentage?: number;
+  passed?: boolean;
+  grade?: string;
+  correctCount?: number;
+  wrongCount?: number;
+  unansweredCount?: number;
+  timeSpentSeconds?: number;
+  reviewPolicy?: string;
+}
+
+export interface SafeExamQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  subject: string;
+  chapter?: string;
+  topic?: string;
+  difficulty: Difficulty;
+  classLevel?: string;
+  board?: string;
+  year?: number;
+}
+
+export interface ExamStartResponse {
+  success: boolean;
+  attemptId: string;
+  test: {
+    id: string;
+    title: string;
+    description: string;
+    testType: TestType;
+    category: string;
+    subject: string;
+    chapter?: string;
+    classLevel?: string;
+    board?: string;
+    durationMinutes: number;
+    totalQuestions: number;
+    totalMarks: number;
+    negativeMarking: boolean;
+    negativeMarkValue?: number;
+    passPercentage: number;
+    reviewPolicy: string;
+    questions: SafeExamQuestion[];
+  };
+  startedAt: string;
+  expiresAt: string;
+  timeRemainingSeconds: number;
+  existingAnswers?: Record<string, { selectedOption: number | null; markedForReview?: boolean; timeSpentSeconds?: number }>;
 }
 
 export interface UserAnswer {
@@ -237,24 +381,36 @@ export interface PastPaper {
   classLevel: string;
   subject: string;
   chapter?: string;
+  topic?: string;
+  exam?: string;
   year: number;
   paperGroup?: 'Group 1' | 'Group 2' | 'Annual' | 'Supply' | 'First Annual' | 'Second Annual';
   type: 'Objective (MCQs)' | 'Subjective' | 'Combined';
   paperType?: string; // e.g., 'Annual Group 1', 'Supplementary', 'Model Paper'
+  language?: string;
+  totalQuestions?: number;
+  totalMarks?: number;
+  durationMinutes?: number;
   questionsCount: number;
   downloadUrl?: string;
   fileUrl?: string;
   pdfUrl?: string;
   thumbnail?: string;
-  status?: 'Published' | 'Draft';
+  status?: 'Published' | 'Draft' | 'Archived';
+  version?: number;
   brandingStatus?: 'Branded' | 'Pending' | 'Not Applicable';
   brandedFileUrl?: string;
   brandingVersion?: string;
   originalFileHash?: string;
+  brandedFileHash?: string;
   brandedAt?: string;
+  downloadsCount?: number;
   description?: string;
   questions?: MCQ[];
+  createdBy?: string;
+  updatedBy?: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface StudyNote {
@@ -270,20 +426,86 @@ export interface StudyNote {
   contentSnippet?: string;
   fullContent?: string;
   content?: string;
+  language?: string;
   pdfUrl?: string;
   fileUrl?: string;
   thumbnail?: string;
-  status?: 'Published' | 'Draft';
+  status?: 'Published' | 'Draft' | 'Archived';
+  version?: number;
   brandingStatus?: 'Branded' | 'Pending' | 'Not Applicable';
   brandedFileUrl?: string;
   brandingVersion?: string;
   originalFileHash?: string;
+  brandedFileHash?: string;
   brandedAt?: string;
   keyPoints?: string[];
   readTime?: string;
   downloadsCount: number;
   isPremium?: boolean;
+  createdBy?: string;
+  updatedBy?: string;
   createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DocumentItem {
+  id: string;
+  title: string;
+  originalFilename: string;
+  sanitizedFilename: string;
+  mimeType: string;
+  fileSize: number;
+  storageRef: string;
+  originalFileHash: string;
+  brandedStorageRef?: string;
+  brandedFileHash?: string;
+  documentType: string;
+  contentType: string;
+  board?: string;
+  classLevel?: string;
+  subject?: string;
+  chapter?: string;
+  topic?: string;
+  year?: number;
+  language?: string;
+  status: 'Published' | 'Draft' | 'Archived';
+  version: number;
+  brandingStatus: 'Completed' | 'Pending' | 'Failed' | 'Not Applicable';
+  brandingVersion?: string;
+  brandedAt?: string;
+  downloadsCount: number;
+  associatedEntityId?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DocumentVersion {
+  id: number;
+  documentId: string;
+  versionNumber: number;
+  originalFilename: string;
+  storageRef: string;
+  originalFileHash: string;
+  brandedStorageRef?: string;
+  brandedFileHash?: string;
+  fileSize: number;
+  changeNotes?: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface DocumentDownloadEvent {
+  id: number;
+  documentId: string;
+  documentType: string;
+  userUid?: string;
+  anonymousSessionId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  version: number;
+  downloadedAt: string;
 }
 
 export interface VideoLecture {

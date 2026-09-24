@@ -28,6 +28,7 @@ import { AdminTeacherPanel } from './components/AdminTeacherPanel';
 import { OnlineTestView } from './components/OnlineTestView';
 import { ResultModal } from './components/ResultModal';
 import { UniversalSearchModal } from './components/UniversalSearchModal';
+import { PublicSearchView } from './components/PublicSearchView';
 import { StudentAuthModal } from './components/StudentAuthModal';
 import { AccessDeniedView } from './components/AccessDeniedView';
 import { SubjectsView } from './components/SubjectsView';
@@ -58,6 +59,24 @@ import {
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { SEOHead } from './components/SEOHead';
 import { checkDuplicateMCQ } from './utils/duplicateDetector';
+import {
+  fetchMCQsApi,
+  createMCQApi,
+  updateMCQApi,
+  deleteMCQApi,
+  fetchTestsApi,
+  createTestApi,
+  updateTestApi,
+  deleteTestApi,
+  fetchPastPapersApi,
+  createPastPaperApi,
+  updatePastPaperApi,
+  deletePastPaperApi,
+  fetchStudyNotesApi,
+  createStudyNoteApi,
+  updateStudyNoteApi,
+  deleteStudyNoteApi,
+} from './lib/api';
 
 export default function App() {
   const { showToast } = useToast();
@@ -474,6 +493,43 @@ export default function App() {
     } catch (e) {}
   }, [historyResults]);
 
+  // Fetch authoritative educational content from PostgreSQL database on load
+  useEffect(() => {
+    let isMounted = true;
+    const loadContentFromDb = async () => {
+      try {
+        const [dbMcqs, dbTests, dbPapers, dbNotes] = await Promise.allSettled([
+          fetchMCQsApi(),
+          fetchTestsApi(),
+          fetchPastPapersApi(),
+          fetchStudyNotesApi(),
+        ]);
+
+        if (!isMounted) return;
+
+        if (dbMcqs.status === 'fulfilled' && Array.isArray(dbMcqs.value) && dbMcqs.value.length > 0) {
+          setMcqBank(dbMcqs.value);
+        }
+        if (dbTests.status === 'fulfilled' && Array.isArray(dbTests.value) && dbTests.value.length > 0) {
+          setAllTests(dbTests.value);
+        }
+        if (dbPapers.status === 'fulfilled' && Array.isArray(dbPapers.value) && dbPapers.value.length > 0) {
+          setAllPastPapers(dbPapers.value);
+        }
+        if (dbNotes.status === 'fulfilled' && Array.isArray(dbNotes.value) && dbNotes.value.length > 0) {
+          setAllStudyNotes(dbNotes.value);
+        }
+      } catch (err) {
+        console.warn('Notice: Background database content sync error:', err);
+      }
+    };
+
+    loadContentFromDb();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Single Central Logout Function
   const [isLoggingOut, setIsLoggingOut] = useState<boolean>(false);
 
@@ -535,37 +591,73 @@ export default function App() {
   }, [handleCentralLogout]);
 
   // Bulk Import Handlers
-  const handleBulkImportMCQs = (imported: MCQ[], replace?: boolean) => {
+  const handleBulkImportMCQs = async (imported: MCQ[], replace?: boolean) => {
     setMcqBank((prev) => (replace ? imported : [...imported, ...prev]));
+    try {
+      const headers = await fetch('/api/mcqs/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mcqs: imported }),
+      });
+    } catch (e) {
+      console.warn('Notice: Background MCQ bulk import sync error:', e);
+    }
   };
 
-  const handleBulkImportTests = (imported: TestConfig[], replace?: boolean) => {
+  const handleBulkImportTests = async (imported: TestConfig[], replace?: boolean) => {
     setAllTests((prev) => (replace ? imported : [...imported, ...prev]));
+    try {
+      await fetch('/api/tests/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tests: imported }),
+      });
+    } catch (e) {
+      console.warn('Notice: Background test bulk import sync error:', e);
+    }
   };
 
-  const handleBulkImportPastPapers = (imported: PastPaper[], replace?: boolean) => {
+  const handleBulkImportPastPapers = async (imported: PastPaper[], replace?: boolean) => {
     setAllPastPapers((prev) => (replace ? imported : [...imported, ...prev]));
+    try {
+      await fetch('/api/past-papers/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pastPapers: imported }),
+      });
+    } catch (e) {
+      console.warn('Notice: Background past papers bulk import sync error:', e);
+    }
   };
 
-  const handleBulkImportStudyNotes = (imported: StudyNote[], replace?: boolean) => {
+  const handleBulkImportStudyNotes = async (imported: StudyNote[], replace?: boolean) => {
     setAllStudyNotes((prev) => (replace ? imported : [...imported, ...prev]));
+    try {
+      await fetch('/api/study-notes/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studyNotes: imported }),
+      });
+    } catch (e) {
+      console.warn('Notice: Background study notes bulk import sync error:', e);
+    }
   };
 
-  const handleBulkImportBundle = (
+  const handleBulkImportBundle = async (
     bundle: { mcqs?: MCQ[]; tests?: TestConfig[]; pastPapers?: PastPaper[]; studyNotes?: StudyNote[] },
     replace?: boolean
   ) => {
     if (bundle.mcqs && bundle.mcqs.length > 0) {
-      setMcqBank((prev) => (replace ? bundle.mcqs! : [...bundle.mcqs!, ...prev]));
+      await handleBulkImportMCQs(bundle.mcqs, replace);
     }
     if (bundle.tests && bundle.tests.length > 0) {
-      setAllTests((prev) => (replace ? bundle.tests! : [...bundle.tests!, ...prev]));
+      await handleBulkImportTests(bundle.tests, replace);
     }
     if (bundle.pastPapers && bundle.pastPapers.length > 0) {
-      setAllPastPapers((prev) => (replace ? bundle.pastPapers! : [...bundle.pastPapers!, ...prev]));
+      await handleBulkImportPastPapers(bundle.pastPapers, replace);
     }
     if (bundle.studyNotes && bundle.studyNotes.length > 0) {
-      setAllStudyNotes((prev) => (replace ? bundle.studyNotes! : [...bundle.studyNotes!, ...prev]));
+      await handleBulkImportStudyNotes(bundle.studyNotes, replace);
     }
   };
 
@@ -793,7 +885,7 @@ export default function App() {
   };
 
   // Admin MCQ Management
-  const handleAddMCQ = (newMCQ: MCQ) => {
+  const handleAddMCQ = async (newMCQ: MCQ) => {
     const dup = checkDuplicateMCQ(
       newMCQ.question,
       newMCQ.subject,
@@ -812,26 +904,62 @@ export default function App() {
       return;
     }
     setMcqBank((prev) => [newMCQ, ...prev]);
+    try {
+      const res = await createMCQApi(newMCQ);
+      if (res.success && res.mcq) {
+        setMcqBank((prev) => prev.map((m) => (m.id === newMCQ.id ? res.mcq : m)));
+      }
+    } catch (e) {
+      console.warn('Notice: Background MCQ create sync error:', e);
+    }
   };
 
-  const handleUpdateMCQ = (updatedMCQ: MCQ) => {
+  const handleUpdateMCQ = async (updatedMCQ: MCQ) => {
     setMcqBank((prev) => prev.map((m) => (m.id === updatedMCQ.id ? updatedMCQ : m)));
+    try {
+      await updateMCQApi(updatedMCQ.id, updatedMCQ);
+    } catch (e) {
+      console.warn('Notice: Background MCQ update sync error:', e);
+    }
   };
 
-  const handleDeleteMCQ = (id: string) => {
+  const handleDeleteMCQ = async (id: string) => {
     setMcqBank((prev) => prev.filter((m) => m.id !== id));
+    try {
+      await deleteMCQApi(id);
+    } catch (e) {
+      console.warn('Notice: Background MCQ delete sync error:', e);
+    }
   };
 
-  const handleCreateTest = (newTest: TestConfig) => {
+  const handleCreateTest = async (newTest: TestConfig) => {
     setAllTests((prev) => [newTest, ...prev]);
+    try {
+      const res = await createTestApi(newTest);
+      if (res.success && res.test) {
+        setAllTests((prev) => prev.map((t) => (t.id === newTest.id ? res.test : t)));
+      }
+    } catch (e) {
+      console.warn('Notice: Background test create sync error:', e);
+    }
   };
 
-  const handleUpdateTest = (updatedTest: TestConfig) => {
+  const handleUpdateTest = async (updatedTest: TestConfig) => {
     setAllTests((prev) => prev.map((t) => (t.id === updatedTest.id ? updatedTest : t)));
+    try {
+      await updateTestApi(updatedTest.id, updatedTest);
+    } catch (e) {
+      console.warn('Notice: Background test update sync error:', e);
+    }
   };
 
-  const handleDeleteTest = (id: string) => {
+  const handleDeleteTest = async (id: string) => {
     setAllTests((prev) => prev.filter((t) => t.id !== id));
+    try {
+      await deleteTestApi(id);
+    } catch (e) {
+      console.warn('Notice: Background test delete sync error:', e);
+    }
   };
 
   const currentStudentName = student?.name || 'Candidate';
@@ -1190,6 +1318,25 @@ export default function App() {
                 }}
                 onNavigate={(view, subFilter, adminTab) => {
                   handleNavigateWithFilter(view, subFilter, adminTab);
+                }}
+              />
+            )}
+
+            {currentView === 'search' && (
+              <PublicSearchView
+                initialQuery={activeSubFilter || ''}
+                onSelectTest={(t) => handleStartTest(t)}
+                onSelectMCQ={() => {
+                  setCurrentView('mcqs');
+                }}
+                onSelectPastPaper={(p) => {
+                  handleSolvePastPaper(p);
+                }}
+                onSelectNote={() => {
+                  setCurrentView('study-material');
+                }}
+                onNavigate={(v, sub) => {
+                  handleNavigateWithFilter(v, sub);
                 }}
               />
             )}

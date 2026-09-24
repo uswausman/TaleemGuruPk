@@ -47,6 +47,11 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
+  // If user identity is already verified on the request, proceed directly
+  if (req.user && req.user.uid) {
+    return next();
+  }
+
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized: Missing or malformed authorization token' });
@@ -161,6 +166,82 @@ export const requireAuth = async (
     console.error('Error verifying authentication token:', error);
     return res.status(401).json({ error: 'Unauthorized: Failed to authenticate token' });
   }
+};
+
+/**
+ * Middleware: Optionally populates user if valid bearer token is provided,
+ * but does not reject request if unauthenticated.
+ */
+export const optionalAuth = async (
+  req: AuthRequest,
+  _res: Response,
+  next: NextFunction
+) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split('Bearer ')[1]?.trim();
+  if (!token) return next();
+
+  try {
+    const client = getSupabaseServerClient();
+    let user: any = null;
+
+    if (client) {
+      try {
+        const { data } = await client.auth.getUser(token);
+        if (data?.user) user = data.user;
+      } catch {}
+    }
+
+    if (!user) {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const crypto = await import('crypto');
+        const secret = process.env.SUPABASE_ANON_KEY || process.env.SQL_ADMIN_PASSWORD || 'taleemguru-admin-auth-key';
+        const expectedSig = crypto.createHmac('sha256', secret).update(`${parts[0]}.${parts[1]}`).digest('base64url');
+        if (parts[2] === expectedSig) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+          const nowSeconds = Math.floor(Date.now() / 1000);
+          if (payload && payload.sub && (!payload.exp || payload.exp > nowSeconds)) {
+            user = {
+              id: payload.sub,
+              email: payload.email || payload.user_metadata?.email,
+              user_metadata: payload.user_metadata || {},
+            };
+          }
+        }
+      }
+    }
+
+    if (user) {
+      const normalizedEmail = (user.email || '').toLowerCase().trim();
+      const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
+      const bootstrapAdmins = getTrustedBootstrapAdmins();
+      const bootstrapConfig = bootstrapAdmins[normalizedEmail];
+      let dbUser = null;
+      try {
+        dbUser = await getUserByUid(user.id);
+      } catch {}
+
+      let authoritativeRoles = ['Student'];
+      if (isBootstrap) authoritativeRoles = ['Admin'];
+      else if (dbUser?.roles && Array.isArray(dbUser.roles)) authoritativeRoles = dbUser.roles;
+
+      req.user = {
+        uid: user.id,
+        email: normalizedEmail,
+        name: (isBootstrap ? (bootstrapConfig?.name || 'Admin') : dbUser?.name) || user.user_metadata?.name || normalizedEmail.split('@')[0],
+        roles: authoritativeRoles,
+      };
+    }
+  } catch (err) {
+    // Non-blocking in optionalAuth
+  }
+
+  return next();
 };
 
 /**
@@ -342,4 +423,165 @@ export const requireHighAdmin = async (
     return next();
   });
 };
+
+/**
+ * Middleware: Requires permission to curate/manage MCQs (Admin, Teacher, Editor, ContentManager)
+ */
+export const requireMCQCurator = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  await requireAuth(req, res, async () => {
+    try {
+      const email = (req.user?.email || '').toLowerCase().trim();
+      if (isTrustedBootstrapAdminEmail(email)) {
+        return next();
+      }
+
+      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isAuthorized = roles.some(role => [
+        'admin',
+        'superadmin',
+        'super_admin',
+        'administrator',
+        'editor',
+        'teacher',
+        'contentmanager',
+        'content_manager',
+      ].includes(role));
+
+      if (!isAuthorized) {
+        return res.status(403).json({
+          error: 'Forbidden: MCQ curation privileges required (Admin, Teacher, Editor, Content Manager).',
+        });
+      }
+
+      return next();
+    } catch (err) {
+      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    }
+  });
+};
+
+/**
+ * Middleware: Requires permission to create/manage tests and quizzes (Admin, Teacher, ContentManager)
+ */
+export const requireQuizCreator = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  await requireAuth(req, res, async () => {
+    try {
+      const email = (req.user?.email || '').toLowerCase().trim();
+      if (isTrustedBootstrapAdminEmail(email)) {
+        return next();
+      }
+
+      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isAuthorized = roles.some(role => [
+        'admin',
+        'superadmin',
+        'super_admin',
+        'administrator',
+        'teacher',
+        'contentmanager',
+        'content_manager',
+      ].includes(role));
+
+      if (!isAuthorized) {
+        return res.status(403).json({
+          error: 'Forbidden: Assessment creation privileges required (Admin, Teacher, Content Manager).',
+        });
+      }
+
+      return next();
+    } catch (err) {
+      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    }
+  });
+};
+
+/**
+ * Middleware: Requires permission to manage Past Papers and Study Notes (Admin, ContentManager, Editor, Teacher)
+ */
+export const requireContentCurator = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  await requireAuth(req, res, async () => {
+    try {
+      const email = (req.user?.email || '').toLowerCase().trim();
+      if (isTrustedBootstrapAdminEmail(email)) {
+        return next();
+      }
+
+      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isAuthorized = roles.some(role => [
+        'admin',
+        'superadmin',
+        'super_admin',
+        'administrator',
+        'contentmanager',
+        'content_manager',
+        'editor',
+        'teacher',
+      ].includes(role));
+
+      if (!isAuthorized) {
+        return res.status(403).json({
+          error: 'Forbidden: Content curation privileges required.',
+        });
+      }
+
+      return next();
+    } catch (err) {
+      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    }
+  });
+};
+
+/**
+ * Middleware: Requires permission to access Teacher portal (Admin, Teacher, ContentManager, SuperAdmin)
+ */
+export const requireTeacher = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  await requireAuth(req, res, async () => {
+    try {
+      const email = (req.user?.email || '').toLowerCase().trim();
+      if (isTrustedBootstrapAdminEmail(email)) {
+        return next();
+      }
+
+      const roles = (req.user?.roles || []).map((r) => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isAuthorized = roles.some((role) =>
+        [
+          'admin',
+          'superadmin',
+          'super_admin',
+          'administrator',
+          'teacher',
+          'contentmanager',
+          'content_manager',
+        ].includes(role)
+      );
+
+      if (!isAuthorized) {
+        return res.status(403).json({
+          error: 'Forbidden: Teacher or Administrator privileges required to access teacher portal.',
+        });
+      }
+
+      return next();
+    } catch (err) {
+      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    }
+  });
+};
+
 
