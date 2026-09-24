@@ -922,6 +922,15 @@ export async function createUserInDb(data: {
 }) {
   try {
     const cleanEmail = data.email.toLowerCase().trim();
+
+    // Safety pre-check: prevent duplicate inserts for the same email
+    const existing = await getUserByEmail(cleanEmail);
+    if (existing) {
+      const err = new Error(`An account with email ${cleanEmail} already exists in the system.`);
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
     let initialPermissions = [...(data.permissions || [])];
     if (data.password) {
       const pwdToken = hashPassword(data.password);
@@ -948,7 +957,26 @@ export async function createUserInDb(data: {
       .returning();
     return created;
   } catch (error: any) {
+    if (error?.statusCode === 409) {
+      throw error;
+    }
     console.error('Failed to create user in database:', error);
+
+    // Inspect Postgres error code 23505 (unique_violation)
+    const code = error?.code || error?.cause?.code;
+    if (code === '23505') {
+      const constraint = error?.constraint || error?.cause?.constraint || '';
+      const detail = error?.detail || error?.cause?.detail || '';
+      if (constraint === 'users_uid_unique' || detail.includes('uid')) {
+        const err = new Error(`An account with this User ID (UID) already exists in the system.`);
+        (err as any).statusCode = 409;
+        throw err;
+      }
+      const err = new Error(`An account with email ${data.email.toLowerCase().trim()} already exists in the system.`);
+      (err as any).statusCode = 409;
+      throw err;
+    }
+
     const specificMessage = error?.message || (typeof error === 'string' ? error : 'Database user record creation failed');
     throw new Error(specificMessage, { cause: error });
   }
