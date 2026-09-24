@@ -2005,7 +2005,12 @@ apiRouter.get('/leaderboard', async (req: Request, res: Response) => {
     res.json({ leaderboard: topUsers });
   } catch (error: any) {
     console.error('Error fetching leaderboard:', error);
-    res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    res.status(500).json({ 
+      error: 'Failed to fetch leaderboard',
+      message: error?.message || String(error),
+      cause: error?.cause?.message || String(error?.cause || ''),
+      stack: error?.stack
+    });
   }
 });
 
