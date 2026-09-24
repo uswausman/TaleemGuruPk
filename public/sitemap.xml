@@ -1,113 +1,83 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9
-        http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">
-  <!-- Homepage -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.taleemguru.pk/</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
-
-  <!-- Online Tests & Examination Center -->
   <url>
     <loc>https://www.taleemguru.pk/tests</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
-
-  <!-- MCQs Bank -->
   <url>
     <loc>https://www.taleemguru.pk/mcqs</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
-
-  <!-- Solved Past Papers Archives -->
   <url>
     <loc>https://www.taleemguru.pk/past-papers</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
-
-  <!-- High-Yield Study Notes & Formulas -->
   <url>
     <loc>https://www.taleemguru.pk/notes</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
-
-  <!-- Pakistan Education Boards Directory -->
   <url>
     <loc>https://www.taleemguru.pk/boards</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- Classes 9th, 10th, 11th, 12th Academic Hubs -->
   <url>
     <loc>https://www.taleemguru.pk/classes</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- Academic Subjects Catalog -->
   <url>
     <loc>https://www.taleemguru.pk/subjects</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- MDCAT & ECAT Entry Tests -->
   <url>
     <loc>https://www.taleemguru.pk/entry-tests</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- CSS & PMS Competitive Exams -->
   <url>
     <loc>https://www.taleemguru.pk/competitive-exams</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- Pakistan Armed Forces Tests -->
   <url>
     <loc>https://www.taleemguru.pk/armed-forces</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
-
-  <!-- National Student Merit Leaderboard -->
   <url>
     <loc>https://www.taleemguru.pk/leaderboard</loc>
     <lastmod>2026-09-24</lastmod>
-    <changefreq>hourly</changefreq>
+    <changefreq>daily</changefreq>
     <priority>0.7</priority>
   </url>
-
-  <!-- Privacy Policy -->
   <url>
     <loc>https://www.taleemguru.pk/privacy-policy</loc>
     <lastmod>2026-09-24</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>
-
-  <!-- Terms of Service -->
   <url>
     <loc>https://www.taleemguru.pk/terms-of-service</loc>
     <lastmod>2026-09-24</lastmod>
@@ -115,3 +85,4 @@
     <priority>0.5</priority>
   </url>
 </urlset>
+
