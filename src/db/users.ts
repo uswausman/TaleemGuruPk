@@ -610,26 +610,39 @@ export async function getCertificateByIdFromDb(certificateId: string, requesting
 }
 
 export async function getTopLeaderboard(limitCount = 20) {
-  try {
-    return await db
-      .select({
-        id: users.id,
-        uid: users.uid,
-        name: users.name,
-        points: users.points,
-        streakDays: users.streakDays,
-        testsTaken: users.testsTaken,
-        board: users.board,
-        classLevel: users.classLevel,
-        avatar: users.avatar,
-      })
-      .from(users)
-      .orderBy(desc(users.points))
-      .limit(limitCount);
-  } catch (error) {
-    console.error('Failed to get leaderboard:', error);
-    throw new Error('Failed to load leaderboard', { cause: error });
+  let attempts = 0;
+  const maxAttempts = 3;
+  const delayMs = 200;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      return await db
+        .select({
+          id: users.id,
+          uid: users.uid,
+          name: users.name,
+          points: users.points,
+          streakDays: users.streakDays,
+          testsTaken: users.testsTaken,
+          board: users.board,
+          classLevel: users.classLevel,
+          avatar: users.avatar,
+        })
+        .from(users)
+        .orderBy(desc(users.points))
+        .limit(limitCount);
+    } catch (error) {
+      console.warn(`[Leaderboard Query] Attempt ${attempts} failed:`, error);
+      if (attempts >= maxAttempts) {
+        console.error('Failed to get leaderboard after max attempts:', error);
+        throw new Error('Failed to load leaderboard', { cause: error });
+      }
+      // Wait before retrying (exponential backoff)
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempts));
+    }
   }
+  throw new Error('Failed to load leaderboard');
 }
 
 export async function toggleBookmarkInDb(userUid: string, questionId: string) {
