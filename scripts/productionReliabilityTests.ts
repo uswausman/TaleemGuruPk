@@ -11,6 +11,7 @@ import {
   privacySafeLogger,
   productionErrorSanitizer,
 } from '../src/server/productionReliability';
+import { getTopLeaderboard } from '../src/db/users';
 
 async function runProductionReliabilityTests() {
   console.log('==================================================================================================================');
@@ -60,6 +61,14 @@ async function runProductionReliabilityTests() {
     const clientError = { status: 400, message: 'Invalid request parameters' };
     const sanitizedClient = productionErrorSanitizer(clientError);
     assert(sanitizedClient.statusCode === 400 && sanitizedClient.error === 'Invalid request parameters', 'Test 6: Production error sanitizer preserves standard client error codes and messages');
+
+    // 7. Leaderboard Query Verification
+    try {
+      const topUsers = await getTopLeaderboard(5);
+      assert(Array.isArray(topUsers), 'Test 7: Leaderboard query executes and returns a valid list of student profiles', `count: ${topUsers.length}`);
+    } catch (e: any) {
+      assert(false, 'Test 7: Leaderboard query failed to execute', e?.message || String(e));
+    }
 
   } catch (error) {
     console.error('Unexpected error during production reliability tests:', error);
