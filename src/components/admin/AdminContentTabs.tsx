@@ -32,9 +32,10 @@ import {
 } from '../../data/educationalHierarchy';
 import { AdminConfirmDialog } from './AdminConfirmDialog';
 import { documentBrandingService } from '../../services/documentBrandingService';
+import { AdminDocumentLibraryTab } from './AdminDocumentLibraryTab';
 
 interface AdminContentTabsProps {
-  type: 'notes' | 'past-papers';
+  type: 'notes' | 'past-papers' | 'documents';
   notes?: StudyNote[];
   pastPapers?: PastPaper[];
   onAddNote?: (note: StudyNote) => void;
@@ -83,10 +84,11 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
   const [noteType, setNoteType] = useState<StudyNote['type']>('Notes');
   const [noteSnippet, setNoteSnippet] = useState('');
   const [noteFullContent, setNoteFullContent] = useState('');
-  const [noteStatus, setNoteStatus] = useState<'Published' | 'Draft'>('Published');
+  const [noteStatus, setNoteStatus] = useState<'Published' | 'Draft' | 'Archived'>('Published');
   const [notePdfUrl, setNotePdfUrl] = useState('');
   const [noteThumbnail, setNoteThumbnail] = useState('');
   const [noteKeyPointsStr, setNoteKeyPointsStr] = useState('');
+  const [noteFile, setNoteFile] = useState<File | null>(null);
 
   // Past Paper Modal Form State
   const [isPaperModalOpen, setIsPaperModalOpen] = useState(false);
@@ -100,10 +102,15 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
   const [paperYear, setPaperYear] = useState<number>(2024);
   const [paperGroup, setPaperGroup] = useState<PastPaper['paperGroup']>('Annual');
   const [paperType, setPaperType] = useState<PastPaper['type']>('Objective (MCQs)');
-  const [paperStatus, setPaperStatus] = useState<'Published' | 'Draft'>('Published');
+  const [paperStatus, setPaperStatus] = useState<'Published' | 'Draft' | 'Archived'>('Published');
   const [paperPdfUrl, setPaperPdfUrl] = useState('');
   const [paperThumbnail, setPaperThumbnail] = useState('');
   const [paperDescription, setPaperDescription] = useState('');
+  const [paperFile, setPaperFile] = useState<File | null>(null);
+
+  // File upload processing
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
 
   // Available chapters for selected subject & class in form
   const dynamicFormChapters = useMemo(() => {
@@ -113,6 +120,13 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
     if (!subObj) return [];
     return ACADEMIC_CHAPTERS.filter((c) => c.subjectId === subObj.id);
   }, [type, noteSubject, paperSubject]);
+
+  // ==========================================
+  // 0. DOCUMENT LIBRARY TAB
+  // ==========================================
+  if (type === 'documents') {
+    return <AdminDocumentLibraryTab />;
+  }
 
   // ==========================================
   // 1. NOTES TAB MANAGEMENT
@@ -174,43 +188,97 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
       onUpdateNote({ ...note, status: updatedStatus });
     };
 
-    const handleSaveNote = (e: React.FormEvent) => {
+    const handleSaveNote = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!noteTitle.trim()) return;
 
-      const pointsArray = noteKeyPointsStr
-        .split('\n')
-        .map((p) => p.trim())
-        .filter(Boolean);
+      setIsUploadingFile(true);
+      setFileUploadError(null);
 
-      const payload: StudyNote = {
-        id: editingNote ? editingNote.id : `note-${Date.now()}`,
-        title: noteTitle.trim(),
-        board: noteBoard,
-        classLevel: noteClass,
-        subject: noteSubject,
-        chapter: noteChapter.trim() || 'Unit 1: Fundamentals',
-        topic: noteTopic.trim() || undefined,
-        type: noteType,
-        description: noteSnippet.trim(),
-        contentSnippet: noteSnippet.trim() || 'Structured study notes with formulas and solutions.',
-        content: noteFullContent.trim() || noteSnippet.trim(),
-        fullContent: noteFullContent.trim() || noteSnippet.trim(),
-        readTime: '8 mins',
-        downloadsCount: editingNote ? (editingNote.downloadsCount ?? 0) : 0,
-        status: noteStatus,
-        pdfUrl: notePdfUrl.trim() || undefined,
-        fileUrl: notePdfUrl.trim() || undefined,
-        thumbnail: noteThumbnail.trim() || undefined,
-        keyPoints: pointsArray.length > 0 ? pointsArray : undefined,
-      };
+      let finalPdfUrl = notePdfUrl.trim() || undefined;
 
-      if (editingNote) {
-        onUpdateNote(payload);
-      } else {
-        onAddNote(payload);
+      try {
+        if (noteFile) {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const res = reader.result as string;
+              resolve(res.split(',')[1] || res);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(noteFile);
+          });
+
+          const token = localStorage.getItem('tg_auth_token') || sessionStorage.getItem('tg_auth_token');
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (token) headers['Authorization'] = `Bearer ${token}`;
+
+          const uploadRes = await fetch('/api/documents/upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              fileBase64: base64,
+              filename: noteFile.name,
+              title: noteTitle.trim(),
+              documentType: 'Study Note',
+              board: noteBoard,
+              classLevel: noteClass,
+              subject: noteSubject,
+              chapter: noteChapter,
+              topic: noteTopic,
+              status: noteStatus,
+              allowDuplicate: true,
+            }),
+          });
+
+          const uploadData = await uploadRes.json();
+          if (uploadRes.ok && uploadData.document) {
+            finalPdfUrl = `/api/documents/${uploadData.document.id}/download`;
+          } else {
+            console.warn('Document upload warning:', uploadData.error);
+          }
+        }
+
+        const pointsArray = noteKeyPointsStr
+          .split('\n')
+          .map((p) => p.trim())
+          .filter(Boolean);
+
+        const payload: StudyNote = {
+          id: editingNote ? editingNote.id : `note-${Date.now()}`,
+          title: noteTitle.trim(),
+          board: noteBoard,
+          classLevel: noteClass,
+          subject: noteSubject,
+          chapter: noteChapter.trim() || 'Unit 1: Fundamentals',
+          topic: noteTopic.trim() || undefined,
+          type: noteType,
+          description: noteSnippet.trim(),
+          contentSnippet: noteSnippet.trim() || 'Structured study notes with formulas and solutions.',
+          content: noteFullContent.trim() || noteSnippet.trim(),
+          fullContent: noteFullContent.trim() || noteSnippet.trim(),
+          readTime: '8 mins',
+          downloadsCount: editingNote ? (editingNote.downloadsCount ?? 0) : 0,
+          status: noteStatus,
+          pdfUrl: finalPdfUrl,
+          fileUrl: finalPdfUrl,
+          thumbnail: noteThumbnail.trim() || undefined,
+          keyPoints: pointsArray.length > 0 ? pointsArray : undefined,
+        };
+
+        if (editingNote) {
+          onUpdateNote(payload);
+        } else {
+          onAddNote(payload);
+        }
+        setIsNoteModalOpen(false);
+        setNoteFile(null);
+      } catch (err: any) {
+        console.error('Error saving note:', err);
+        setFileUploadError(err.message || 'Failed to upload document');
+      } finally {
+        setIsUploadingFile(false);
       }
-      setIsNoteModalOpen(false);
     };
 
     return (
@@ -602,33 +670,51 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
                   />
                 </div>
 
-                {/* PDF and Thumbnail URLs */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* PDF File Upload or URL */}
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2.5">
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      PDF File Attachment URL (Optional)
+                      Upload PDF Document (Automatic TaleemGuru Branding)
+                    </label>
+                    <input
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(e) => setNoteFile(e.target.files?.[0] || null)}
+                      className="w-full text-xs text-slate-900 dark:text-white file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+                    />
+                    {noteFile && (
+                      <div className="mt-1 text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Ready to upload & brand: {noteFile.name} ({(noteFile.size / 1024).toFixed(1)} KB)</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Or existing PDF File / Handout URL
                     </label>
                     <input
                       type="text"
                       value={notePdfUrl}
                       onChange={(e) => setNotePdfUrl(e.target.value)}
-                      placeholder="https://taleemguru.pk/notes/phy-ch5.pdf"
-                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                      placeholder="https://taleemguru.pk/notes/phy-ch5.pdf or /api/documents/:id/download"
+                      className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                     />
                   </div>
+                </div>
 
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Thumbnail Image URL (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={noteThumbnail}
-                      onChange={(e) => setNoteThumbnail(e.target.value)}
-                      placeholder="https://images.unsplash.com/..."
-                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                    />
-                  </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Thumbnail Image URL (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={noteThumbnail}
+                    onChange={(e) => setNoteThumbnail(e.target.value)}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
                 </div>
 
                 {/* TaleemGuru Branding Notice */}
@@ -791,36 +877,91 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
     onUpdatePastPaper({ ...paper, status: updatedStatus });
   };
 
-  const handleSavePaper = (e: React.FormEvent) => {
+  const handleSavePaper = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paperTitle.trim()) return;
 
-    const payload: PastPaper = {
-      id: editingPaper ? editingPaper.id : `paper-${Date.now()}`,
-      title: paperTitle.trim(),
-      board: paperBoard,
-      province: paperProvince,
-      classLevel: paperClass,
-      subject: paperSubject,
-      chapter: paperChapter.trim() || undefined,
-      year: Number(paperYear),
-      paperGroup: paperGroup,
-      type: paperType,
-      questionsCount: editingPaper ? editingPaper.questionsCount : 12,
-      status: paperStatus,
-      fileUrl: paperPdfUrl.trim() || undefined,
-      pdfUrl: paperPdfUrl.trim() || undefined,
-      thumbnail: paperThumbnail.trim() || undefined,
-      description: paperDescription.trim() || undefined,
-      questions: editingPaper ? editingPaper.questions : [],
-    };
+    setIsUploadingFile(true);
+    setFileUploadError(null);
 
-    if (editingPaper) {
-      onUpdatePastPaper(payload);
-    } else {
-      onAddPastPaper(payload);
+    let finalPaperUrl = paperPdfUrl.trim() || undefined;
+
+    try {
+      if (paperFile) {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const res = reader.result as string;
+            resolve(res.split(',')[1] || res);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(paperFile);
+        });
+
+        const token = localStorage.getItem('tg_auth_token') || sessionStorage.getItem('tg_auth_token');
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const uploadRes = await fetch('/api/documents/upload', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            fileBase64: base64,
+            filename: paperFile.name,
+            title: paperTitle.trim(),
+            documentType: 'Past Paper',
+            board: paperBoard,
+            province: paperProvince,
+            classLevel: paperClass,
+            subject: paperSubject,
+            chapter: paperChapter,
+            year: Number(paperYear),
+            status: paperStatus,
+            allowDuplicate: true,
+          }),
+        });
+
+        const uploadData = await uploadRes.json();
+        if (uploadRes.ok && uploadData.document) {
+          finalPaperUrl = `/api/documents/${uploadData.document.id}/download`;
+        } else {
+          console.warn('Past paper upload warning:', uploadData.error);
+        }
+      }
+
+      const payload: PastPaper = {
+        id: editingPaper ? editingPaper.id : `paper-${Date.now()}`,
+        title: paperTitle.trim(),
+        board: paperBoard,
+        province: paperProvince,
+        classLevel: paperClass,
+        subject: paperSubject,
+        chapter: paperChapter.trim() || undefined,
+        year: Number(paperYear),
+        paperGroup: paperGroup,
+        type: paperType,
+        questionsCount: editingPaper ? editingPaper.questionsCount : 12,
+        status: paperStatus,
+        fileUrl: finalPaperUrl,
+        pdfUrl: finalPaperUrl,
+        thumbnail: paperThumbnail.trim() || undefined,
+        description: paperDescription.trim() || undefined,
+        questions: editingPaper ? editingPaper.questions : [],
+      };
+
+      if (editingPaper) {
+        onUpdatePastPaper(payload);
+      } else {
+        onAddPastPaper(payload);
+      }
+      setIsPaperModalOpen(false);
+      setPaperFile(null);
+    } catch (err: any) {
+      console.error('Error saving past paper:', err);
+      setFileUploadError(err.message || 'Failed to upload past paper');
+    } finally {
+      setIsUploadingFile(false);
     }
-    setIsPaperModalOpen(false);
   };
 
   return (
@@ -1204,33 +1345,51 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
                 />
               </div>
 
-              {/* PDF and Thumbnail URLs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* PDF File Upload or URL */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2.5">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    PDF File / Attachment URL (Optional)
+                    Upload Past Paper PDF (Automatic TaleemGuru Branding)
+                  </label>
+                  <input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={(e) => setPaperFile(e.target.files?.[0] || null)}
+                    className="w-full text-xs text-slate-900 dark:text-white file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-teal-600 file:text-white hover:file:bg-teal-700 cursor-pointer"
+                  />
+                  {paperFile && (
+                    <div className="mt-1 text-[11px] text-teal-600 font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Ready to upload & brand: {paperFile.name} ({(paperFile.size / 1024).toFixed(1)} KB)</span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Or existing PDF File / Past Paper URL
                   </label>
                   <input
                     type="text"
                     value={paperPdfUrl}
                     onChange={(e) => setPaperPdfUrl(e.target.value)}
-                    placeholder="https://taleemguru.pk/pastpapers/lhr-10-phy-2024.pdf"
-                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    placeholder="https://taleemguru.pk/pastpapers/lhr-10-phy-2024.pdf or /api/documents/:id/download"
+                    className="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                   />
                 </div>
+              </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Thumbnail URL (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={paperThumbnail}
-                    onChange={(e) => setPaperThumbnail(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  />
-                </div>
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Thumbnail URL (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={paperThumbnail}
+                  onChange={(e) => setPaperThumbnail(e.target.value)}
+                  placeholder="https://images.unsplash.com/..."
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
               </div>
 
               {/* TaleemGuru Branding Notice */}

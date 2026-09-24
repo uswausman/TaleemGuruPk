@@ -20,11 +20,13 @@ import {
   Layers,
   HelpCircle,
   X,
+  Loader2,
 } from 'lucide-react';
 import { TestConfig, UserAnswer, TestResult, MCQ } from '../types';
 import { exportMCQsToWatermarkedPDF } from '../utils/watermark';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
+import { startExamApi, saveExamAnswerApi, submitExamApi } from '../lib/api';
 
 interface OnlineTestViewProps {
   test: TestConfig;
@@ -45,16 +47,20 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
   const [answers, setAnswers] = useState<Record<string, UserAnswer>>({});
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [shuffleQuestions, setShuffleQuestions] = useState(false);
-  const [shuffledList, setShuffledList] = useState<MCQ[]>(test.questions);
+  const [shuffleQuestions, setShuffleQuestions] = useState(Boolean(test.randomizeQuestions));
+  const [shuffledList, setShuffledList] = useState<MCQ[]>(test.questions || []);
   const [isTimeUp, setIsTimeUp] = useState(false);
   const [isPaletteOpenMobile, setIsPaletteOpenMobile] = useState(false);
+  const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [serverConnected, setServerConnected] = useState(true);
 
   const timerRef = useRef<any>(null);
   const endTimeRef = useRef<number>(Date.now() + totalDurationSeconds * 1000);
   const answersRef = useRef<Record<string, UserAnswer>>({});
-  const shuffledListRef = useRef<MCQ[]>(test.questions);
+  const shuffledListRef = useRef<MCQ[]>(test.questions || []);
   const hasAutoSubmittedRef = useRef<boolean>(false);
+  const attemptIdRef = useRef<string | null>(null);
 
   // Keep refs synchronized with latest state
   useEffect(() => {
@@ -65,9 +71,79 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
     shuffledListRef.current = shuffledList;
   }, [shuffledList]);
 
-  // Initialize questions and answers map
   useEffect(() => {
-    let qList = [...test.questions];
+    attemptIdRef.current = attemptId;
+  }, [attemptId]);
+
+  // Initialize server-authoritative test session
+  useEffect(() => {
+    let isMounted = true;
+
+    async function initSession() {
+      try {
+        const response = await startExamApi({
+          testId: test.id,
+          studentName,
+        });
+
+        if (!isMounted) return;
+
+        if (response && response.attemptId) {
+          setAttemptId(response.attemptId);
+          attemptIdRef.current = response.attemptId;
+
+          if (response.questions && response.questions.length > 0) {
+            const mappedQuestions: MCQ[] = response.questions.map((q: any) => ({
+              id: q.id,
+              question: q.question,
+              options: q.options || [],
+              correctAnswer: 0, // Hidden client-side during exam
+              explanation: '',
+              subject: q.subject || test.subject,
+              chapter: q.chapter,
+              topic: q.topic,
+              difficulty: q.difficulty || 'Medium',
+              tags: [],
+            }));
+            setShuffledList(mappedQuestions);
+            shuffledListRef.current = mappedQuestions;
+          }
+
+          if (response.timeRemainingSeconds !== undefined) {
+            const serverRemaining = Math.max(10, response.timeRemainingSeconds);
+            setTimeRemainingSeconds(serverRemaining);
+            endTimeRef.current = Date.now() + serverRemaining * 1000;
+          }
+
+          if (response.savedAnswers) {
+            const initialMap: Record<string, UserAnswer> = {};
+            Object.entries(response.savedAnswers).forEach(([qId, ans]: [string, any]) => {
+              initialMap[qId] = {
+                questionId: qId,
+                selectedOption: ans.selectedOption !== undefined ? ans.selectedOption : null,
+                markedForReview: Boolean(ans.markedForReview),
+                timeSpentSeconds: ans.timeSpentSeconds || 0,
+              };
+            });
+            setAnswers((prev) => ({ ...prev, ...initialMap }));
+          }
+        }
+      } catch (err) {
+        console.warn('Notice: Server exam start fallback to local session:', err);
+        setServerConnected(false);
+      }
+    }
+
+    initSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [test.id, studentName]);
+
+  // Initialize default question answers map
+  useEffect(() => {
+    let qList = [...(test.questions || [])];
     if (shuffleQuestions) {
       qList = qList.sort(() => Math.random() - 0.5);
     }
@@ -89,8 +165,8 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
     endTimeRef.current = Date.now() + totalDurationSeconds * 1000;
   }, [test, shuffleQuestions, totalDurationSeconds]);
 
-  // Calculate Result Helper
-  const calculateResult = (timeRemainingSecs: number): TestResult => {
+  // Calculate Local Result Fallback
+  const calculateLocalResult = (timeRemainingSecs: number): TestResult => {
     let correct = 0;
     let wrong = 0;
     let skipped = 0;
@@ -150,22 +226,56 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
     };
   };
 
-  const handleAutoSubmit = () => {
+  // Execute Submission
+  const executeSubmission = async (timeRemainingSecs: number) => {
     if (hasAutoSubmittedRef.current) return;
     hasAutoSubmittedRef.current = true;
     if (timerRef.current) clearInterval(timerRef.current);
+    setIsSubmitting(true);
+
+    const activeAttemptId = attemptIdRef.current;
+    const timeUsed = totalDurationSeconds - Math.max(0, timeRemainingSecs);
+
+    if (activeAttemptId) {
+      try {
+        const payloadAnswers: Record<string, any> = {};
+        Object.entries(answersRef.current).forEach(([qId, ans]) => {
+          payloadAnswers[qId] = {
+            selectedOption: ans.selectedOption,
+            markedForReview: ans.markedForReview,
+            timeSpentSeconds: ans.timeSpentSeconds || 0,
+          };
+        });
+
+        const evalResponse = await submitExamApi(activeAttemptId, {
+          answers: payloadAnswers,
+          timeSpentSeconds: Math.max(5, timeUsed),
+        });
+
+        if (evalResponse && evalResponse.result) {
+          setIsSubmitting(false);
+          onFinishTest(evalResponse.result);
+          return;
+        }
+      } catch (err) {
+        console.warn('Notice: Server exam evaluation fallback to client scoring:', err);
+      }
+    }
+
+    // Fallback to client-side evaluation
+    setIsSubmitting(false);
+    const localResult = calculateLocalResult(timeRemainingSecs);
+    onFinishTest(localResult);
+  };
+
+  const handleAutoSubmit = () => {
     setIsTimeUp(true);
-    const result = calculateResult(0);
-    onFinishTest(result);
+    executeSubmission(0);
   };
 
   const handleManualSubmit = () => {
-    if (hasAutoSubmittedRef.current) return;
-    hasAutoSubmittedRef.current = true;
-    if (timerRef.current) clearInterval(timerRef.current);
     setShowSubmitConfirm(false);
-    const result = calculateResult(timeRemainingSeconds);
-    onFinishTest(result);
+    executeSubmission(timeRemainingSeconds);
   };
 
   // Persistent Countdown Timer Loop
@@ -200,7 +310,7 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
     }
   };
 
-  const currentMCQ = shuffledList[currentIdx] || test.questions[0] || {
+  const currentMCQ = shuffledList[currentIdx] || (test.questions && test.questions[0]) || {
     id: 'q-default',
     question: 'Question Loading...',
     options: ['Option A', 'Option B', 'Option C', 'Option D'],
@@ -214,45 +324,83 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
   const currentAnswer = answers[currentMCQ?.id];
 
   const handleSelectOption = (optIdx: number) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [currentMCQ.id]: {
-        ...(prev[currentMCQ.id] || {
+    setAnswers((prev) => {
+      const updated = {
+        ...prev,
+        [currentMCQ.id]: {
+          ...(prev[currentMCQ.id] || {
+            questionId: currentMCQ.id,
+            markedForReview: false,
+            timeSpentSeconds: 0,
+          }),
+          selectedOption: optIdx,
+        },
+      };
+
+      // Background Autosave to Server
+      if (attemptIdRef.current) {
+        saveExamAnswerApi(attemptIdRef.current, {
           questionId: currentMCQ.id,
-          markedForReview: false,
-          timeSpentSeconds: 0,
-        }),
-        selectedOption: optIdx,
-      },
-    }));
+          selectedOption: optIdx,
+          markedForReview: updated[currentMCQ.id]?.markedForReview,
+        });
+      }
+
+      return updated;
+    });
   };
 
   const handleClearOption = () => {
-    setAnswers((prev) => ({
-      ...prev,
-      [currentMCQ.id]: {
-        ...(prev[currentMCQ.id] || {
+    setAnswers((prev) => {
+      const updated = {
+        ...prev,
+        [currentMCQ.id]: {
+          ...(prev[currentMCQ.id] || {
+            questionId: currentMCQ.id,
+            markedForReview: false,
+            timeSpentSeconds: 0,
+          }),
+          selectedOption: null,
+        },
+      };
+
+      if (attemptIdRef.current) {
+        saveExamAnswerApi(attemptIdRef.current, {
           questionId: currentMCQ.id,
-          markedForReview: false,
-          timeSpentSeconds: 0,
-        }),
-        selectedOption: null,
-      },
-    }));
+          selectedOption: null,
+          markedForReview: updated[currentMCQ.id]?.markedForReview,
+        });
+      }
+
+      return updated;
+    });
   };
 
   const handleToggleReview = () => {
-    setAnswers((prev) => ({
-      ...prev,
-      [currentMCQ.id]: {
-        ...(prev[currentMCQ.id] || {
+    setAnswers((prev) => {
+      const newMarked = !prev[currentMCQ.id]?.markedForReview;
+      const updated = {
+        ...prev,
+        [currentMCQ.id]: {
+          ...(prev[currentMCQ.id] || {
+            questionId: currentMCQ.id,
+            selectedOption: null,
+            timeSpentSeconds: 0,
+          }),
+          markedForReview: newMarked,
+        },
+      };
+
+      if (attemptIdRef.current) {
+        saveExamAnswerApi(attemptIdRef.current, {
           questionId: currentMCQ.id,
-          selectedOption: null,
-          timeSpentSeconds: 0,
-        }),
-        markedForReview: !prev[currentMCQ.id]?.markedForReview,
-      },
-    }));
+          selectedOption: updated[currentMCQ.id]?.selectedOption ?? null,
+          markedForReview: newMarked,
+        });
+      }
+
+      return updated;
+    });
   };
 
   // Keyboard shortcut listener
@@ -760,12 +908,35 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
               </button>
               <button
                 id="modal-confirm-submit-btn"
+                disabled={isSubmitting}
                 onClick={handleManualSubmit}
-                className="px-5 py-2.5 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-500 rounded-xl shadow-md shadow-blue-600/25 transition-all hover:scale-[1.02] active:scale-98 cursor-pointer"
+                className="px-5 py-2.5 text-xs font-extrabold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-60 rounded-xl shadow-md shadow-blue-600/25 transition-all hover:scale-[1.02] active:scale-98 cursor-pointer flex items-center gap-1.5"
               >
-                Yes, Submit Now
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Evaluating...</span>
+                  </>
+                ) : (
+                  <span>Yes, Submit Now</span>
+                )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submitting Loading Overlay */}
+      {isSubmitting && !isTimeUp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-800 text-center space-y-3">
+            <Loader2 className="w-10 h-10 text-blue-600 dark:text-cyan-400 animate-spin mx-auto" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+              Evaluating Assessment
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Your responses are being authoritatively verified against the question bank.
+            </p>
           </div>
         </div>
       )}

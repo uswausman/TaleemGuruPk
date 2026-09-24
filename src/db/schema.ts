@@ -1,5 +1,5 @@
 import { relations } from 'drizzle-orm';
-import { integer, pgTable, serial, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
+import { integer, pgTable, serial, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
 
 // Users table storing student and admin profiles linked to Auth UID (Supabase user ID)
 export const users = pgTable('users', {
@@ -171,6 +171,259 @@ export const syllabus = pgTable('syllabus', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// ============================================================================
+// EDUCATIONAL CONTENT TABLES: MCQs, Tests, Past Papers, Study Notes
+// ============================================================================
+
+// 1. MCQs Question Bank
+export const mcqs = pgTable('mcqs', {
+  id: text('id').primaryKey(),
+  question: text('question').notNull(),
+  options: jsonb('options').$type<string[]>().notNull(),
+  correctAnswer: integer('correct_answer').notNull(), // 0-indexed
+  explanation: text('explanation'),
+  subject: text('subject').notNull(),
+  chapter: text('chapter'),
+  topic: text('topic'),
+  difficulty: text('difficulty').default('Medium').notNull(), // 'Easy' | 'Medium' | 'Hard'
+  classLevel: text('class_level'),
+  board: text('board'),
+  exam: text('exam'),
+  year: integer('year'),
+  tags: jsonb('tags').$type<string[]>().default([]),
+  language: text('language').default('English').notNull(), // 'English' | 'Urdu'
+  status: text('status').default('Published').notNull(), // 'Published' | 'Draft'
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 2. Tests & Quizzes Configurations
+export const tests = pgTable('tests', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  description: text('description'),
+  testType: text('test_type').default('Chapter Test').notNull(),
+  category: text('category').default('Academic').notNull(),
+  subject: text('subject').notNull(),
+  chapter: text('chapter'),
+  classLevel: text('class_level'),
+  board: text('board'),
+  exam: text('exam'),
+  durationMinutes: integer('duration_minutes').default(15).notNull(),
+  totalQuestions: integer('total_questions').default(10).notNull(),
+  totalMarks: integer('total_marks').default(10).notNull(),
+  negativeMarking: boolean('negative_marking').default(false).notNull(),
+  negativeMarkValue: text('negative_mark_value').default('0.25'),
+  passPercentage: integer('pass_percentage').default(50).notNull(),
+  randomizeQuestions: boolean('randomize_questions').default(false).notNull(),
+  randomizeOptions: boolean('randomize_options').default(false).notNull(),
+  allowRetake: boolean('allow_retake').default(true).notNull(),
+  maxAttempts: integer('max_attempts').default(0).notNull(), // 0 = unlimited
+  reviewPolicy: text('review_policy').default('immediate').notNull(), // 'immediate' | 'after_submission' | 'none'
+  isPremium: boolean('is_premium').default(false).notNull(),
+  status: text('status').default('Published').notNull(), // 'Published' | 'Draft'
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 2.1 Exam Attempts for Server-Authoritative Examination Execution
+export const examAttempts = pgTable('exam_attempts', {
+  id: serial('id').primaryKey(),
+  attemptId: text('attempt_id').notNull().unique(),
+  testId: text('test_id').notNull(),
+  testTitle: text('test_title').notNull(),
+  userUid: text('user_uid').notNull(),
+  studentName: text('student_name'),
+  studentEmail: text('student_email'),
+  startedAt: timestamp('started_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
+  submittedAt: timestamp('submitted_at'),
+  status: text('status').default('IN_PROGRESS').notNull(), // 'IN_PROGRESS' | 'COMPLETED' | 'EXPIRED' | 'ABANDONED'
+  questionOrder: jsonb('question_order').$type<string[]>().notNull(), // MCQ IDs in attempt order
+  answers: jsonb('answers').$type<Record<string, { selectedOption: number | null; markedForReview?: boolean; timeSpentSeconds?: number; savedAt?: string }>>().default({}).notNull(),
+  score: integer('score'),
+  totalMarks: integer('total_marks'),
+  percentage: integer('percentage'),
+  passed: boolean('passed'),
+  grade: text('grade'),
+  correctCount: integer('correct_count'),
+  wrongCount: integer('wrong_count'),
+  unansweredCount: integer('unanswered_count'),
+  timeSpentSeconds: integer('time_spent_seconds'),
+  reviewPolicy: text('review_policy').default('immediate').notNull(),
+  ipAddress: text('ip_address'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 3. Test Questions Junction (relates tests to MCQs with specific ordering)
+export const testQuestions = pgTable('test_questions', {
+  id: serial('id').primaryKey(),
+  testId: text('test_id').references(() => tests.id, { onDelete: 'cascade' }).notNull(),
+  mcqId: text('mcq_id').references(() => mcqs.id, { onDelete: 'cascade' }).notNull(),
+  ordering: integer('ordering').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 4. Past Papers Archive
+export const pastPapers = pgTable('past_papers', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  board: text('board').notNull(),
+  province: text('province'),
+  classLevel: text('class_level').notNull(),
+  subject: text('subject').notNull(),
+  chapter: text('chapter'),
+  topic: text('topic'),
+  exam: text('exam'),
+  year: integer('year').notNull(),
+  paperGroup: text('paper_group'),
+  type: text('type').default('Objective (MCQs)').notNull(), // 'Objective (MCQs)' | 'Subjective' | 'Combined'
+  paperType: text('paper_type'),
+  language: text('language').default('English').notNull(),
+  totalQuestions: integer('total_questions').default(0).notNull(),
+  totalMarks: integer('total_marks').default(0).notNull(),
+  durationMinutes: integer('duration_minutes'),
+  questionsCount: integer('questions_count').default(0).notNull(),
+  downloadUrl: text('download_url'),
+  fileUrl: text('file_url'),
+  pdfUrl: text('pdf_url'),
+  thumbnail: text('thumbnail'),
+  description: text('description'),
+  status: text('status').default('Published').notNull(), // 'Published' | 'Draft' | 'Archived'
+  version: integer('version').default(1).notNull(),
+  brandingStatus: text('branding_status').default('Not Applicable'),
+  brandedFileUrl: text('branded_file_url'),
+  brandingVersion: text('branding_version'),
+  originalFileHash: text('original_file_hash'),
+  brandedFileHash: text('branded_file_hash'),
+  brandedAt: timestamp('branded_at'),
+  downloadsCount: integer('downloads_count').default(0).notNull(),
+  questions: jsonb('questions').$type<any[]>(), // Optional embedded questions
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 5. Study Notes & Subject Material
+export const studyNotes = pgTable('study_notes', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  board: text('board'),
+  subject: text('subject').notNull(),
+  classLevel: text('class_level').notNull(),
+  chapter: text('chapter').notNull(),
+  topic: text('topic'),
+  description: text('description'),
+  type: text('type').default('Notes').notNull(),
+  contentSnippet: text('content_snippet'),
+  fullContent: text('full_content'),
+  content: text('content'),
+  language: text('language').default('English').notNull(),
+  pdfUrl: text('pdf_url'),
+  fileUrl: text('file_url'),
+  thumbnail: text('thumbnail'),
+  status: text('status').default('Published').notNull(), // 'Published' | 'Draft' | 'Archived'
+  version: integer('version').default(1).notNull(),
+  brandingStatus: text('branding_status').default('Not Applicable'),
+  brandedFileUrl: text('branded_file_url'),
+  brandingVersion: text('branding_version'),
+  originalFileHash: text('original_file_hash'),
+  brandedFileHash: text('branded_file_hash'),
+  brandedAt: timestamp('branded_at'),
+  keyPoints: jsonb('key_points').$type<string[]>().default([]),
+  readTime: text('read_time'),
+  downloadsCount: integer('downloads_count').default(0).notNull(),
+  isPremium: boolean('is_premium').default(false).notNull(),
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 6. Centralized Document Library
+export const documents = pgTable('documents', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  originalFilename: text('original_filename').notNull(),
+  sanitizedFilename: text('sanitized_filename').notNull(),
+  mimeType: text('mime_type').notNull(),
+  fileSize: integer('file_size').notNull(),
+  storageRef: text('storage_ref').notNull(), // Path to immutable original
+  originalFileHash: text('original_file_hash').notNull(), // SHA-256
+  brandedStorageRef: text('branded_storage_ref'), // Path to branded/distribution copy
+  brandedFileHash: text('branded_file_hash'), // SHA-256 of branded copy
+  documentType: text('document_type').default('Document').notNull(), // 'Past Paper' | 'Study Note' | 'Syllabus' | 'Reference' | 'Book' | 'Document'
+  contentType: text('content_type').default('PDF').notNull(),
+  board: text('board'),
+  classLevel: text('class_level'),
+  subject: text('subject'),
+  chapter: text('chapter'),
+  topic: text('topic'),
+  year: integer('year'),
+  language: text('language').default('English'),
+  status: text('status').default('Published').notNull(), // 'Published' | 'Draft' | 'Archived'
+  version: integer('version').default(1).notNull(),
+  brandingStatus: text('branding_status').default('Completed').notNull(), // 'Completed' | 'Pending' | 'Failed' | 'Not Applicable'
+  brandingVersion: text('branding_version').default('2.0'),
+  brandedAt: timestamp('branded_at'),
+  downloadsCount: integer('downloads_count').default(0).notNull(),
+  associatedEntityId: text('associated_entity_id'),
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// 6.1 Document Historical Versions
+export const documentVersions = pgTable('document_versions', {
+  id: serial('id').primaryKey(),
+  documentId: text('document_id').notNull(),
+  versionNumber: integer('version_number').notNull(),
+  originalFilename: text('original_filename').notNull(),
+  storageRef: text('storage_ref').notNull(),
+  originalFileHash: text('original_file_hash').notNull(),
+  brandedStorageRef: text('branded_storage_ref'),
+  brandedFileHash: text('branded_file_hash'),
+  fileSize: integer('file_size').notNull(),
+  changeNotes: text('change_notes'),
+  createdBy: text('created_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 6.2 Real Document Download Events
+export const documentDownloadEvents = pgTable('document_download_events', {
+  id: serial('id').primaryKey(),
+  documentId: text('document_id').notNull(),
+  documentType: text('document_type').default('Document').notNull(),
+  userUid: text('user_uid'),
+  anonymousSessionId: text('anonymous_session_id'),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  version: integer('version').default(1),
+  downloadedAt: timestamp('downloaded_at').defaultNow().notNull(),
+});
+
+// 7. Notifications Table for In-App Notification Center
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  notificationId: text('notification_id').notNull().unique(),
+  recipientUid: text('recipient_uid').notNull(), // User UID or 'ALL' for broadcast
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  category: text('category').default('System').notNull(), // 'System' | 'Test' | 'Result' | 'Certificate' | 'PastPaper' | 'StudyNote' | 'Announcement'
+  isRead: boolean('is_read').default(false).notNull(),
+  actionUrl: text('action_url'),
+  senderUid: text('sender_uid'),
+  senderName: text('sender_name'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   testResults: many(testResults),
@@ -204,5 +457,24 @@ export const certificatesRelations = relations(certificates, ({ one }) => ({
   user: one(users, {
     fields: [certificates.userUid],
     references: [users.uid],
+  }),
+}));
+
+export const testsRelations = relations(tests, ({ many }) => ({
+  testQuestions: many(testQuestions),
+}));
+
+export const mcqsRelations = relations(mcqs, ({ many }) => ({
+  testQuestions: many(testQuestions),
+}));
+
+export const testQuestionsRelations = relations(testQuestions, ({ one }) => ({
+  test: one(tests, {
+    fields: [testQuestions.testId],
+    references: [tests.id],
+  }),
+  mcq: one(mcqs, {
+    fields: [testQuestions.mcqId],
+    references: [mcqs.id],
   }),
 }));

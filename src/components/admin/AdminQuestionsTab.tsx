@@ -20,6 +20,15 @@ import {
   Tag,
   Hash,
   RefreshCw,
+  Archive,
+  ChevronLeft,
+  ChevronRight,
+  SquareCheck,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  ShieldCheck,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { MCQ, Difficulty } from '../../types';
 import { BOARDS_LIST, SCHOOL_CLASSES } from '../../data/mockData';
@@ -27,6 +36,8 @@ import { SUBJECTS_LIST } from '../SubjectsView';
 import { AdminConfirmDialog } from './AdminConfirmDialog';
 import { useToast } from '../ui/Toast';
 import { checkDuplicateMCQ, DuplicateMCQCheckResult } from '../../utils/duplicateDetector';
+import { BulkMCQEntryModal } from './BulkMCQEntryModal';
+import { bulkUpdateMCQStatusApi, bulkDeleteMCQsApi } from '../../lib/api';
 
 interface AdminQuestionsTabProps {
   questions: MCQ[];
@@ -34,6 +45,9 @@ interface AdminQuestionsTabProps {
   onUpdateQuestion: (mcq: MCQ) => void;
   onDeleteQuestion: (id: string) => void;
   onExportPDF?: (filteredQuestions?: MCQ[]) => void;
+  onRefresh?: () => void;
+  canEdit?: boolean;
+  activeRoleFilter?: string;
 }
 
 export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
@@ -42,6 +56,9 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
   onUpdateQuestion,
   onDeleteQuestion,
   onExportPDF,
+  onRefresh,
+  canEdit = true,
+  activeRoleFilter,
 }) => {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -51,6 +68,19 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
   const [chapterFilter, setChapterFilter] = useState('All');
   const [difficultyFilter, setDifficultyFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Selection & Bulk Actions State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [isBulkEntryOpen, setIsBulkEntryOpen] = useState(false);
+
+  // Preview Modal State
+  const [previewMCQ, setPreviewMCQ] = useState<MCQ | null>(null);
+  const [previewSelectedOption, setPreviewSelectedOption] = useState<number | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -71,7 +101,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
   const [formTopic, setFormTopic] = useState('');
   const [formDifficulty, setFormDifficulty] = useState<Difficulty>('Medium');
   const [formTags, setFormTags] = useState('');
-  const [formStatus, setFormStatus] = useState<'Published' | 'Draft'>('Published');
+  const [formStatus, setFormStatus] = useState<'Published' | 'Draft' | 'Archived'>('Published');
   const [formLanguage, setFormLanguage] = useState<'English' | 'Urdu'>('English');
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [duplicateWarning, setDuplicateWarning] = useState<DuplicateMCQCheckResult | null>(null);
@@ -103,7 +133,6 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
 
     if (check.isDuplicate && check.existingMCQ) {
       setDuplicateWarning(check);
-      // Trigger immediate UI notification toast if not already toasted for this specific duplicate
       if (lastAlertedDuplicateIdRef.current !== check.existingMCQ.id) {
         lastAlertedDuplicateIdRef.current = check.existingMCQ.id;
         showToast({
@@ -122,6 +151,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
   // Confirmation dialog state
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteTargetTitle, setDeleteTargetTitle] = useState<string>('');
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
 
   // Extract unique chapters from questions
   const availableChapters = Array.from(
@@ -171,10 +201,16 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
     setFormTopic(q.topic || '');
     setFormDifficulty(q.difficulty || 'Medium');
     setFormTags((q.tags || []).join(', '));
-    setFormStatus(q.status || 'Published');
+    setFormStatus((q.status as any) || 'Published');
     setFormLanguage(q.language || 'English');
     setFormErrors({});
     setIsModalOpen(true);
+  };
+
+  // Open Preview Modal
+  const handleOpenPreview = (q: MCQ) => {
+    setPreviewMCQ(q);
+    setPreviewSelectedOption(null);
   };
 
   // Form Validation & Submit
@@ -189,7 +225,6 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
     if (!formOptD.trim()) errors.optD = 'Option D is required';
     if (!formExplanation.trim()) errors.explanation = 'Explanation is required for student learning';
 
-    // Immediate authoritative duplicate validation
     const duplicateCheck = checkDuplicateMCQ(
       formQuestion,
       formSubject,
@@ -237,7 +272,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
       topic: formTopic.trim() || 'Core Concept',
       difficulty: formDifficulty,
       tags: tagsArray,
-      status: formStatus,
+      status: formStatus as any,
       language: formLanguage,
       createdAt: editingQuestion?.createdAt || new Date().toISOString(),
     };
@@ -252,11 +287,12 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
     resetForm();
   };
 
-  // Quick Status Toggle (Publish / Unpublish)
+  // Quick Status Toggle
   const handleToggleStatus = (q: MCQ) => {
+    const nextStatus = q.status === 'Draft' ? 'Published' : 'Draft';
     const updated: MCQ = {
       ...q,
-      status: q.status === 'Draft' ? 'Published' : 'Draft',
+      status: nextStatus,
     };
     onUpdateQuestion(updated);
   };
@@ -278,7 +314,8 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
     const matchesStatus =
       statusFilter === 'All' ||
       (statusFilter === 'Published' && (q.status === 'Published' || !q.status)) ||
-      (statusFilter === 'Draft' && q.status === 'Draft');
+      (statusFilter === 'Draft' && q.status === 'Draft') ||
+      (statusFilter === 'Archived' && (q.status as any) === 'Archived');
 
     return (
       matchesSearch &&
@@ -290,6 +327,101 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
       matchesStatus
     );
   });
+
+  // Reset to Page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, boardFilter, classFilter, subjectFilter, chapterFilter, difficultyFilter, statusFilter, pageSize]);
+
+  // Paginated Questions
+  const totalPages = Math.max(1, Math.ceil(filteredQuestions.length / pageSize));
+  const paginatedQuestions = filteredQuestions.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
+  // Selection handlers
+  const handleToggleSelectAllOnPage = () => {
+    const newSelected = new Set(selectedIds);
+    const allPageIdsSelected = paginatedQuestions.every((q) => newSelected.has(q.id));
+
+    if (allPageIdsSelected) {
+      paginatedQuestions.forEach((q) => newSelected.delete(q.id));
+    } else {
+      paginatedQuestions.forEach((q) => newSelected.add(q.id));
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleToggleSelectRow = (id: string) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(id)) {
+      newSelected.delete(id);
+    } else {
+      newSelected.add(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleBulkStatusChange = async (newStatus: 'Published' | 'Draft' | 'Archived') => {
+    if (selectedIds.size === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await bulkUpdateMCQStatusApi(ids, newStatus);
+      if (res.success) {
+        showToast({
+          type: 'success',
+          title: 'Bulk Status Updated',
+          message: `Successfully set ${res.count} MCQs to "${newStatus}".`,
+        });
+        setSelectedIds(new Set());
+        if (onRefresh) onRefresh();
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Bulk Update Failed',
+          message: res.error || 'Failed to update MCQs.',
+        });
+      }
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Error', message: err.message });
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await bulkDeleteMCQsApi(ids);
+      if (res.success) {
+        showToast({
+          type: 'success',
+          title: 'Bulk Delete Complete',
+          message: `Deleted ${res.count} MCQs from the database.`,
+        });
+        setSelectedIds(new Set());
+        setIsBulkDeleteOpen(false);
+        if (onRefresh) onRefresh();
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Bulk Delete Failed',
+          message: res.error || 'Failed to delete MCQs.',
+        });
+      }
+    } catch (err: any) {
+      showToast({ type: 'error', title: 'Error', message: err.message });
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const isAllPageSelected =
+    paginatedQuestions.length > 0 && paginatedQuestions.every((q) => selectedIds.has(q.id));
 
   return (
     <div className="space-y-6">
@@ -305,17 +437,98 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            resetForm();
-            setIsModalOpen(true);
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add New Question</span>
-        </button>
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsBulkEntryOpen(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition-colors cursor-pointer"
+              title="Enter multiple MCQs in one batch"
+            >
+              <Layers className="w-4 h-4 text-blue-600" />
+              <span>Bulk Rapid Entry</span>
+            </button>
+
+            <button
+              onClick={() => {
+                resetForm();
+                setIsModalOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Single Question</span>
+            </button>
+          </div>
+        )}
       </div>
+
+      {!canEdit && (
+        <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-800 dark:text-amber-200">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <span className="font-bold">MCQ Editor Tools Disabled:</span>
+              <span className="ml-1 text-amber-700 dark:text-amber-300">
+                You are viewing the question catalog under the <strong>{activeRoleFilter || 'Moderator'}</strong> filter. MCQ creation, editing, and deletion controls are hidden.
+              </span>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-full bg-amber-200/60 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-bold text-[10px] shrink-0 self-start sm:self-auto">
+            Read-Only Mode
+          </span>
+        </div>
+      )}
+
+      {/* Bulk Action Floating Toolbar */}
+      {selectedIds.size > 0 && canEdit && (
+        <div className="bg-slate-900 dark:bg-slate-800 text-white p-3.5 px-5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-slideDown">
+          <div className="flex items-center gap-2.5">
+            <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+              {selectedIds.size}
+            </span>
+            <span className="text-xs font-bold">
+              {selectedIds.size === 1 ? '1 Question Selected' : `${selectedIds.size} Questions Selected`}
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <button
+              disabled={isBulkProcessing}
+              onClick={() => handleBulkStatusChange('Published')}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer disabled:opacity-50 transition-colors"
+            >
+              Publish Selected
+            </button>
+            <button
+              disabled={isBulkProcessing}
+              onClick={() => handleBulkStatusChange('Draft')}
+              className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer disabled:opacity-50 transition-colors"
+            >
+              Draft Selected
+            </button>
+            <button
+              disabled={isBulkProcessing}
+              onClick={() => handleBulkStatusChange('Archived')}
+              className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white font-bold cursor-pointer disabled:opacity-50 transition-colors flex items-center gap-1"
+            >
+              <Archive className="w-3.5 h-3.5" /> Archive
+            </button>
+            <button
+              disabled={isBulkProcessing}
+              onClick={() => setIsBulkDeleteOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold cursor-pointer disabled:opacity-50 transition-colors flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-2.5 py-1.5 rounded-xl text-slate-400 hover:text-white transition-colors cursor-pointer text-xs"
+            >
+              Deselect All
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search and Multi-Criteria Filter Bar */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
@@ -332,7 +545,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs cursor-pointer"
             >
               Clear
             </button>
@@ -450,25 +663,84 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
               <option value="All">All Statuses</option>
               <option value="Published">Published</option>
               <option value="Draft">Draft</option>
+              <option value="Archived">Archived</option>
             </select>
           </div>
         </div>
       </div>
 
+      {/* Select All on Page & Pagination Size Control Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400 px-1">
+        <div className="flex items-center gap-3">
+          {canEdit && paginatedQuestions.length > 0 && (
+            <button
+              onClick={handleToggleSelectAllOnPage}
+              className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+            >
+              {isAllPageSelected ? (
+                <CheckSquare className="w-4 h-4 text-blue-600" />
+              ) : (
+                <Square className="w-4 h-4 text-slate-400" />
+              )}
+              <span>Select Page ({paginatedQuestions.length})</span>
+            </button>
+          )}
+
+          <span>
+            Showing {(currentPage - 1) * pageSize + 1}–
+            {Math.min(currentPage * pageSize, filteredQuestions.length)} of {filteredQuestions.length}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span>Rows per page:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="text-xs py-1 px-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300"
+          >
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </div>
+      </div>
+
       {/* Questions List */}
       <div className="space-y-3">
-        {filteredQuestions.map((q, idx) => {
-          const isPublished = q.status !== 'Draft';
+        {paginatedQuestions.map((q, idx) => {
+          const globalIdx = (currentPage - 1) * pageSize + idx;
+          const isPublished = q.status !== 'Draft' && (q.status as any) !== 'Archived';
+          const isArchived = (q.status as any) === 'Archived';
+          const isSelected = selectedIds.has(q.id);
+
           return (
             <div
               key={q.id}
               className={`bg-white dark:bg-slate-900 border rounded-2xl p-4 sm:p-5 shadow-2xs transition-all ${
-                isPublished
+                isSelected
+                  ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/10'
+                  : isArchived
+                  ? 'border-slate-200 dark:border-slate-800 opacity-70 bg-slate-50/40 dark:bg-slate-800/20'
+                  : isPublished
                   ? 'border-slate-200 dark:border-slate-800 hover:border-blue-400/50 dark:hover:border-blue-500/50'
                   : 'border-amber-200 dark:border-amber-900/50 bg-amber-50/20 dark:bg-amber-950/10'
               }`}
             >
               <div className="flex items-start justify-between gap-4">
+                {canEdit && (
+                  <button
+                    onClick={() => handleToggleSelectRow(q.id)}
+                    className="mt-1 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer shrink-0"
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="w-4 h-4 text-blue-600" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                  </button>
+                )}
+
                 <div className="flex-1 min-w-0">
                   {/* Badges line */}
                   <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold mb-2">
@@ -501,23 +773,39 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                     >
                       {q.difficulty}
                     </span>
-                    <button
-                      onClick={() => handleToggleStatus(q)}
-                      className={`px-2 py-0.5 rounded-full font-bold cursor-pointer transition-colors ${
-                        isPublished
-                          ? 'bg-emerald-500 text-white'
-                          : 'bg-amber-500 text-white'
-                      }`}
-                      title="Click to toggle publish/draft"
-                    >
-                      {isPublished ? 'Published' : 'Draft'}
-                    </button>
+                    {canEdit ? (
+                      <button
+                        onClick={() => handleToggleStatus(q)}
+                        className={`px-2 py-0.5 rounded-full font-bold cursor-pointer transition-colors ${
+                          isArchived
+                            ? 'bg-slate-600 text-white'
+                            : isPublished
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-amber-500 text-white'
+                        }`}
+                        title="Click to toggle publish/draft"
+                      >
+                        {isArchived ? 'Archived' : isPublished ? 'Published' : 'Draft'}
+                      </button>
+                    ) : (
+                      <span
+                        className={`px-2 py-0.5 rounded-full font-bold ${
+                          isArchived
+                            ? 'bg-slate-200 text-slate-700'
+                            : isPublished
+                            ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                        }`}
+                      >
+                        {isArchived ? 'Archived' : isPublished ? 'Published' : 'Draft'}
+                      </span>
+                    )}
                   </div>
 
                   {/* Question Text */}
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white leading-snug">
                     <span className="text-slate-400 dark:text-slate-600 mr-1.5">
-                      #{idx + 1}.
+                      #{globalIdx + 1}.
                     </span>
                     {q.question}
                   </h3>
@@ -526,7 +814,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3 text-xs">
                     {q.options.map((opt, oIdx) => {
                       const isCorrect = oIdx === q.correctAnswer;
-                      const optLabel = String.fromCharCode(65 + oIdx); // A, B, C, D
+                      const optLabel = String.fromCharCode(65 + oIdx);
                       return (
                         <div
                           key={oIdx}
@@ -577,25 +865,37 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   </div>
                 </div>
 
-                {/* Edit & Delete Actions */}
+                {/* Edit, Preview & Delete Actions */}
                 <div className="flex flex-col gap-1.5 shrink-0">
                   <button
-                    onClick={() => handleOpenEdit(q)}
-                    className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
-                    title="Edit Question"
+                    onClick={() => handleOpenPreview(q)}
+                    className="p-2 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Live Test Preview"
                   >
-                    <Edit className="w-4 h-4" />
+                    <Eye className="w-4 h-4" />
                   </button>
-                  <button
-                    onClick={() => {
-                      setDeleteTargetId(q.id);
-                      setDeleteTargetTitle(q.question);
-                    }}
-                    className="p-2 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
-                    title="Delete Question"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+
+                  {canEdit && (
+                    <>
+                      <button
+                        onClick={() => handleOpenEdit(q)}
+                        className="p-2 rounded-xl text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
+                        title="Edit Question"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeleteTargetId(q.id);
+                          setDeleteTargetTitle(q.question);
+                        }}
+                        className="p-2 rounded-xl text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
+                        title="Delete Question"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -629,6 +929,51 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
         )}
       </div>
 
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 pt-4 border-t border-slate-200 dark:border-slate-800">
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <ChevronLeft className="w-4 h-4" /> Previous
+          </button>
+
+          <div className="flex items-center gap-1 text-xs">
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              let pageNum = i + 1;
+              if (totalPages > 5 && currentPage > 3) {
+                pageNum = currentPage - 2 + i;
+                if (pageNum > totalPages) pageNum = totalPages - (4 - i);
+              }
+              return (
+                <button
+                  key={pageNum}
+                  onClick={() => setCurrentPage(pageNum)}
+                  className={`w-7 h-7 rounded-lg font-bold text-xs flex items-center justify-center transition-colors cursor-pointer ${
+                    currentPage === pageNum
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              );
+            })}
+            {totalPages > 5 && <span className="text-slate-400 px-1">...</span>}
+          </div>
+
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Next <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Add / Edit Question Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
@@ -647,7 +992,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
               </h3>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -715,10 +1060,6 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                             )}
                           </div>
                         </div>
-                        <p className="text-[10px] text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
-                          <XCircle className="w-3.5 h-3.5 shrink-0" />
-                          Submission blocked to prevent database duplicates. Modify question statement or scope.
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -726,185 +1067,104 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
               </div>
 
               {/* 4 Options */}
-              <div className="space-y-2">
-                <label className="block font-bold text-slate-700 dark:text-slate-300">
-                  Four Answer Options & Mark Correct Option *
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Option A */}
-                  <div
-                    className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                      formCorrectAnswer === 0
-                        ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-400'
-                        : 'border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Option A *</span>
                     <input
                       type="radio"
-                      name="correctOption"
-                      id="optA"
+                      name="correctAnswer"
                       checked={formCorrectAnswer === 0}
                       onChange={() => setFormCorrectAnswer(0)}
-                      className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      className="text-blue-600"
                     />
-                    <label htmlFor="optA" className="font-bold text-slate-700 dark:text-slate-300">
-                      A:
-                    </label>
-                    <input
-                      type="text"
-                      value={formOptA}
-                      onChange={(e) => setFormOptA(e.target.value)}
-                      placeholder="Option A text..."
-                      className="w-full bg-transparent border-none text-slate-900 dark:text-white focus:outline-hidden"
-                    />
-                  </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={formOptA}
+                    onChange={(e) => setFormOptA(e.target.value)}
+                    placeholder="Value / Statement for Option A"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
 
-                  {/* Option B */}
-                  <div
-                    className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                      formCorrectAnswer === 1
-                        ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-400'
-                        : 'border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Option B *</span>
                     <input
                       type="radio"
-                      name="correctOption"
-                      id="optB"
+                      name="correctAnswer"
                       checked={formCorrectAnswer === 1}
                       onChange={() => setFormCorrectAnswer(1)}
-                      className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      className="text-blue-600"
                     />
-                    <label htmlFor="optB" className="font-bold text-slate-700 dark:text-slate-300">
-                      B:
-                    </label>
-                    <input
-                      type="text"
-                      value={formOptB}
-                      onChange={(e) => setFormOptB(e.target.value)}
-                      placeholder="Option B text..."
-                      className="w-full bg-transparent border-none text-slate-900 dark:text-white focus:outline-hidden"
-                    />
-                  </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={formOptB}
+                    onChange={(e) => setFormOptB(e.target.value)}
+                    placeholder="Value / Statement for Option B"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
 
-                  {/* Option C */}
-                  <div
-                    className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                      formCorrectAnswer === 2
-                        ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-400'
-                        : 'border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Option C *</span>
                     <input
                       type="radio"
-                      name="correctOption"
-                      id="optC"
+                      name="correctAnswer"
                       checked={formCorrectAnswer === 2}
                       onChange={() => setFormCorrectAnswer(2)}
-                      className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      className="text-blue-600"
                     />
-                    <label htmlFor="optC" className="font-bold text-slate-700 dark:text-slate-300">
-                      C:
-                    </label>
-                    <input
-                      type="text"
-                      value={formOptC}
-                      onChange={(e) => setFormOptC(e.target.value)}
-                      placeholder="Option C text..."
-                      className="w-full bg-transparent border-none text-slate-900 dark:text-white focus:outline-hidden"
-                    />
-                  </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={formOptC}
+                    onChange={(e) => setFormOptC(e.target.value)}
+                    placeholder="Value / Statement for Option C"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
 
-                  {/* Option D */}
-                  <div
-                    className={`p-2.5 rounded-xl border flex items-center gap-2 ${
-                      formCorrectAnswer === 3
-                        ? 'bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-400'
-                        : 'border-slate-200 dark:border-slate-700'
-                    }`}
-                  >
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Option D *</span>
                     <input
                       type="radio"
-                      name="correctOption"
-                      id="optD"
+                      name="correctAnswer"
                       checked={formCorrectAnswer === 3}
                       onChange={() => setFormCorrectAnswer(3)}
-                      className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      className="text-blue-600"
                     />
-                    <label htmlFor="optD" className="font-bold text-slate-700 dark:text-slate-300">
-                      D:
-                    </label>
-                    <input
-                      type="text"
-                      value={formOptD}
-                      onChange={(e) => setFormOptD(e.target.value)}
-                      placeholder="Option D text..."
-                      className="w-full bg-transparent border-none text-slate-900 dark:text-white focus:outline-hidden"
-                    />
-                  </div>
+                  </label>
+                  <input
+                    type="text"
+                    value={formOptD}
+                    onChange={(e) => setFormOptD(e.target.value)}
+                    placeholder="Value / Statement for Option D"
+                    className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
                 </div>
               </div>
 
               {/* Explanation */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Textbook Explanation & Solution Step *
+                  Detailed Explanation / Solution *
                 </label>
                 <textarea
                   rows={2}
                   value={formExplanation}
                   onChange={(e) => setFormExplanation(e.target.value)}
-                  placeholder="Explain why the correct answer is true, referencing relevant textbook chapters..."
-                  className={`w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden ${
-                    formErrors.explanation
-                      ? 'border-red-500'
-                      : 'border-slate-200 dark:border-slate-700'
-                  }`}
+                  placeholder="Explain why the correct option is right with formulas, textbook context, or reasoning..."
+                  className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                 />
               </div>
 
-              {/* Academic Metadata Grid (Subject, Class, Board, Chapter, Topic, Difficulty, Tags, Status) */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {/* Subject */}
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Subject
-                  </label>
-                  <select
-                    value={formSubject}
-                    onChange={(e) => setFormSubject(e.target.value)}
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  >
-                    {SUBJECTS_LIST.map((s) => (
-                      <option key={s.name} value={s.name}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Class */}
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Class Level
-                  </label>
-                  <select
-                    value={formClass}
-                    onChange={(e) => setFormClass(e.target.value)}
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  >
-                    {SCHOOL_CLASSES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                    <option value="MDCAT Medical">MDCAT Medical</option>
-                    <option value="ECAT Engineering">ECAT Engineering</option>
-                    <option value="CSS Competitive">CSS Competitive</option>
-                  </select>
-                </div>
-
-                {/* Board */}
+              {/* Academic Hierarchy Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Board
@@ -922,15 +1182,67 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   </select>
                 </div>
 
-                {/* Difficulty */}
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Class / Level
+                  </label>
+                  <select
+                    value={formClass}
+                    onChange={(e) => setFormClass(e.target.value)}
+                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  >
+                    {SCHOOL_CLASSES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                    <option value="MDCAT Medical">MDCAT Medical</option>
+                    <option value="ECAT Engineering">ECAT Engineering</option>
+                    <option value="CSS Competitive">CSS Competitive</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Subject
+                  </label>
+                  <select
+                    value={formSubject}
+                    onChange={(e) => setFormSubject(e.target.value)}
+                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  >
+                    {SUBJECTS_LIST.map((s) => (
+                      <option key={s.name} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Chapter, Topic, Difficulty & Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Chapter
+                  </label>
+                  <input
+                    type="text"
+                    value={formChapter}
+                    onChange={(e) => setFormChapter(e.target.value)}
+                    placeholder="e.g. Chapter 14 - Optics"
+                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Difficulty
                   </label>
                   <select
                     value={formDifficulty}
-                    onChange={(e) => setFormDifficulty(e.target.value as Difficulty)}
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    onChange={(e) => setFormDifficulty(e.target.value as any)}
+                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold"
                   >
                     <option value="Easy">Easy</option>
                     <option value="Medium">Medium</option>
@@ -938,38 +1250,9 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   </select>
                 </div>
 
-                {/* Chapter */}
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Chapter Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formChapter}
-                    onChange={(e) => setFormChapter(e.target.value)}
-                    placeholder="e.g. Geometrical Optics"
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                {/* Topic */}
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Topic
-                  </label>
-                  <input
-                    type="text"
-                    value={formTopic}
-                    onChange={(e) => setFormTopic(e.target.value)}
-                    placeholder="e.g. Refraction of Light"
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                {/* Status */}
-                <div>
-                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Publish Status
+                    Status
                   </label>
                   <select
                     value={formStatus}
@@ -978,21 +1261,22 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   >
                     <option value="Published">Published</option>
                     <option value="Draft">Draft</option>
+                    <option value="Archived">Archived</option>
                   </select>
                 </div>
 
-                {/* Tags */}
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Tags (comma separated)
+                    Language
                   </label>
-                  <input
-                    type="text"
-                    value={formTags}
-                    onChange={(e) => setFormTags(e.target.value)}
-                    placeholder="optics, physics, matric"
-                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  />
+                  <select
+                    value={formLanguage}
+                    onChange={(e) => setFormLanguage(e.target.value as any)}
+                    className="w-full p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-bold"
+                  >
+                    <option value="English">English</option>
+                    <option value="Urdu">Urdu</option>
+                  </select>
                 </div>
               </div>
 
@@ -1008,11 +1292,6 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                 <button
                   type="submit"
                   disabled={Boolean(duplicateWarning?.isDuplicate)}
-                  title={
-                    duplicateWarning?.isDuplicate
-                      ? 'Submission blocked: duplicate question content detected'
-                      : undefined
-                  }
                   className={`px-5 py-2 rounded-xl font-bold shadow-xs transition-colors flex items-center gap-2 ${
                     duplicateWarning?.isDuplicate
                       ? 'bg-slate-400 dark:bg-slate-700 text-slate-200 dark:text-slate-400 cursor-not-allowed opacity-80'
@@ -1035,6 +1314,157 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
           </div>
         </div>
       )}
+
+      {/* Bulk Rapid Entry Modal */}
+      <BulkMCQEntryModal
+        isOpen={isBulkEntryOpen}
+        onClose={() => setIsBulkEntryOpen(false)}
+        onSuccess={(count) => {
+          if (onRefresh) onRefresh();
+        }}
+        existingMCQs={questions}
+      />
+
+      {/* Live Student MCQ Preview Modal */}
+      {previewMCQ && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full shadow-2xl p-6 relative my-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold">
+                  <Eye className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Student Test-Mode Preview
+                  </h3>
+                  <p className="text-xs text-slate-500">Live test renderer simulation</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewMCQ(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4">
+              {/* Question Badge Header */}
+              <div className="flex flex-wrap gap-2 text-[10px] font-bold">
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                  {previewMCQ.subject}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                  {previewMCQ.classLevel}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+                  {previewMCQ.chapter}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400">
+                  {previewMCQ.difficulty}
+                </span>
+              </div>
+
+              {/* Question */}
+              <p className="text-base font-bold text-slate-900 dark:text-white leading-relaxed">
+                {previewMCQ.question}
+              </p>
+
+              {/* Interactive Options */}
+              <div className="space-y-2">
+                {previewMCQ.options.map((opt, i) => {
+                  const isSelected = previewSelectedOption === i;
+                  const isCorrect = i === previewMCQ.correctAnswer;
+                  const optLabel = String.fromCharCode(65 + i);
+
+                  let optionClass =
+                    'border-slate-200 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500 bg-slate-50/50 dark:bg-slate-800/40';
+
+                  if (previewSelectedOption !== null) {
+                    if (isSelected && isCorrect) {
+                      optionClass =
+                        'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 font-semibold';
+                    } else if (isSelected && !isCorrect) {
+                      optionClass =
+                        'border-red-500 bg-red-50/80 dark:bg-red-950/40 text-red-900 dark:text-red-200';
+                    } else if (isCorrect) {
+                      optionClass =
+                        'border-emerald-500/60 bg-emerald-50/40 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-300';
+                    }
+                  }
+
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setPreviewSelectedOption(i)}
+                      className={`w-full text-left p-3.5 rounded-2xl border text-xs flex items-center gap-3 transition-all cursor-pointer ${optionClass}`}
+                    >
+                      <span
+                        className={`w-6 h-6 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 ${
+                          isSelected && isCorrect
+                            ? 'bg-emerald-600 text-white'
+                            : isSelected && !isCorrect
+                            ? 'bg-red-600 text-white'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {optLabel}
+                      </span>
+                      <span className="flex-1 font-medium">{opt}</span>
+                      {previewSelectedOption !== null && isCorrect && (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      )}
+                      {previewSelectedOption !== null && isSelected && !isCorrect && (
+                        <XCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Explanation */}
+              {previewSelectedOption !== null && (
+                <div className="p-4 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/40 space-y-1.5 animate-fadeIn text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-blue-900 dark:text-blue-300">
+                    <Sparkles className="w-4 h-4 text-blue-600" /> Explanation:
+                  </div>
+                  <p className="text-slate-700 dark:text-slate-300 leading-relaxed">
+                    {previewMCQ.explanation}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <button
+                onClick={() => setPreviewSelectedOption(null)}
+                className="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+              >
+                Reset Answer
+              </button>
+              <button
+                onClick={() => setPreviewMCQ(null)}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer"
+              >
+                Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <AdminConfirmDialog
+        isOpen={isBulkDeleteOpen}
+        title={`Delete ${selectedIds.size} Questions?`}
+        message={`Are you sure you want to delete ${selectedIds.size} selected questions? This cannot be undone.`}
+        confirmLabel={`Delete ${selectedIds.size} Questions`}
+        isDestructive={true}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setIsBulkDeleteOpen(false)}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AdminConfirmDialog

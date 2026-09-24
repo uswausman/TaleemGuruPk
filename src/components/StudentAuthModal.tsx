@@ -64,6 +64,15 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isUnauthorizedDomain, setIsUnauthorizedDomain] = useState(false);
   const [copiedDomain, setCopiedDomain] = useState(false);
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldown]);
 
   const avatarOptions = ['👨‍🎓', '👩‍🎓', '🧑‍🔬', '👩‍⚕️', '👨‍💻', '👩‍🏫', '🚀', '🌟'];
 
@@ -120,6 +129,11 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
     e.preventDefault();
     if (isLoading) return;
 
+    if (resetCooldown > 0) {
+      setErrorMsg(`Please wait ${resetCooldown}s before requesting another reset email.`);
+      return;
+    }
+
     const cleanEmail = email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!cleanEmail || !emailRegex.test(cleanEmail)) {
@@ -133,9 +147,17 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
 
     try {
       await resetPasswordWithEmail(cleanEmail);
+      setResetCooldown(60);
       setSuccessMsg(`Password reset instructions sent to ${cleanEmail}. Please check your inbox and spam folders.`);
     } catch (err: any) {
-      console.error('Password reset error:', err);
+      console.warn('Password reset notice:', err?.message || err);
+      const isRateLimited =
+        String(err?.message || '').toLowerCase().includes('rate limit') ||
+        String(err?.message || '').toLowerCase().includes('once every') ||
+        err?.status === 429;
+      if (isRateLimited) {
+        setResetCooldown(60);
+      }
       setErrorMsg(formatAuthErrorMessage(err));
     } finally {
       setIsLoading(false);
@@ -334,22 +356,31 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         {/* Header */}
         <div className="p-6 bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white flex items-center justify-between border-b border-blue-800/40">
-          <div>
-            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cyan-400">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Taleem Guru Official Portal</span>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden shrink-0">
+              <img 
+                src="/assets/taleemguru-logo-original.png" 
+                alt="Taleem Guru Official Logo" 
+                className="w-8 h-8 object-contain" 
+              />
             </div>
-            <h2 className="text-xl font-black mt-1">
-              {mode === 'login'
-                ? 'Candidate Sign In'
-                : mode === 'register'
-                ? 'Create Student Account'
-                : 'Reset Password'}
-            </h2>
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cyan-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Taleem Guru Official Portal</span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black mt-0.5">
+                {mode === 'login'
+                  ? 'Candidate Sign In'
+                  : mode === 'register'
+                  ? 'Create Student Account'
+                  : 'Reset Password'}
+              </h2>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+            className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer self-start"
             aria-label="Close dialog"
           >
             <X className="w-5 h-5" />
@@ -467,11 +498,17 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
 
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-400 text-white font-extrabold rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoading || resetCooldown > 0}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-400 dark:disabled:bg-slate-700 text-white font-extrabold rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
             >
               <KeyRound className="w-4 h-4" />
-              <span>{isLoading ? 'Sending Reset Link...' : 'Send Password Reset Link'}</span>
+              <span>
+                {isLoading
+                  ? 'Sending Reset Link...'
+                  : resetCooldown > 0
+                  ? `Resend available in ${resetCooldown}s`
+                  : 'Send Password Reset Link'}
+              </span>
             </button>
 
             <div className="text-center pt-2">

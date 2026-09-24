@@ -54,18 +54,25 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingQuiz, setEditingQuiz] = useState<TestConfig | null>(null);
 
-  // Form State
+  // Form Basic Info State
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formSubject, setFormSubject] = useState('Physics');
   const [formClassLevel, setFormClassLevel] = useState('Class 10 (Matric Pt 2)');
   const [formBoard, setFormBoard] = useState('BISE Lahore');
-  const [formTestType, setFormTestType] = useState<TestType>('Chapter Test');
+  const [formTestType, setFormTestType] = useState('Chapter Test');
   const [formCategory, setFormCategory] = useState('Classroom');
+
+  // Assessment Configuration State
   const [formDurationMinutes, setFormDurationMinutes] = useState<number>(15);
   const [formPassPercentage, setFormPassPercentage] = useState<number>(50);
   const [formNegativeMarking, setFormNegativeMarking] = useState<boolean>(false);
   const [formNegativeValue, setFormNegativeValue] = useState<number>(0.25);
+  const [formRandomizeQuestions, setFormRandomizeQuestions] = useState<boolean>(false);
+  const [formRandomizeOptions, setFormRandomizeOptions] = useState<boolean>(false);
+  const [formAllowRetake, setFormAllowRetake] = useState<boolean>(true);
+  const [formMaxAttempts, setFormMaxAttempts] = useState<number>(0);
+  const [formReviewPolicy, setFormReviewPolicy] = useState<'immediate' | 'after_submission' | 'none'>('immediate');
   const [formStatus, setFormStatus] = useState<'Published' | 'Draft'>('Published');
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [questionSearch, setQuestionSearch] = useState('');
@@ -134,6 +141,11 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
     setFormPassPercentage(50);
     setFormNegativeMarking(false);
     setFormNegativeValue(0.25);
+    setFormRandomizeQuestions(false);
+    setFormRandomizeOptions(false);
+    setFormAllowRetake(true);
+    setFormMaxAttempts(0);
+    setFormReviewPolicy('immediate');
     setFormStatus('Published');
     setSelectedQuestionIds([]);
     setQuestionSearch('');
@@ -155,6 +167,11 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
     setFormPassPercentage(quiz.passPercentage || 50);
     setFormNegativeMarking(Boolean(quiz.negativeMarking));
     setFormNegativeValue(quiz.negativeMarkValue || 0.25);
+    setFormRandomizeQuestions(Boolean(quiz.randomizeQuestions));
+    setFormRandomizeOptions(Boolean(quiz.randomizeOptions));
+    setFormAllowRetake(quiz.allowRetake !== false);
+    setFormMaxAttempts(quiz.maxAttempts || 0);
+    setFormReviewPolicy(quiz.reviewPolicy || 'immediate');
     setFormStatus(quiz.status || 'Published');
     setSelectedQuestionIds((quiz.questions || []).map((q) => q.id));
     setFormErrors({});
@@ -228,7 +245,7 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
       description:
         formDescription.trim() ||
         `${formSubject} assessment for ${formClassLevel} (${formBoard})`,
-      testType: formTestType,
+      testType: formTestType as TestType,
       category: formCategory,
       subject: formSubject,
       classLevel: formClassLevel,
@@ -239,6 +256,11 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
       negativeMarking: formNegativeMarking,
       negativeMarkValue: formNegativeMarking ? formNegativeValue : undefined,
       passPercentage: formPassPercentage,
+      randomizeQuestions: formRandomizeQuestions,
+      randomizeOptions: formRandomizeOptions,
+      allowRetake: formAllowRetake,
+      maxAttempts: formMaxAttempts,
+      reviewPolicy: formReviewPolicy,
       questions: attachedQuestions,
       status: formStatus,
       createdAt: editingQuiz?.createdAt || new Date().toISOString(),
@@ -246,8 +268,18 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
 
     if (editingQuiz) {
       onUpdateQuiz(quizPayload);
+      showToast({
+        type: 'success',
+        title: 'Quiz Updated',
+        message: `"${quizPayload.title}" has been updated successfully.`,
+      });
     } else {
       onCreateQuiz(quizPayload);
+      showToast({
+        type: 'success',
+        title: 'Quiz Created',
+        message: `"${quizPayload.title}" has been created and added to assessments.`,
+      });
     }
 
     setIsModalOpen(false);
@@ -762,6 +794,80 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Advanced Examination & Security Rules */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                    Advanced Exam Delivery & Integrity Controls
+                  </span>
+                  <span className="text-[10px] text-indigo-700 dark:text-indigo-300 font-semibold">
+                    Server-Authoritative Evaluation
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 text-[11px]">
+                      Shuffle Questions
+                    </label>
+                    <label className="inline-flex items-center gap-2 cursor-pointer h-8">
+                      <input
+                        type="checkbox"
+                        checked={formRandomizeQuestions}
+                        onChange={(e) => setFormRandomizeQuestions(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-slate-700 dark:text-slate-300">Randomize Order</span>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 text-[11px]">
+                      Shuffle Options
+                    </label>
+                    <label className="inline-flex items-center gap-2 cursor-pointer h-8">
+                      <input
+                        type="checkbox"
+                        checked={formRandomizeOptions}
+                        onChange={(e) => setFormRandomizeOptions(e.target.checked)}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-slate-700 dark:text-slate-300">Randomize A/B/C/D</span>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 text-[11px]">
+                      Review Policy
+                    </label>
+                    <select
+                      value={formReviewPolicy}
+                      onChange={(e) => setFormReviewPolicy(e.target.value as any)}
+                      className="w-full p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs"
+                    >
+                      <option value="immediate">Show Answers on Submission</option>
+                      <option value="on_submission">Summary Only</option>
+                      <option value="never">Hide Explanations</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 text-[11px]">
+                      Retake Limit (0 = unlimited)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      value={formMaxAttempts}
+                      onChange={(e) => setFormMaxAttempts(Number(e.target.value))}
+                      className="w-full p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs"
+                    />
+                  </div>
                 </div>
               </div>
 

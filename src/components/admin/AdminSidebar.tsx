@@ -1,4 +1,5 @@
 import React from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   LayoutDashboard,
   Users,
@@ -7,6 +8,7 @@ import {
   BookOpen,
   Layers,
   FileQuestion,
+  Database,
   Clock,
   FileText,
   Award,
@@ -19,7 +21,11 @@ import {
   ShieldCheck,
   AlertTriangle,
   X,
+  Filter,
+  Files,
 } from 'lucide-react';
+import { StaffRole } from '../../types';
+import { isSectionAllowedForRoles } from '../../utils/staffRolePermissions';
 
 export type AdminSection =
   | 'dashboard'
@@ -30,9 +36,11 @@ export type AdminSection =
   | 'subjects'
   | 'chapters'
   | 'questions'
+  | 'question-bank'
   | 'quizzes'
   | 'notes'
   | 'past-papers'
+  | 'documents'
   | 'results'
   | 'leaderboard'
   | 'certificates'
@@ -61,6 +69,10 @@ interface AdminSidebarProps {
   };
   isMobileOpen: boolean;
   onCloseMobile: () => void;
+  selectedRoles?: StaffRole[];
+  activeRoleFilter?: StaffRole | 'All';
+  onRoleFilterChange?: (role: StaffRole | 'All') => void;
+  allowedTabs?: AdminSection[];
 }
 
 export const AdminSidebar: React.FC<AdminSidebarProps> = ({
@@ -69,8 +81,12 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   counts,
   isMobileOpen,
   onCloseMobile,
+  selectedRoles,
+  activeRoleFilter = 'All',
+  onRoleFilterChange,
+  allowedTabs,
 }) => {
-  const navGroups: {
+  const allNavGroups: {
     groupTitle: string;
     items: {
       id: AdminSection;
@@ -124,8 +140,14 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       items: [
         {
           id: 'questions',
-          label: 'Questions',
+          label: 'Curate MCQs',
           icon: <FileQuestion className="w-4 h-4" />,
+          count: counts.questions,
+        },
+        {
+          id: 'question-bank',
+          label: 'Manage Question Bank',
+          icon: <Database className="w-4 h-4" />,
           count: counts.questions,
         },
         {
@@ -145,6 +167,12 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           label: 'Past Papers',
           icon: <BookOpen className="w-4 h-4" />,
           count: counts.pastPapers,
+        },
+        {
+          id: 'documents',
+          label: 'Document Library',
+          icon: <Files className="w-4 h-4" />,
+          badge: 'Branded',
         },
       ],
     },
@@ -209,24 +237,50 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     },
   ];
 
+  // Determine effective roles based on active filter or assigned user roles
+  const effectiveRoles: StaffRole[] =
+    activeRoleFilter && activeRoleFilter !== 'All'
+      ? [activeRoleFilter]
+      : selectedRoles && selectedRoles.length > 0
+      ? selectedRoles
+      : [];
+
+  // Dynamically filter navigation groups based on allowed tabs or selected user roles
+  const navGroups = allNavGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        if (allowedTabs && allowedTabs.length > 0) {
+          return allowedTabs.includes(item.id);
+        }
+        if (effectiveRoles.length === 0) return true;
+        return isSectionAllowedForRoles(item.id, effectiveRoles);
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+
   const sidebarContent = (
     <div className="h-full flex flex-col justify-between py-5 px-3 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 select-none">
       <div className="space-y-6 overflow-y-auto pr-1">
         {/* Logo / Admin Header */}
-        <div className="px-3 pb-3 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
+        <div className="px-2 pb-3 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center shadow-sm overflow-hidden">
-              <img src="/favicon.svg" alt="Taleem Guru Logo" className="w-6 h-6 object-contain" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-md shadow-blue-500/20 overflow-hidden shrink-0">
+              <img 
+                src="/assets/taleemguru-logo-original.png" 
+                alt="Taleem Guru Official Logo" 
+                className="w-7 h-7 object-contain" 
+              />
             </div>
             <div>
               <div className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
-                TALEEM GURU
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                TALEEM <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-cyan-500 dark:from-blue-400 dark:to-cyan-400">GURU</span>
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
                   ADMIN
                 </span>
               </div>
-              <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                National Exam Portal
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-wide">
+                Learn. Practice. Test. Improve.
               </div>
             </div>
           </div>
@@ -240,6 +294,30 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           )}
         </div>
 
+        {activeRoleFilter && activeRoleFilter !== 'All' && (
+          <div className="mx-1 px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 flex items-center justify-between text-[10px]">
+            <span className="font-bold text-blue-700 dark:text-blue-300 flex items-center gap-1">
+              <Filter className="w-3 h-3" /> Filter: {activeRoleFilter}
+            </span>
+            <div className="flex items-center gap-1.5">
+              {activeRoleFilter === 'Moderator' && (
+                <span className="text-[9px] font-semibold text-amber-600 dark:text-amber-400">
+                  MCQ Editor Hidden
+                </span>
+              )}
+              {onRoleFilterChange && (
+                <button
+                  onClick={() => onRoleFilterChange('All')}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1 p-0.5 rounded cursor-pointer"
+                  title="Reset filter to All"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Navigation Groups */}
         <div className="space-y-5">
           {navGroups.map((group) => (
@@ -248,61 +326,71 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 {group.groupTitle}
               </div>
               <div className="space-y-0.5">
-                {group.items.map((item) => {
-                  const isActive = activeTab === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        onSelectTab(item.id);
-                        if (isMobileOpen) onCloseMobile();
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer group ${
-                        isActive
-                          ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20 font-bold'
-                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className={`${
+                <AnimatePresence initial={false}>
+                  {group.items.map((item) => {
+                    const isActive = activeTab === item.id;
+                    return (
+                      <motion.div
+                        key={item.id}
+                        layout
+                        initial={{ opacity: 0, x: -6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -6, height: 0, overflow: 'hidden' }}
+                        transition={{ duration: 0.18, ease: 'easeOut' }}
+                      >
+                        <button
+                          onClick={() => {
+                            onSelectTab(item.id);
+                            if (isMobileOpen) onCloseMobile();
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer group ${
                             isActive
-                              ? 'text-white'
-                              : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200'
+                              ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/20 font-bold'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60'
                           }`}
                         >
-                          {item.icon}
-                        </span>
-                        <span>{item.label}</span>
-                      </div>
+                          <div className="flex items-center gap-2.5">
+                            <span
+                              className={`${
+                                isActive
+                                  ? 'text-white'
+                                  : 'text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200'
+                              }`}
+                            >
+                              {item.icon}
+                            </span>
+                            <span>{item.label}</span>
+                          </div>
 
-                      <div className="flex items-center gap-1">
-                        {item.count !== undefined && (
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              isActive
-                                ? 'bg-white/20 text-white'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
-                            }`}
-                          >
-                            {item.count}
-                          </span>
-                        )}
-                        {item.badge && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              isActive
-                                ? 'bg-white/20 text-white'
-                                : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400'
-                            }`}
-                          >
-                            {item.badge}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                          <div className="flex items-center gap-1">
+                            {item.count !== undefined && (
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isActive
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 group-hover:bg-slate-200 dark:group-hover:bg-slate-700'
+                                }`}
+                              >
+                                {item.count}
+                              </span>
+                            )}
+                            {item.badge && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  isActive
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400'
+                                }`}
+                              >
+                                {item.badge}
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      </motion.div>
+                    );
+                  })}
+                </AnimatePresence>
               </div>
             </div>
           ))}

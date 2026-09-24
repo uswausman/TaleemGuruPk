@@ -19,10 +19,18 @@ import {
   ShieldAlert,
   X,
   Save,
+  Lock,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { AdminUser, TestResult } from '../../types';
 import { AdminConfirmDialog } from './AdminConfirmDialog';
-import { updateAdminUserRoleApi, createAdminUserApi, updateAdminUserStatusApi } from '../../lib/api';
+import {
+  updateAdminUserRoleApi,
+  createAdminUserApi,
+  updateAdminUserStatusApi,
+  adminResetUserPasswordApi,
+} from '../../lib/api';
 
 interface AdminStudentsTabProps {
   students: AdminUser[];
@@ -48,19 +56,93 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
   // Status toggle confirmation
   const [toggleConfirmTarget, setToggleConfirmTarget] = useState<AdminUser | null>(null);
   const [roleEditTarget, setRoleEditTarget] = useState<AdminUser | null>(null);
-  const [selectedRole, setSelectedRole] = useState<string>('Student');
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(['Student']);
   const [isUpdatingRole, setIsUpdatingRole] = useState(false);
   const [roleNotice, setRoleNotice] = useState<string | null>(null);
+
+  // Reset Password Modal State
+  const [passwordResetTarget, setPasswordResetTarget] = useState<AdminUser | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState<string | null>(null);
 
   // Add Staff Account modal
   const [isAddStaffOpen, setIsAddStaffOpen] = useState(false);
   const [newStaffName, setNewStaffName] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
-  const [newStaffRole, setNewStaffRole] = useState('Teacher');
+  const [newStaffRoles, setNewStaffRoles] = useState<string[]>(['Teacher']);
   const [newStaffPassword, setNewStaffPassword] = useState('');
+  const [newStaffConfirmPassword, setNewStaffConfirmPassword] = useState('');
+  const [showNewStaffPassword, setShowNewStaffPassword] = useState(false);
   const [isCreatingStaff, setIsCreatingStaff] = useState(false);
   const [createStaffError, setCreateStaffError] = useState<string | null>(null);
   const [createStaffSuccess, setCreateStaffSuccess] = useState<string | null>(null);
+
+  // Generate random password for new staff
+  const handleGenerateNewStaffPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+    let pass = '';
+    for (let i = 0; i < 12; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewStaffPassword(pass);
+    setNewStaffConfirmPassword(pass);
+    setShowNewStaffPassword(true);
+  };
+
+  // Generate random password for reset
+  const handleGenerateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+    let pass = '';
+    for (let i = 0; i < 12; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setResetNewPassword(pass);
+    setResetConfirmPassword(pass);
+    setShowResetPassword(true);
+  };
+
+  // Submit Reset Password
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordResetTarget) return;
+
+    setResetPasswordError(null);
+    setResetPasswordSuccess(null);
+
+    if (!resetNewPassword || resetNewPassword.length < 6) {
+      setResetPasswordError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetPasswordError('Passwords do not match.');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const res = await adminResetUserPasswordApi(passwordResetTarget.id, resetNewPassword);
+      if (res.success) {
+        setResetPasswordSuccess(`Password for ${passwordResetTarget.email} has been reset successfully!`);
+        setTimeout(() => {
+          setPasswordResetTarget(null);
+          setResetPasswordSuccess(null);
+          setResetNewPassword('');
+          setResetConfirmPassword('');
+        }, 1500);
+      } else {
+        setResetPasswordError(res.error || 'Failed to reset password.');
+      }
+    } catch (err: any) {
+      setResetPasswordError(err.message || 'Error communicating with server.');
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
 
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,8 +158,16 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
       setCreateStaffError('Full name is required.');
       return;
     }
+    if (newStaffRoles.length === 0) {
+      setCreateStaffError('Please select at least one role.');
+      return;
+    }
     if (!newStaffPassword || newStaffPassword.length < 6) {
       setCreateStaffError('Password must be at least 6 characters.');
+      return;
+    }
+    if (newStaffConfirmPassword && newStaffPassword !== newStaffConfirmPassword) {
+      setCreateStaffError('Passwords do not match. Please verify your confirm password.');
       return;
     }
 
@@ -86,18 +176,18 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
       const res = await createAdminUserApi({
         name: cleanName,
         email: cleanEmail,
-        roles: [newStaffRole],
+        roles: newStaffRoles,
         password: newStaffPassword,
       });
       if (res.success && res.user) {
-        setCreateStaffSuccess(`Successfully created ${newStaffRole} account for ${cleanEmail}.`);
+        setCreateStaffSuccess(`Successfully created account with roles [${newStaffRoles.join(', ')}] for ${cleanEmail}.`);
         if (onAddStudent) {
           onAddStudent({
             id: res.user.uid,
             name: res.user.name,
             email: res.user.email,
-            role: res.user.role as any,
-            roles: [res.user.role as any],
+            role: (res.user.roles?.[0] || res.user.role) as any,
+            roles: (res.user.roles || [res.user.role || 'Teacher']) as any,
             testsCompleted: 0,
             targetExam: res.user.targetExam || 'MDCAT',
             classLevel: res.user.classLevel || 'Class 10',
@@ -115,7 +205,7 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
           setNewStaffName('');
           setNewStaffEmail('');
           setNewStaffPassword('');
-          setNewStaffRole('Teacher');
+          setNewStaffRoles(['Teacher']);
           if (onRefresh) onRefresh();
         }, 1200);
       } else {
@@ -138,7 +228,8 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
       (s.board && s.board.toLowerCase().includes(q)) ||
       (s.classLevel && s.classLevel.toLowerCase().includes(q));
 
-    const matchesRole = roleFilter === 'All' || s.role === roleFilter;
+    const userRolesList = (s.roles && s.roles.length > 0) ? s.roles : [s.role || 'Student'];
+    const matchesRole = roleFilter === 'All' || userRolesList.includes(roleFilter as any);
     const matchesStatus = statusFilter === 'All' || s.status === statusFilter;
 
     return matchesSearch && matchesRole && matchesStatus;
@@ -157,33 +248,40 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
 
   const handleOpenRoleModal = (student: AdminUser) => {
     setRoleEditTarget(student);
-    setSelectedRole(student.roles?.[0] || 'Student');
+    const initialRoles = (student.roles && student.roles.length > 0)
+      ? student.roles
+      : [student.role || 'Student'];
+    setSelectedRoles(initialRoles);
     setRoleNotice(null);
   };
 
+  const handleToggleRoleSelection = (role: string) => {
+    setSelectedRoles((prev) => {
+      if (prev.includes(role)) {
+        if (prev.length === 1) return prev; // At least one role must remain selected
+        return prev.filter((r) => r !== role);
+      } else {
+        return [...prev, role];
+      }
+    });
+  };
+
   const handleSaveRole = async () => {
-    if (!roleEditTarget) return;
+    if (!roleEditTarget || selectedRoles.length === 0) return;
     setIsUpdatingRole(true);
     try {
-      const res = await updateAdminUserRoleApi(roleEditTarget.id, selectedRole);
-      if (res) {
-        onUpdateStudent({
-          ...roleEditTarget,
-          roles: [selectedRole as any],
-        });
-        setRoleNotice(`Role for ${roleEditTarget.email} updated to ${selectedRole}.`);
-        setTimeout(() => {
-          setRoleEditTarget(null);
-          setRoleNotice(null);
-        }, 1200);
-      } else {
-        // Optimistically update if backend acknowledged
-        onUpdateStudent({
-          ...roleEditTarget,
-          role: selectedRole as any,
-        });
+      const res = await updateAdminUserRoleApi(roleEditTarget.id, selectedRoles);
+      const updatedRoles = (res && res.roles) || selectedRoles;
+      onUpdateStudent({
+        ...roleEditTarget,
+        roles: updatedRoles as any,
+        role: updatedRoles[0] as any,
+      });
+      setRoleNotice(`Roles for ${roleEditTarget.email} updated to [${updatedRoles.join(', ')}].`);
+      setTimeout(() => {
         setRoleEditTarget(null);
-      }
+        setRoleNotice(null);
+      }, 1200);
     } catch (err) {
       console.error('Failed to update role:', err);
     } finally {
@@ -207,6 +305,7 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            id="btn-create-staff-account"
             onClick={() => {
               setIsAddStaffOpen(true);
               setCreateStaffError(null);
@@ -215,7 +314,7 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
             className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
-            Add Staff Account
+            Create Staff Account
           </button>
           {onRefresh && (
             <button
@@ -340,19 +439,24 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
                       </td>
 
                       <td className="py-3.5 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            s.role === 'Admin'
-                              ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
-                              : s.role === 'Teacher'
-                              ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                              : s.role === 'Editor' || s.role === 'Moderator'
-                              ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          {s.role}
-                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {((s.roles && s.roles.length > 0) ? s.roles : [s.role || 'Student']).map((rName) => (
+                            <span
+                              key={rName}
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                rName === 'Admin' || rName === 'SuperAdmin'
+                                  ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                                  : rName === 'Teacher'
+                                  ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                  : rName === 'Editor' || rName === 'Moderator' || rName === 'ContentManager'
+                                  ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              {rName}
+                            </span>
+                          ))}
+                        </div>
                       </td>
 
                       <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
@@ -393,6 +497,21 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
                           >
                             <Shield className="w-3 h-3" />
                             Role
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setPasswordResetTarget(s);
+                              setResetNewPassword('');
+                              setResetConfirmPassword('');
+                              setResetPasswordError(null);
+                              setResetPasswordSuccess(null);
+                            }}
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 transition-colors cursor-pointer flex items-center gap-1"
+                            title="Reset Account Password"
+                          >
+                            <Lock className="w-3 h-3" />
+                            Reset Pwd
                           </button>
 
                           <button
@@ -452,7 +571,7 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
             <div className="mt-4 space-y-4 text-xs">
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  Select Permission Role
+                  Select Roles (Multiple Allowed)
                 </label>
                 <div className="space-y-2">
                   {[
@@ -462,29 +581,43 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
                     { role: 'ContentManager', desc: 'Can manage curriculum content, questions, and test suites' },
                     { role: 'Moderator', desc: 'Can audit student feedback and error reports' },
                     { role: 'Admin', desc: 'Full administrative access to platform and database' },
-                  ].map((item) => (
-                    <label
-                      key={item.role}
-                      className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
-                        selectedRole === item.role
-                          ? 'bg-purple-50 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 shadow-2xs'
-                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="userRole"
-                        value={item.role}
-                        checked={selectedRole === item.role}
-                        onChange={() => setSelectedRole(item.role)}
-                        className="mt-0.5 text-purple-600"
-                      />
-                      <div>
-                        <div className="font-bold text-slate-900 dark:text-white">{item.role}</div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.desc}</div>
-                      </div>
-                    </label>
-                  ))}
+                  ].map((item) => {
+                    const isSelected = selectedRoles.includes(item.role);
+                    return (
+                      <label
+                        key={item.role}
+                        className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'bg-purple-50 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 shadow-2xs'
+                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          name="userRoles"
+                          value={item.role}
+                          checked={isSelected}
+                          onChange={() => handleToggleRoleSelection(item.role)}
+                          className="mt-0.5 h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-600 cursor-pointer"
+                        />
+                        <div className="flex-1">
+                          <div className="font-bold text-slate-900 dark:text-white flex items-center justify-between">
+                            <span>{item.role}</span>
+                            {isSelected && (
+                              <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400">Assigned</span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.desc}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <span className="font-semibold">Selected:</span>
+                  <span className="font-mono text-purple-600 dark:text-purple-400 font-bold">
+                    [{selectedRoles.join(', ')}]
+                  </span>
                 </div>
               </div>
 
@@ -499,11 +632,11 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveRole}
-                  disabled={isUpdatingRole}
+                  disabled={isUpdatingRole || selectedRoles.length === 0}
                   className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  {isUpdatingRole ? 'Updating...' : 'Confirm Role'}
+                  {isUpdatingRole ? 'Updating...' : `Save Roles (${selectedRoles.length})`}
                 </button>
               </div>
             </div>
@@ -528,10 +661,10 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Add Staff Account
+                  Create Staff Account
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Create an authorized team account (Teacher, Editor, ContentManager, Moderator, Admin)
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Provision new team members with multi-role access and secure credentials
                 </p>
               </div>
             </div>
@@ -580,36 +713,107 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Assign Staff Role
-                </label>
-                <select
-                  value={newStaffRole}
-                  onChange={(e) => setNewStaffRole(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-hidden focus:ring-2 focus:ring-purple-500"
-                >
-                  <option value="Teacher">Teacher (Create tests, track student quiz scores)</option>
-                  <option value="Editor">Editor (Curate MCQs, past papers, notes)</option>
-                  <option value="ContentManager">ContentManager (Manage curriculum suites and question bank)</option>
-                  <option value="Moderator">Moderator (Review reports, student feedback, and audit logs)</option>
-                  <option value="Admin">Admin (Full administrative staff management)</option>
-                </select>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    Assign Multi-Roles (Select all that apply)
+                  </label>
+                  <span className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
+                    {newStaffRoles.length} role(s) selected
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {[
+                    { role: 'Teacher', desc: 'Create tests, track student quiz scores' },
+                    { role: 'Staff', desc: 'Institutional operations & content maintenance' },
+                    { role: 'Editor', desc: 'Curate MCQs, past papers, notes' },
+                    { role: 'ContentManager', desc: 'Manage curriculum suites and question bank' },
+                    { role: 'Moderator', desc: 'Review reports, feedback, and audit logs' },
+                    { role: 'Admin', desc: 'Full administrative staff and user management' },
+                    { role: 'Student', desc: 'Candidate learner access' },
+                  ].map((item) => {
+                    const isSelected = newStaffRoles.includes(item.role);
+                    return (
+                      <label
+                        key={item.role}
+                        className={`flex items-center gap-2.5 p-2 rounded-xl border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'bg-purple-50 dark:bg-purple-950/50 border-purple-300 dark:border-purple-700 shadow-xs'
+                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            setNewStaffRoles((prev) =>
+                              isSelected
+                                ? (prev.length > 1 ? prev.filter((r) => r !== item.role) : prev)
+                                : [...prev, item.role]
+                            );
+                          }}
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-purple-600 focus:ring-purple-600 cursor-pointer"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <span className="font-bold text-slate-900 dark:text-white">{item.role}</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 ml-1.5 truncate">
+                            — {item.desc}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    Password (min 6 characters)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateNewStaffPassword}
+                    className="text-[10px] font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    Generate Random
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showNewStaffPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="••••••••"
+                    value={newStaffPassword}
+                    onChange={(e) => setNewStaffPassword(e.target.value)}
+                    className="w-full px-3 py-2 pr-9 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewStaffPassword(!showNewStaffPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  >
+                    {showNewStaffPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Temporary Password (min 6 characters)
+                  Confirm Password
                 </label>
                 <input
-                  type="password"
+                  type={showNewStaffPassword ? 'text' : 'password'}
                   required
-                  placeholder="••••••••"
-                  value={newStaffPassword}
-                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  minLength={6}
+                  placeholder="Repeat password"
+                  value={newStaffConfirmPassword}
+                  onChange={(e) => setNewStaffConfirmPassword(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-purple-500"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Authentication is managed securely. Passwords are never stored in the application database.
+                  Credentials are encrypted server-side using secure cryptographic hashing.
                 </p>
               </div>
 
@@ -624,10 +828,141 @@ export const AdminStudentsTab: React.FC<AdminStudentsTabProps> = ({
                 <button
                   type="submit"
                   disabled={isCreatingStaff}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {isCreatingStaff ? 'Creating...' : 'Create Staff Member'}
+                  {isCreatingStaff ? 'Creating...' : 'Create Staff Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Modal */}
+      {passwordResetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in zoom-in-95 duration-150">
+            <button
+              onClick={() => {
+                setPasswordResetTarget(null);
+                setResetPasswordError(null);
+                setResetPasswordSuccess(null);
+              }}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Reset Account Password
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Authoritative administrative password override
+                </p>
+              </div>
+            </div>
+
+            {resetPasswordError && (
+              <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300/30 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <XCircle className="w-4 h-4 shrink-0" />
+                {resetPasswordError}
+              </div>
+            )}
+
+            {resetPasswordSuccess && (
+              <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300/30 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                {resetPasswordSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleResetPasswordSubmit} className="mt-4 space-y-3.5 text-xs">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <div className="font-bold text-slate-900 dark:text-white">{passwordResetTarget.name}</div>
+                <div className="text-slate-500 dark:text-slate-400 font-mono text-[11px]">{passwordResetTarget.email}</div>
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-slate-500 text-[11px]">Roles:</span>
+                  {(passwordResetTarget.roles || [passwordResetTarget.role || 'Student']).map(r => (
+                    <span key={r} className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    New Password (min 6 chars)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomPassword}
+                    className="text-[11px] text-purple-600 dark:text-purple-400 hover:underline font-semibold"
+                  >
+                    Generate Random
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Enter new password"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    className="w-full pl-3 pr-9 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    {showResetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Confirm New Password
+                </label>
+                <input
+                  type={showResetPassword ? 'text' : 'password'}
+                  required
+                  minLength={6}
+                  placeholder="Repeat new password"
+                  value={resetConfirmPassword}
+                  onChange={(e) => setResetConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordResetTarget(null);
+                    setResetPasswordError(null);
+                    setResetPasswordSuccess(null);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword || !resetNewPassword || !resetConfirmPassword}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  {isResettingPassword ? 'Resetting...' : 'Reset Password'}
                 </button>
               </div>
             </form>

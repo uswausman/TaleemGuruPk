@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   User,
   Clock,
@@ -31,9 +31,23 @@ import {
   Play,
   Compass,
   MapPin,
+  Lock,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Filter,
+  Search,
 } from 'lucide-react';
 import { StudentProfile, TestResult, MCQ, TestConfig, WeeklyStudyGoal } from '../types';
 import { exportResultCardToPDF, exportCertificateToPDF } from '../utils/watermark';
+import {
+  changeStudentPasswordApi,
+  fetchStudentDashboardApi,
+  fetchStudentPerformanceApi,
+  fetchStudentActiveExamApi,
+  fetchUserCertificatesApi,
+  fetchTestsApi,
+} from '../lib/api';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { Card } from './ui/Card';
@@ -77,7 +91,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenAuthModal = () => {},
   onLogout = () => {},
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'roadmap' | 'tests' | 'analytics' | 'achievements' | 'wrong' | 'saved'>('overview');
+  const [activeTab, setActiveTab] = useState<
+    'overview' | 'my-tests' | 'roadmap' | 'tests' | 'analytics' | 'achievements' | 'certificates' | 'wrong' | 'saved'
+  >('overview');
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [weeklyGoals, setWeeklyGoals] = useState<WeeklyStudyGoal[]>(student?.weeklyGoals || []);
   const [editName, setEditName] = useState(student?.name || '');
@@ -85,6 +101,75 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [editClass, setEditClass] = useState(student?.classLevel || 'Class 10 (Matric Pt 2)');
   const [editTargetExam, setEditTargetExam] = useState(student?.targetExam || 'MDCAT / BISE Board Exam');
   const [editAvatar, setEditAvatar] = useState(student?.avatar || '👨‍🎓');
+
+  // Real backend analytics and active session states
+  const [activeExam, setActiveExam] = useState<{
+    attemptId: string;
+    testId: string;
+    testTitle: string;
+    timeRemainingSeconds: number;
+    totalQuestions: number;
+  } | null>(null);
+  const [dbCertificates, setDbCertificates] = useState<any[]>([]);
+  const [performanceData, setPerformanceData] = useState<any>(null);
+  const [availableTests, setAvailableTests] = useState<TestConfig[]>([]);
+
+  // Test Filters state
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('All');
+  const [selectedClassFilter, setSelectedClassFilter] = useState('All');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('All');
+  const [testSearchQuery, setTestSearchQuery] = useState('');
+
+  // Profile Modal Tab & Password Change State
+  const [profileModalTab, setProfileModalTab] = useState<'profile' | 'password'>('profile');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordChangeError, setPasswordChangeError] = useState<string | null>(null);
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState<string | null>(null);
+
+  // Load server-authoritative active exam, performance, certificates, and test list
+  useEffect(() => {
+    if (!student) return;
+
+    let isMounted = true;
+
+    async function loadAuthoritativeData() {
+      try {
+        const [activeRes, perfRes, certRes, testsRes] = await Promise.allSettled([
+          fetchStudentActiveExamApi(),
+          fetchStudentPerformanceApi(),
+          fetchUserCertificatesApi(),
+          fetchTestsApi(),
+        ]);
+
+        if (!isMounted) return;
+
+        if (activeRes.status === 'fulfilled' && activeRes.value) {
+          setActiveExam(activeRes.value);
+        }
+        if (perfRes.status === 'fulfilled' && perfRes.value) {
+          setPerformanceData(perfRes.value);
+        }
+        if (certRes.status === 'fulfilled' && Array.isArray(certRes.value)) {
+          setDbCertificates(certRes.value);
+        }
+        if (testsRes.status === 'fulfilled' && Array.isArray(testsRes.value)) {
+          setAvailableTests(testsRes.value);
+        }
+      } catch (err) {
+        console.warn('Notice loading student data:', err);
+      }
+    }
+
+    loadAuthoritativeData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [student?.uid]);
 
   if (!student) {
     return (
@@ -135,7 +220,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             leftIcon={<LogIn className="w-4 h-4" />}
             onClick={onOpenAuthModal}
           >
-            Sign In / Register Account
+            Sign In / Register Candidate
           </Button>
         </Card>
       </div>
@@ -156,62 +241,59 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const savedMCQs = allMCQs.filter((m) => (student.savedQuestionIds || []).includes(m.id));
   const wrongMCQs = allMCQs.filter((m) => (student.wrongQuestionIds || []).includes(m.id));
 
-  // Compute live aggregates
-  const totalQuizzesAttempted = studentResults.length || student.testsTaken || 0;
-  const totalQuestionsAnswered = studentResults.reduce((acc, r) => acc + (r.answeredCount || r.totalQuestions), 0) || (totalQuizzesAttempted * 15);
-  const totalCorrectAnswers = studentResults.reduce((acc, r) => acc + (r.correctCount || 0), 0) || Math.round(totalQuestionsAnswered * 0.82);
-  const accuracyPercentage = totalQuestionsAnswered > 0 ? Math.round((totalCorrectAnswers / totalQuestionsAnswered) * 100) : 85;
+  // Compute live aggregates strictly from actual PostgreSQL records
+  const totalQuizzesAttempted = studentResults.length;
+  const totalQuestionsAnswered = studentResults.reduce(
+    (acc, r) => acc + (r.answeredCount || r.totalQuestions || 0),
+    0
+  );
+  const totalCorrectAnswers = studentResults.reduce((acc, r) => acc + (r.correctCount || 0), 0);
+  const accuracyPercentage =
+    totalQuestionsAnswered > 0
+      ? Math.round((totalCorrectAnswers / totalQuestionsAnswered) * 100)
+      : 0;
 
-  // Subject Performance calculations
-  const subjectStats = [
-    { subject: 'Chemistry', percentage: 91, accuracy: '91%', tests: 6, status: 'Strong', color: 'from-blue-600 to-cyan-500' },
-    { subject: 'Mathematics', percentage: 84, accuracy: '84%', tests: 8, status: 'Strong', color: 'from-indigo-600 to-blue-500' },
-    { subject: 'Biology', percentage: 78, accuracy: '78%', tests: 5, status: 'Average', color: 'from-teal-600 to-emerald-500' },
-    { subject: 'Physics', percentage: 72, accuracy: '72%', tests: 7, status: 'Needs Focus', color: 'from-amber-500 to-orange-500' },
-    { subject: 'English', percentage: 88, accuracy: '88%', tests: 4, status: 'Strong', color: 'from-purple-600 to-indigo-500' },
-    { subject: 'Computer Science', percentage: 94, accuracy: '94%', tests: 5, status: 'Strong', color: 'from-emerald-600 to-teal-500' },
-  ];
+  // Compute real Subject Performance from actual results
+  const subjectAggregates: Record<
+    string,
+    { tests: number; totalPct: number; correct: number; totalQ: number }
+  > = {};
 
-  // Curated Recommended Quizzes
-  const recommendedQuizzes: Array<{
-    title: string;
-    subject: string;
-    durationMinutes: number;
-    totalQuestions: number;
-    difficulty: string;
-    category: string;
-    description: string;
-  }> = [
-    {
-      title: `${student.targetExam || 'MDCAT'} High-Yield Model Mock`,
-      subject: 'Biology & Chemistry',
-      durationMinutes: 20,
-      totalQuestions: 15,
-      difficulty: 'Medium',
-      category: 'Entry Test Mock',
-      description: 'Standard exam format with negative marking simulation.',
-    },
-    {
-      title: `${student.board || 'BISE Lahore'} Board Physics Exam Sprint`,
-      subject: 'Physics',
-      durationMinutes: 15,
-      totalQuestions: 12,
-      difficulty: 'Hard',
-      category: 'Board Practice',
-      description: 'Strengthen weak chapters like Optics and Electromagnetism.',
-    },
-    {
-      title: 'Mathematics Matrices & Algebra Rapid Quiz',
-      subject: 'Mathematics',
-      durationMinutes: 10,
-      totalQuestions: 10,
-      difficulty: 'Easy',
-      category: 'Chapter Test',
-      description: 'Fast-paced formulas and calculation practice.',
-    },
-  ];
+  studentResults.forEach((r) => {
+    const subj = r.subject || 'General';
+    if (!subjectAggregates[subj]) {
+      subjectAggregates[subj] = { tests: 0, totalPct: 0, correct: 0, totalQ: 0 };
+    }
+    subjectAggregates[subj].tests += 1;
+    subjectAggregates[subj].totalPct += r.percentage || 0;
+    subjectAggregates[subj].correct += r.correctCount || 0;
+    subjectAggregates[subj].totalQ += r.answeredCount || r.totalQuestions || 0;
+  });
 
-  // Achievements List
+  const subjectStats = Object.entries(subjectAggregates).map(([subject, data]) => {
+    const avg = Math.round(data.totalPct / data.tests);
+    let status: 'Strong' | 'Average' | 'Needs Focus' = 'Average';
+    if (avg >= 80) status = 'Strong';
+    else if (avg < 60) status = 'Needs Focus';
+
+    let color = 'from-indigo-600 to-blue-500';
+    if (subject.toLowerCase().includes('chem')) color = 'from-blue-600 to-cyan-500';
+    else if (subject.toLowerCase().includes('math')) color = 'from-indigo-600 to-blue-500';
+    else if (subject.toLowerCase().includes('bio')) color = 'from-teal-600 to-emerald-500';
+    else if (subject.toLowerCase().includes('phys')) color = 'from-amber-500 to-orange-500';
+    else if (subject.toLowerCase().includes('comp')) color = 'from-emerald-600 to-teal-500';
+
+    return {
+      subject,
+      percentage: avg,
+      accuracy: `${avg}%`,
+      tests: data.tests,
+      status,
+      color,
+    };
+  });
+
+  // Achievements based strictly on real milestones
   const achievements = [
     {
       id: 'first-test',
@@ -241,14 +323,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       id: 'high-scorer',
       title: 'Merit Scholar',
       description: 'Achieve 85%+ score on any full mock test.',
-      unlocked: studentResults.some((r) => r.percentage >= 85) || true,
+      unlocked: studentResults.some((r) => r.percentage >= 85),
       icon: '🏆',
-      progress: 100,
+      progress: studentResults.some((r) => r.percentage >= 85) ? 100 : 0,
     },
     {
       id: 'science-whiz',
-      title: 'Science Prodigy',
-      description: 'Complete 5 science tests with high accuracy.',
+      title: 'Subject Veteran',
+      description: 'Complete 5 assessments in any subject.',
       unlocked: totalQuizzesAttempted >= 5,
       icon: '🧪',
       progress: Math.min(100, (totalQuizzesAttempted / 5) * 100),
@@ -268,42 +350,120 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     setIsEditProfileOpen(false);
   };
 
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeError(null);
+    setPasswordChangeSuccess(null);
+
+    if (!currentPassword) {
+      setPasswordChangeError('Please enter your current password.');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordChangeError('New password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordChangeError('New passwords do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await changeStudentPasswordApi(currentPassword, newPassword);
+      if (res.success) {
+        setPasswordChangeSuccess('Your password has been changed successfully!');
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setTimeout(() => {
+          setPasswordChangeSuccess(null);
+        }, 3000);
+      } else {
+        setPasswordChangeError(
+          res.error || 'Failed to change password. Please check your current password.'
+        );
+      }
+    } catch (err: any) {
+      setPasswordChangeError(err.message || 'Error updating password.');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
   const handleToggleGoal = (goalId: string) => {
-    const updatedGoals = weeklyGoals.map(g => g.id === goalId ? { ...g, completed: !g.completed } : g);
+    const updatedGoals = weeklyGoals.map((g) =>
+      g.id === goalId ? { ...g, completed: !g.completed } : g
+    );
     setWeeklyGoals(updatedGoals);
     if (onUpdateProfile) {
       onUpdateProfile({ weeklyGoals: updatedGoals });
     }
   };
 
-  const handleLaunchRecommended = (quiz: typeof recommendedQuizzes[0]) => {
-    if (onStartTestConfig) {
-      const qPool = allMCQs.filter(
-        (m) =>
-          m.subject.toLowerCase().includes(quiz.subject.toLowerCase().split(' ')[0]) ||
-          quiz.subject.toLowerCase().includes(m.subject.toLowerCase())
-      );
-      onStartTestConfig({
-        id: `rec-${Date.now()}`,
-        title: quiz.title,
-        description: quiz.description,
-        category: quiz.category,
-        subject: quiz.subject,
-        durationMinutes: quiz.durationMinutes,
-        totalQuestions: quiz.totalQuestions,
-        totalMarks: quiz.totalQuestions,
-        testType: 'Practice Test',
-        negativeMarking: quiz.category.includes('Mock'),
-        passPercentage: 50,
-        questions: qPool.length >= 10 ? qPool.slice(0, quiz.totalQuestions) : allMCQs.slice(0, quiz.totalQuestions),
-      });
-    } else if (onStartQuiz) {
-      onStartQuiz();
-    }
-  };
+  // Filtered available tests
+  const filteredAvailableTests = availableTests.filter((t) => {
+    const matchesSubject = selectedSubjectFilter === 'All' || t.subject === selectedSubjectFilter;
+    const matchesClass = selectedClassFilter === 'All' || t.classLevel === selectedClassFilter;
+    const matchesType = selectedTypeFilter === 'All' || t.testType === selectedTypeFilter;
+    const matchesSearch =
+      !testSearchQuery ||
+      t.title.toLowerCase().includes(testSearchQuery.toLowerCase()) ||
+      t.subject.toLowerCase().includes(testSearchQuery.toLowerCase());
+    return matchesSubject && matchesClass && matchesType && matchesSearch;
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-200">
+      {/* 0. Active Exam Banner (if candidate has an ongoing in-progress test) */}
+      {activeExam && activeExam.timeRemainingSeconds > 0 && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-rose-500/15 border-2 border-amber-500/40 rounded-3xl p-5 text-slate-900 dark:text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold animate-pulse shrink-0 shadow-md shadow-amber-500/30">
+              <Clock className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/60 px-2.5 py-0.5 rounded-full border border-amber-300/40">
+                  Active Examination In Progress
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black mt-1 text-slate-900 dark:text-white">
+                {activeExam.testTitle}
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300">
+                Time Remaining: {Math.floor(activeExam.timeRemainingSeconds / 60)}m{' '}
+                {activeExam.timeRemainingSeconds % 60}s • {activeExam.totalQuestions} Total Questions
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              if (onStartTestConfig) {
+                onStartTestConfig({
+                  id: activeExam.testId,
+                  title: activeExam.testTitle,
+                  description: 'Active In-Progress Examination Session',
+                  testType: 'Board Test',
+                  durationMinutes: Math.ceil(activeExam.timeRemainingSeconds / 60),
+                  totalQuestions: activeExam.totalQuestions,
+                  totalMarks: activeExam.totalQuestions,
+                  category: 'Active Exam',
+                  subject: 'Examination',
+                  negativeMarking: false,
+                  passPercentage: 50,
+                  questions: [],
+                });
+              }
+            }}
+            className="w-full sm:w-auto px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs sm:text-sm rounded-2xl shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-98"
+          >
+            <Play className="w-4 h-4 fill-white" />
+            <span>Continue Exam</span>
+          </button>
+        </div>
+      )}
+
       {/* 1. Welcome Section & Personalized Banner */}
       <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-blue-500/20 relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -338,6 +498,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <span>Start Quiz</span>
             </button>
             <button
+              onClick={() => setActiveTab('my-tests')}
+              className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold rounded-xl border border-white/20 transition-colors cursor-pointer"
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>Explore Tests</span>
+            </button>
+            <button
               onClick={() => setActiveTab('tests')}
               className="flex items-center gap-2 px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white text-xs font-bold rounded-xl border border-white/20 transition-colors cursor-pointer"
             >
@@ -363,7 +530,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">{student.name}</h2>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
+                {student.name}
+              </h2>
               <Badge variant="blue" size="xs">
                 Active Student
               </Badge>
@@ -379,8 +548,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 <Target className="w-3.5 h-3.5" /> Target: {student.targetExam}
               </span>
               <span>•</span>
-              <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                <Trophy className="w-3.5 h-3.5 text-amber-500" /> Merit Rank: #14 in Pakistan
+              <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> Completed Tests:{' '}
+                {totalQuizzesAttempted}
               </span>
             </div>
           </div>
@@ -393,7 +563,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <Award className="w-5 h-5" />
               <span>{student.points.toLocaleString()}</span>
             </div>
-            <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider">Merit Points</span>
+            <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider">
+              Merit Points
+            </span>
           </div>
 
           <Button
@@ -416,108 +588,54 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       </Card>
 
-      {/* 3. Quick Actions Toolbar */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <button
-          onClick={() => setActiveTab('roadmap')}
-          className="p-4 rounded-2xl bg-linear-to-br from-blue-600 to-indigo-700 text-white shadow-md text-left transition-all hover:scale-[1.02] group cursor-pointer border border-blue-500/50 relative overflow-hidden"
-        >
-          <div className="w-9 h-9 rounded-xl bg-white/20 text-white flex items-center justify-center mb-2 group-hover:rotate-12 transition-transform">
-            <Compass className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-white flex items-center gap-1">
-            Study Roadmap
-            <Sparkles className="w-3 h-3 text-amber-300" />
-          </div>
-          <div className="text-[11px] text-blue-100 mt-0.5">Chapter Progress Trail</div>
-        </button>
-
-        <button
-          onClick={() => {
-            if (onStartQuiz) onStartQuiz();
-          }}
-          className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-cyan-400 shadow-xs text-left transition-all hover:scale-[1.02] group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-cyan-400 flex items-center justify-center mb-2 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-            <Zap className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-slate-900 dark:text-white">Start Quiz</div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Practice timed MCQs</div>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('tests')}
-          className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-cyan-400 shadow-xs text-left transition-all hover:scale-[1.02] group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-2 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-            <FileCheck className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-slate-900 dark:text-white">My Results</div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{studentResults.length} Scorecards</div>
-        </button>
-
-        <button
-          onClick={() => setIsEditProfileOpen(true)}
-          className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-cyan-400 shadow-xs text-left transition-all hover:scale-[1.02] group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-2 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-            <User className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-slate-900 dark:text-white">My Profile</div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Board & Target Exam</div>
-        </button>
-
-        <button
-          onClick={() => {
-            if (onNavigateNotes) onNavigateNotes();
-          }}
-          className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-cyan-400 shadow-xs text-left transition-all hover:scale-[1.02] group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-2 group-hover:bg-amber-600 group-hover:text-white transition-colors">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-slate-900 dark:text-white">Browse Notes</div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">Chapter Summaries</div>
-        </button>
-
-        <button
-          onClick={() => {
-            if (onNavigatePastPapers) onNavigatePastPapers();
-          }}
-          className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-cyan-400 shadow-xs text-left transition-all hover:scale-[1.02] group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-2 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-            <FileText className="w-5 h-5" />
-          </div>
-          <div className="text-xs font-black text-slate-900 dark:text-white">Past Papers</div>
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">10-Year Solved</div>
-        </button>
-      </div>
-
-      {/* 4. Core Four Metric Stat Cards */}
+      {/* 3. Core Four Metric Stat Cards (100% Calculated from Real Records) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card hoverLift className="p-5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Quizzes Attempted</span>
-          <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mt-1.5">{totalQuizzesAttempted}</div>
-          <span className="text-[11px] text-blue-600 dark:text-cyan-400 font-semibold">Active candidate</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Tests Attempted
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mt-1.5">
+            {totalQuizzesAttempted}
+          </div>
+          <span className="text-[11px] text-blue-600 dark:text-cyan-400 font-semibold">
+            {totalQuizzesAttempted > 0 ? 'Authoritative records' : 'No tests yet'}
+          </span>
         </Card>
 
         <Card hoverLift className="p-5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Questions Answered</span>
-          <div className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400 mt-1.5">{totalQuestionsAnswered}</div>
-          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">Across all sessions</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Questions Answered
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400 mt-1.5">
+            {totalQuestionsAnswered}
+          </div>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+            Across completed tests
+          </span>
         </Card>
 
         <Card hoverLift className="p-5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Correct Answers</span>
-          <div className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1.5">{totalCorrectAnswers}</div>
-          <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">+{totalCorrectAnswers * 10} Merit pts</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Correct Answers
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1.5">
+            {totalCorrectAnswers}
+          </div>
+          <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">
+            Verified correct MCQs
+          </span>
         </Card>
 
         <Card hoverLift className="p-5">
-          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Accuracy Percentage</span>
-          <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-cyan-400 mt-1.5">{accuracyPercentage}%</div>
-          <span className="text-[11px] text-blue-700 dark:text-cyan-300 font-semibold">92nd National Percentile</span>
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            Average Accuracy
+          </span>
+          <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-cyan-400 mt-1.5">
+            {totalQuizzesAttempted > 0 ? `${accuracyPercentage}%` : '—'}
+          </div>
+          <span className="text-[11px] text-blue-700 dark:text-cyan-300 font-semibold">
+            {totalQuizzesAttempted > 0 ? 'Live database score' : 'Take a test to calculate'}
+          </span>
         </Card>
       </div>
 
@@ -525,10 +643,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto text-xs font-bold pb-0 scrollbar-none">
         {[
           { id: 'overview', label: 'Dashboard Overview' },
+          { id: 'my-tests', label: '📚 Available Tests' },
           { id: 'roadmap', label: '🗺️ Study Roadmap' },
           { id: 'tests', label: `Result History (${studentResults.length})` },
-          { id: 'analytics', label: 'Subject Progress' },
-          { id: 'achievements', label: `Achievements (${achievements.filter((a) => a.unlocked).length}/${achievements.length})` },
+          { id: 'analytics', label: 'Performance Analytics' },
+          { id: 'certificates', label: `Certificates (${dbCertificates.length})` },
+          {
+            id: 'achievements',
+            label: `Achievements (${achievements.filter((a) => a.unlocked).length}/${achievements.length})`,
+          },
           { id: 'wrong', label: `Mistake Notebook (${wrongMCQs.length})` },
           { id: 'saved', label: `Saved Bookmarks (${savedMCQs.length})` },
         ].map((tab) => (
@@ -546,53 +669,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         ))}
       </div>
 
-      {/* Study Roadmap Tab Content */}
-      {activeTab === 'roadmap' && (
-        <StudyRoadmap
-          student={student}
-          historyResults={historyResults}
-          allMCQs={allMCQs}
-          onStartTestConfig={onStartTestConfig}
-          onNavigateNotes={onNavigateNotes}
-          onNavigatePastPapers={onNavigatePastPapers}
-          onPracticeWrongQuestions={onPracticeWrongQuestions}
-        />
-      )}
-
-      {/* Overview Tab Content */}
+      {/* 1. Overview Tab Content */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* My Progress Widget */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Card className="p-4 flex items-center gap-4">
-              <div className="p-3 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-2xl">
-                <Trophy className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Total Points</p>
-                <p className="text-xl font-black text-slate-900 dark:text-white">{student?.points || 0}</p>
-              </div>
-            </Card>
-            <Card className="p-4 flex items-center gap-4">
-              <div className="p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-2xl">
-                <Flame className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Streak</p>
-                <p className="text-xl font-black text-slate-900 dark:text-white">{student?.streak || 0} Days</p>
-              </div>
-            </Card>
-            <Card className="p-4 flex items-center gap-4">
-              <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-2xl">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Tests Taken</p>
-                <p className="text-xl font-black text-slate-900 dark:text-white">{historyResults?.length || 0}</p>
-              </div>
-            </Card>
-          </div>
-
           {/* Study Roadmap Spotlight Banner */}
           <div className="rounded-3xl p-6 sm:p-7 bg-linear-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-xl border border-blue-700/40 relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-2 max-w-xl">
@@ -624,76 +703,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
           <WeeklyStudyPlanner goals={weeklyGoals} onToggleGoal={handleToggleGoal} />
           <ExamCountdown />
-          <AchievementBadges quizzesAttempted={totalQuizzesAttempted} accuracy={accuracyPercentage} />
-          <SyllabusComparison />
 
-          <PerformanceRadar
-            data={[
-              { subject: 'Physics', score: 72, fullMark: 100 },
-              { subject: 'Chemistry', score: 91, fullMark: 100 },
-              { subject: 'Math', score: 84, fullMark: 100 },
-              { subject: 'Biology', score: 78, fullMark: 100 },
-              { subject: 'English', score: 88, fullMark: 100 },
-            ]}
-          />
-
-          <FocusAreasSection
-            historyResults={studentResults}
-            allMCQs={allMCQs}
-            onStartTestConfig={onStartTestConfig || (() => {})}
-            onNavigateToProgress={() => setActiveTab('analytics')}
-          />
-
-          {/* Recommended Quizzes Section */}
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
-                  Recommended Quizzes for You
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Targeted assessments based on your class ({student.classLevel}) and board ({student.board}).
-                </p>
-              </div>
-              <Badge variant="amber" size="sm">
-                AI Curated
-              </Badge>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {recommendedQuizzes.map((quiz, idx) => (
-                <Card key={idx} hoverLift className="p-5 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between text-xs mb-2">
-                      <Badge variant="blue" size="xs">
-                        {quiz.subject}
-                      </Badge>
-                      <span className="text-slate-400 font-medium">{quiz.difficulty}</span>
-                    </div>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-white mb-1.5">{quiz.title}</h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{quiz.description}</p>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-blue-500" /> {quiz.durationMinutes} mins • {quiz.totalQuestions} MCQs
-                    </span>
-                    <Button
-                      variant="primary"
-                      size="xs"
-                      leftIcon={<Play className="w-3 h-3 fill-white" />}
-                      onClick={() => handleLaunchRecommended(quiz)}
-                    >
-                      Start
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-
-          {/* Subject Progress Breakdown */}
+          {/* Subject Progress from Real Database Records */}
           <Card className="p-6 sm:p-8 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
@@ -701,63 +712,76 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   Subject Progress & Accuracy
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Performance across your chapter tests, board mock exams, and practice sessions.
+                  Calculated from your completed test sessions.
                 </p>
               </div>
-              <Badge variant="blue" size="sm">
-                Top Subject: Computer Science (94%)
-              </Badge>
+              {subjectStats.length > 0 && (
+                <Badge variant="blue" size="sm">
+                  {subjectStats.length} Subjects Evaluated
+                </Badge>
+              )}
             </div>
 
-            <div className="space-y-4 pt-3">
-              {subjectStats.map((stat) => (
-                <div key={stat.subject} className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-slate-800 dark:text-slate-200 flex items-center gap-2">
-                      {stat.subject}
-                      <span
-                        className={`text-[10px] px-2 py-0.2 rounded-full font-bold ${
-                          stat.status === 'Strong'
-                            ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
-                            : stat.status === 'Average'
-                            ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-cyan-300'
-                            : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
-                        }`}
-                      >
-                        {stat.status}
+            {subjectStats.length > 0 ? (
+              <div className="space-y-4 pt-3">
+                {subjectStats.map((stat) => (
+                  <div key={stat.subject} className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                        {stat.subject}
+                        <span
+                          className={`text-[10px] px-2 py-0.2 rounded-full font-bold ${
+                            stat.status === 'Strong'
+                              ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                              : stat.status === 'Average'
+                              ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-cyan-300'
+                              : 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                          }`}
+                        >
+                          {stat.status}
+                        </span>
                       </span>
-                    </span>
-                    <span className="text-blue-600 dark:text-cyan-400 font-extrabold">
-                      {stat.percentage}% ({stat.tests} tests)
-                    </span>
+                      <span className="text-blue-600 dark:text-cyan-400 font-extrabold">
+                        {stat.percentage}% ({stat.tests} {stat.tests === 1 ? 'test' : 'tests'})
+                      </span>
+                    </div>
+                    <div className="h-2.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full bg-gradient-to-r ${stat.color} transition-all duration-500`}
+                        style={{ width: `${stat.percentage}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-2.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full bg-gradient-to-r ${stat.color} transition-all duration-500`}
-                      style={{ width: `${stat.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400">
+                Start your first test to see your performance breakdown by subject.
+              </div>
+            )}
           </Card>
 
-          {/* Recent Quiz Attempts (Top 3) */}
+          {/* Recent Quiz Attempts */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                 Recent Quiz Attempts & Results
               </h3>
-              <button
-                onClick={() => setActiveTab('tests')}
-                className="text-xs font-bold text-blue-600 dark:text-cyan-400 hover:underline cursor-pointer"
-              >
-                View Full History ({studentResults.length})
-              </button>
+              {studentResults.length > 3 && (
+                <button
+                  onClick={() => setActiveTab('tests')}
+                  className="text-xs font-bold text-blue-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                >
+                  View Full History ({studentResults.length})
+                </button>
+              )}
             </div>
 
             {studentResults.slice(0, 3).map((res) => (
-              <Card key={res.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <Card
+                key={res.id}
+                className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+              >
                 <div>
                   <div className="flex items-center gap-2 text-xs flex-wrap">
                     <Badge variant="blue" size="xs">
@@ -766,13 +790,26 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     <span className="text-slate-500 dark:text-slate-400">{res.timestamp}</span>
                     <span className="text-slate-500 dark:text-slate-400">• {res.testType}</span>
                   </div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-1">{res.testTitle}</h4>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white mt-1">
+                    {res.testTitle}
+                  </h4>
                   <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 mt-1 flex-wrap">
                     <span>
-                      Score: <strong className="text-blue-600 dark:text-cyan-400">{res.marksObtained} / {res.totalMarks}</strong> ({res.percentage}%)
+                      Score:{' '}
+                      <strong className="text-blue-600 dark:text-cyan-400">
+                        {res.marksObtained} / {res.totalMarks}
+                      </strong>{' '}
+                      ({res.percentage}%)
                     </span>
-                    <span>Grade: <strong>{res.grade}</strong></span>
-                    <span>Time: <strong>{Math.floor(res.timeUsedSeconds / 60)}m {res.timeUsedSeconds % 60}s</strong></span>
+                    <span>
+                      Grade: <strong>{res.grade}</strong>
+                    </span>
+                    <span>
+                      Time:{' '}
+                      <strong>
+                        {Math.floor(res.timeUsedSeconds / 60)}m {res.timeUsedSeconds % 60}s
+                      </strong>
+                    </span>
                   </div>
                 </div>
 
@@ -816,15 +853,183 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
             {studentResults.length === 0 && (
               <EmptyState
-                title="No Recent Results"
-                description="Click 'Start Quiz' above to launch your first practice session and start recording your achievements."
+                title="Start your first test to see your performance."
+                description="Click 'Start Quiz' or 'Available Tests' to take your first test and begin recording your achievements."
               />
             )}
           </div>
         </div>
       )}
 
-      {/* Result History Tab */}
+      {/* 2. Available Tests Tab */}
+      {activeTab === 'my-tests' && (
+        <div className="space-y-6">
+          {/* Test Search & Filters Toolbar */}
+          <Card className="p-5 sm:p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                  Available Online Tests & Mocks
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Select and start assessments aligned with your board and class syllabus.
+                </p>
+              </div>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search test by title or subject..."
+                  value={testSearchQuery}
+                  onChange={(e) => setTestSearchQuery(e.target.value)}
+                  className="pl-9 pr-4 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">Subject</label>
+                <select
+                  value={selectedSubjectFilter}
+                  onChange={(e) => setSelectedSubjectFilter(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
+                >
+                  <option value="All">All Subjects</option>
+                  <option value="Physics">Physics</option>
+                  <option value="Chemistry">Chemistry</option>
+                  <option value="Biology">Biology</option>
+                  <option value="Mathematics">Mathematics</option>
+                  <option value="Computer Science">Computer Science</option>
+                  <option value="English">English</option>
+                  <option value="Pakistan Studies">Pakistan Studies</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">Class / Level</label>
+                <select
+                  value={selectedClassFilter}
+                  onChange={(e) => setSelectedClassFilter(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
+                >
+                  <option value="All">All Classes</option>
+                  <option value="Class 9 (Matric Pt 1)">Class 9</option>
+                  <option value="Class 10 (Matric Pt 2)">Class 10</option>
+                  <option value="Class 11 (FSc Pt 1 / ICS)">Class 11</option>
+                  <option value="Class 12 (FSc Pt 2 / ICS)">Class 12</option>
+                  <option value="MDCAT Entry Test">MDCAT</option>
+                  <option value="ECAT Entry Test">ECAT</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">Test Type</label>
+                <select
+                  value={selectedTypeFilter}
+                  onChange={(e) => setSelectedTypeFilter(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold cursor-pointer"
+                >
+                  <option value="All">All Types</option>
+                  <option value="Chapter Test">Chapter Test</option>
+                  <option value="Subject Test">Subject Test</option>
+                  <option value="Full Book Test">Full Book Test</option>
+                  <option value="Board Test">Board Test</option>
+                  <option value="Mock Test">Mock Test</option>
+                  <option value="Practice Test">Practice Test</option>
+                </select>
+              </div>
+            </div>
+          </Card>
+
+          {/* Test Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredAvailableTests.map((t) => {
+              const userAttemptsOnThisTest = studentResults.filter((r) => r.testId === t.id).length;
+              return (
+                <Card key={t.id} hoverLift className="p-5 flex flex-col justify-between space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-2">
+                      <Badge variant="blue" size="xs">
+                        {t.subject}
+                      </Badge>
+                      <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        {t.testType}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white line-clamp-2">
+                      {t.title}
+                    </h4>
+                    {t.description && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                        {t.description}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-blue-500" /> {t.durationMinutes} mins
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <FileCheck className="w-3.5 h-3.5 text-indigo-500" /> {t.totalQuestions} MCQs
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-emerald-500" /> Pass: {t.passPercentage || 50}%
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-500" /> Used:{' '}
+                        {userAttemptsOnThisTest}
+                      </span>
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="w-full justify-center"
+                      leftIcon={<Play className="w-3.5 h-3.5 fill-white" />}
+                      onClick={() => {
+                        if (onStartTestConfig) {
+                          onStartTestConfig(t);
+                        } else if (onStartQuiz) {
+                          onStartQuiz();
+                        }
+                      }}
+                    >
+                      Start Assessment
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+
+            {filteredAvailableTests.length === 0 && (
+              <div className="col-span-full">
+                <EmptyState
+                  title="No Matching Tests Found"
+                  description="Try adjusting your subject or class filters above, or explore the MCQ Question Bank."
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 3. Study Roadmap Tab Content */}
+      {activeTab === 'roadmap' && (
+        <StudyRoadmap
+          student={student}
+          historyResults={historyResults}
+          allMCQs={allMCQs}
+          onStartTestConfig={onStartTestConfig}
+          onNavigateNotes={onNavigateNotes}
+          onNavigatePastPapers={onNavigatePastPapers}
+          onPracticeWrongQuestions={onPracticeWrongQuestions}
+        />
+      )}
+
+      {/* 4. Result History Tab */}
       {activeTab === 'tests' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -854,19 +1059,42 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     </Badge>
                     <span className="text-slate-500 dark:text-slate-400">{res.timestamp}</span>
                     <span className="text-slate-500 dark:text-slate-400">• {res.testType}</span>
+                    <Badge
+                      variant={res.percentage >= 50 ? 'emerald' : 'rose'}
+                      size="xs"
+                    >
+                      {res.percentage >= 50 ? 'Passed' : 'Failed'}
+                    </Badge>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1.5">{res.testTitle}</h3>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white mt-1.5">
+                    {res.testTitle}
+                  </h3>
                   <div className="flex items-center gap-4 text-xs text-slate-600 dark:text-slate-400 mt-1 flex-wrap">
                     <span>
-                      Score: <strong className="text-blue-600 dark:text-cyan-400">{res.marksObtained} / {res.totalMarks}</strong> ({res.percentage}%)
+                      Score:{' '}
+                      <strong className="text-blue-600 dark:text-cyan-400">
+                        {res.marksObtained} / {res.totalMarks}
+                      </strong>{' '}
+                      ({res.percentage}%)
                     </span>
-                    <span>Grade: <strong>{res.grade}</strong></span>
                     <span>
-                      Time: <strong>{Math.floor(res.timeUsedSeconds / 60)}m {res.timeUsedSeconds % 60}s</strong>
+                      Grade: <strong>{res.grade}</strong>
                     </span>
-                    <span>Correct: <strong className="text-emerald-600">{res.correctCount}</strong></span>
-                    <span>Wrong: <strong className="text-rose-600">{res.wrongCount}</strong></span>
-                    <span>Skipped: <strong>{res.skippedCount}</strong></span>
+                    <span>
+                      Time:{' '}
+                      <strong>
+                        {Math.floor(res.timeUsedSeconds / 60)}m {res.timeUsedSeconds % 60}s
+                      </strong>
+                    </span>
+                    <span>
+                      Correct: <strong className="text-emerald-600">{res.correctCount}</strong>
+                    </span>
+                    <span>
+                      Wrong: <strong className="text-rose-600">{res.wrongCount}</strong>
+                    </span>
+                    <span>
+                      Skipped: <strong>{res.skippedCount}</strong>
+                    </span>
                   </div>
                 </div>
 
@@ -909,102 +1137,217 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             ))
           ) : (
             <EmptyState
-              title="No Tests Taken Yet"
-              description="Launch an online test from the Tests menu to start tracking your performance and building your progress history."
+              title="Start your first test to see your performance."
+              description="Launch an online test from the Available Tests tab to start tracking your performance and building your progress history."
             />
           )}
         </div>
       )}
 
-      {/* Subject Progress / Analytics Tab */}
+      {/* 5. Performance Analytics Tab */}
       {activeTab === 'analytics' && (
         <div className="space-y-6">
           <Card className="p-6 sm:p-8 space-y-6">
-            <h2 className="text-lg font-black text-slate-900 dark:text-white">Subject Progress & Analytics</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700/70 space-y-3">
-                <span className="text-xs font-bold uppercase text-blue-600 dark:text-cyan-400 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Strong Subjects
-                </span>
-                <ul className="text-xs space-y-2.5 text-slate-700 dark:text-slate-300">
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Computer Science: Programming & Database
-                    </span>
-                    <strong className="text-emerald-600 font-bold">94%</strong>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Chemistry: Hydrocarbons, Acids & Bases
-                    </span>
-                    <strong className="text-emerald-600 font-bold">91%</strong>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" /> English: Grammar & Sentence Correction
-                    </span>
-                    <strong className="text-emerald-600 font-bold">88%</strong>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Mathematics: Matrices & Trigonometry
-                    </span>
-                    <strong className="text-emerald-600 font-bold">84%</strong>
-                  </li>
-                </ul>
-              </div>
-
-              <div className="p-6 bg-amber-50/60 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/40 space-y-3">
-                <span className="text-xs font-bold uppercase text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4" /> Focus Areas (Recommended Review)
-                </span>
-                <ul className="text-xs space-y-2.5 text-slate-700 dark:text-slate-300">
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500" /> Physics: Geometrical Optics & Electromagnetism
-                    </span>
-                    <strong className="text-amber-600 font-bold">72%</strong>
-                  </li>
-                  <li className="flex items-center justify-between">
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-500" /> Biology: Circulation & Genetics
-                    </span>
-                    <strong className="text-amber-600 font-bold">78%</strong>
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            {/* Quick Link to Study Roadmap */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between flex-wrap gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                  <Compass className="w-4 h-4 text-blue-600 dark:text-cyan-400" />
-                  Want Chapter-by-Chapter Analytics?
-                </h4>
+                <h2 className="text-lg font-black text-slate-900 dark:text-white">
+                  Student Performance & Score Analytics
+                </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Track individual topic mastery, view your curriculum progression trail, and target weak chapters.
+                  Authoritative analytics calculated strictly from PostgreSQL examination records.
                 </p>
               </div>
-              <Button
-                variant="primary"
-                size="sm"
-                leftIcon={<Compass className="w-3.5 h-3.5" />}
-                onClick={() => setActiveTab('roadmap')}
-              >
-                Open Study Roadmap
-              </Button>
+              {performanceData?.hasData && (
+                <Badge variant="emerald" size="sm">
+                  Pass Rate: {performanceData.passRate}%
+                </Badge>
+              )}
             </div>
+
+            {performanceData?.hasData ? (
+              <div className="space-y-6">
+                {/* Metric Summary Strip */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">Average Score</span>
+                    <div className="text-2xl font-black text-blue-600 dark:text-cyan-400 mt-1">
+                      {performanceData.averagePercentage}%
+                    </div>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">Highest Score</span>
+                    <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                      {performanceData.highestScore}%
+                    </div>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">Total Questions</span>
+                    <div className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+                      {performanceData.totalQuestionsAnswered}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase">Overall Accuracy</span>
+                    <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">
+                      {performanceData.overallAccuracy}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Subject Strengths & Focus Areas */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="p-6 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700/70 space-y-3">
+                    <span className="text-xs font-bold uppercase text-blue-600 dark:text-cyan-400 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" /> Subject Breakdown
+                    </span>
+                    <ul className="text-xs space-y-2.5 text-slate-700 dark:text-slate-300">
+                      {(performanceData.subjectBreakdown || []).map((s: any) => (
+                        <li key={s.subject} className="flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                s.status === 'Strong'
+                                  ? 'bg-emerald-500'
+                                  : s.status === 'Average'
+                                  ? 'bg-blue-500'
+                                  : 'bg-amber-500'
+                              }`}
+                            />{' '}
+                            {s.subject} ({s.testsCount} tests)
+                          </span>
+                          <strong className="text-slate-900 dark:text-white font-bold">
+                            {s.averagePercentage}%
+                          </strong>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="p-6 bg-amber-50/60 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/40 space-y-3">
+                    <span className="text-xs font-bold uppercase text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                      <AlertCircle className="w-4 h-4" /> Focus Areas
+                    </span>
+                    <ul className="text-xs space-y-2.5 text-slate-700 dark:text-slate-300">
+                      {(performanceData.subjectBreakdown || [])
+                        .filter((s: any) => s.status !== 'Strong')
+                        .map((s: any) => (
+                          <li key={s.subject} className="flex items-center justify-between">
+                            <span className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-amber-500" /> {s.subject}
+                            </span>
+                            <strong className="text-amber-600 font-bold">
+                              {s.averagePercentage}% Avg
+                            </strong>
+                          </li>
+                        ))}
+                      {(performanceData.subjectBreakdown || []).filter((s: any) => s.status !== 'Strong')
+                        .length === 0 && (
+                        <li className="text-slate-500 text-xs">
+                          All tested subjects are in strong standing (80%+)!
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400">
+                Not enough data yet. Complete tests to generate performance analytics.
+              </div>
+            )}
           </Card>
         </div>
       )}
 
-      {/* Achievements Tab */}
+      {/* 6. Certificates Tab */}
+      {activeTab === 'certificates' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Earned Certificates & Verification
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Verifiable certificates issued to {student.name}.
+              </p>
+            </div>
+            <Badge variant="amber" size="sm">
+              {dbCertificates.length} Certificates
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {dbCertificates.map((cert) => (
+              <Card key={cert.id} className="p-5 flex flex-col justify-between space-y-4 border-amber-500/20">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <Badge variant="emerald" size="xs">
+                      {cert.status || 'VALID'}
+                    </Badge>
+                    <span className="text-slate-400 font-mono text-[11px]">{cert.id}</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">{cert.testName}</h4>
+                  <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-slate-400 mt-2">
+                    <span>
+                      Score: <strong>{cert.score} / {cert.totalMarks}</strong> ({cert.percentage}%)
+                    </span>
+                    <span>
+                      Grade: <strong>{cert.grade}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400">
+                    Issued: {cert.issueDate ? new Date(cert.issueDate).toLocaleDateString() : 'N/A'}
+                  </span>
+                  <button
+                    onClick={() =>
+                      exportCertificateToPDF({
+                        id: cert.id,
+                        studentName: cert.studentName || student.name,
+                        testName: cert.testName,
+                        score: cert.score,
+                        totalMarks: cert.totalMarks,
+                        percentage: cert.percentage,
+                        grade: cert.grade,
+                        issueDate: cert.issueDate ? new Date(cert.issueDate).toLocaleDateString() : '',
+                        certificateNumber: cert.id,
+                        verificationUrl: cert.verificationUrl || `https://taleemguru.pk/verify/${cert.id}`,
+                      })
+                    }
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition-all"
+                  >
+                    <Award className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </button>
+                </div>
+              </Card>
+            ))}
+
+            {dbCertificates.length === 0 && (
+              <div className="col-span-full">
+                <EmptyState
+                  title="No Certificates Earned Yet"
+                  description="Pass any assessment with 60%+ score to earn your official verifiable TaleemGuru Certificate."
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 7. Achievements Tab */}
       {activeTab === 'achievements' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {achievements.map((ach) => (
-              <Card key={ach.id} className={`p-5 space-y-3 ${ach.unlocked ? 'border-amber-300 dark:border-amber-800' : 'opacity-70'}`}>
+              <Card
+                key={ach.id}
+                className={`p-5 space-y-3 ${
+                  ach.unlocked ? 'border-amber-300 dark:border-amber-800' : 'opacity-70'
+                }`}
+              >
                 <div className="flex items-center justify-between">
                   <span className="text-3xl">{ach.icon}</span>
                   <Badge variant={ach.unlocked ? 'amber' : 'neutral'} size="xs">
@@ -1013,7 +1356,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-900 dark:text-white">{ach.title}</h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{ach.description}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    {ach.description}
+                  </p>
                 </div>
                 <div className="space-y-1">
                   <div className="flex justify-between text-[10px] font-bold text-slate-500">
@@ -1021,7 +1366,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                     <span>{Math.round(ach.progress)}%</span>
                   </div>
                   <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${ach.progress}%` }} />
+                    <div
+                      className="h-full bg-amber-500 rounded-full"
+                      style={{ width: `${ach.progress}%` }}
+                    />
                   </div>
                 </div>
               </Card>
@@ -1030,7 +1378,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       )}
 
-      {/* Mistake Notebook Tab */}
+      {/* 8. Mistake Notebook Tab */}
       {activeTab === 'wrong' && (
         <div className="space-y-4">
           <div className="bg-rose-50/70 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 p-5 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1081,7 +1429,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       )}
 
-      {/* Saved Bookmarks Tab */}
+      {/* 9. Saved Bookmarks Tab */}
       {activeTab === 'saved' && (
         <div className="space-y-3">
           {savedMCQs.map((q, idx) => (
@@ -1113,116 +1461,264 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       )}
 
-      {/* 5. Profile Edit Modal */}
+      {/* 10. Profile Edit & Security Modal */}
       {isEditProfileOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-in fade-in duration-150">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-cyan-400 flex items-center justify-center">
-                  <Edit3 className="w-4 h-4" />
+                  {profileModalTab === 'profile' ? <Edit3 className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                 </div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Student Profile</h3>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    {profileModalTab === 'profile' ? 'Edit Student Profile' : 'Account Security'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {profileModalTab === 'profile'
+                      ? 'Update personal and academic preferences'
+                      : 'Change student account password'}
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setIsEditProfileOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                onClick={() => {
+                  setIsEditProfileOpen(false);
+                  setPasswordChangeError(null);
+                  setPasswordChangeSuccess(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              </div>
+            {/* Modal Tabs */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl mb-4 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setProfileModalTab('profile')}
+                className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  profileModalTab === 'profile'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-cyan-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                Profile Info
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfileModalTab('password')}
+                className={`flex-1 py-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  profileModalTab === 'password'
+                    ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-cyan-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Change Password
+              </button>
+            </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Education Board</label>
-                <select
-                  value={editBoard}
-                  onChange={(e) => setEditBoard(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                >
-                  <option value="BISE Lahore">BISE Lahore (Punjab)</option>
-                  <option value="BISE Rawalpindi">BISE Rawalpindi (Punjab)</option>
-                  <option value="BISE Faisalabad">BISE Faisalabad (Punjab)</option>
-                  <option value="BISE Multan">BISE Multan (Punjab)</option>
-                  <option value="BISE Gujranwala">BISE Gujranwala (Punjab)</option>
-                  <option value="BIEK Karachi">BIEK Karachi (Sindh)</option>
-                  <option value="BISE Peshawar">BISE Peshawar (KPK)</option>
-                  <option value="FBISE Islamabad">FBISE Islamabad (Federal)</option>
-                  <option value="BISE Quetta">BISE Quetta (Balochistan)</option>
-                  <option value="BISE Mirpur">BISE Mirpur (AJK)</option>
-                </select>
-              </div>
+            {profileModalTab === 'profile' ? (
+              <div className="space-y-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Class Level</label>
-                <select
-                  value={editClass}
-                  onChange={(e) => setEditClass(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                >
-                  <option value="Class 9 (Matric Pt 1)">Class 9 (Matric Pt 1)</option>
-                  <option value="Class 10 (Matric Pt 2)">Class 10 (Matric Pt 2)</option>
-                  <option value="Class 11 (FSc Pt 1 / ICS)">Class 11 (FSc Pt 1 / ICS)</option>
-                  <option value="Class 12 (FSc Pt 2 / ICS)">Class 12 (FSc Pt 2 / ICS)</option>
-                  <option value="MDCAT Entry Test">MDCAT Entry Test</option>
-                  <option value="ECAT Entry Test">ECAT Entry Test</option>
-                  <option value="CSS / PMS Competitive">CSS / PMS Competitive</option>
-                </select>
-              </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Education Board
+                  </label>
+                  <select
+                    value={editBoard}
+                    onChange={(e) => setEditBoard(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="BISE Lahore">BISE Lahore (Punjab)</option>
+                    <option value="BISE Rawalpindi">BISE Rawalpindi (Punjab)</option>
+                    <option value="BISE Faisalabad">BISE Faisalabad (Punjab)</option>
+                    <option value="BISE Multan">BISE Multan (Punjab)</option>
+                    <option value="BISE Gujranwala">BISE Gujranwala (Punjab)</option>
+                    <option value="BIEK Karachi">BIEK Karachi (Sindh)</option>
+                    <option value="BISE Peshawar">BISE Peshawar (KPK)</option>
+                    <option value="FBISE Islamabad">FBISE Islamabad (Federal)</option>
+                    <option value="BISE Quetta">BISE Quetta (Balochistan)</option>
+                    <option value="BISE Mirpur">BISE Mirpur (AJK)</option>
+                  </select>
+                </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Target Exam Goal</label>
-                <input
-                  type="text"
-                  value={editTargetExam}
-                  onChange={(e) => setEditTargetExam(e.target.value)}
-                  placeholder="e.g. MDCAT 2026 / 10th Board Position"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                />
-              </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Class Level
+                  </label>
+                  <select
+                    value={editClass}
+                    onChange={(e) => setEditClass(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="Class 9 (Matric Pt 1)">Class 9 (Matric Pt 1)</option>
+                    <option value="Class 10 (Matric Pt 2)">Class 10 (Matric Pt 2)</option>
+                    <option value="Class 11 (FSc Pt 1 / ICS)">Class 11 (FSc Pt 1 / ICS)</option>
+                    <option value="Class 12 (FSc Pt 2 / ICS)">Class 12 (FSc Pt 2 / ICS)</option>
+                    <option value="MDCAT Entry Test">MDCAT Entry Test</option>
+                    <option value="ECAT Entry Test">ECAT Entry Test</option>
+                    <option value="CSS / PMS Competitive">CSS / PMS Competitive</option>
+                  </select>
+                </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Choose Avatar</label>
-                <div className="flex gap-2 text-xl">
-                  {['👨‍🎓', '👩‍🎓', '🧑‍🔬', '👨‍🏫', '🚀', '⭐'].map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setEditAvatar(emoji)}
-                      className={`p-2 rounded-xl border cursor-pointer ${
-                        editAvatar === emoji
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/60'
-                          : 'border-slate-200 dark:border-slate-700'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Target Exam Goal
+                  </label>
+                  <input
+                    type="text"
+                    value={editTargetExam}
+                    onChange={(e) => setEditTargetExam(e.target.value)}
+                    placeholder="e.g. MDCAT 2026 / 10th Board Position"
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Choose Avatar
+                  </label>
+                  <div className="flex gap-2 text-xl">
+                    {['👨‍🎓', '👩‍🎓', '🧑‍🔬', '👨‍🏫', '🚀', '⭐'].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setEditAvatar(emoji)}
+                        className={`p-2 rounded-xl border cursor-pointer ${
+                          editAvatar === emoji
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/60'
+                            : 'border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <Button variant="ghost" size="sm" onClick={() => setIsEditProfileOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={handleSaveProfile}>
+                    Save Changes
+                  </Button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <form onSubmit={handleChangePasswordSubmit} className="space-y-3.5 text-xs">
+                {passwordChangeError && (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-300/30 text-rose-700 dark:text-rose-300 rounded-xl text-xs font-semibold flex items-center gap-2">
+                    <XCircle className="w-4 h-4 shrink-0" />
+                    <span>{passwordChangeError}</span>
+                  </div>
+                )}
 
-            <div className="mt-6 flex items-center justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setIsEditProfileOpen(false)}>
-                Cancel
-              </Button>
-              <Button variant="primary" size="sm" onClick={handleSaveProfile}>
-                Save Changes
-              </Button>
-            </div>
+                {passwordChangeSuccess && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300/30 text-emerald-700 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>{passwordChangeSuccess}</span>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Current Password <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      required
+                      placeholder="Enter your current password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      className="w-full pl-3 pr-9 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPasswords(!showPasswords)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    >
+                      {showPasswords ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    New Password <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Enter new password (min 6 chars)"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Confirm New Password <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Repeat new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div className="mt-6 flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    onClick={() => {
+                      setIsEditProfileOpen(false);
+                      setPasswordChangeError(null);
+                      setPasswordChangeSuccess(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    type="submit"
+                    disabled={
+                      isChangingPassword || !currentPassword || !newPassword || !confirmPassword
+                    }
+                  >
+                    {isChangingPassword ? 'Updating Password...' : 'Update Password'}
+                  </Button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
+

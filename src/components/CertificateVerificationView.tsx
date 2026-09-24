@@ -40,6 +40,14 @@ export const CertificateVerificationView: React.FC = () => {
 
   return (
     <div className="p-8 max-w-2xl mx-auto bg-white rounded-xl shadow-lg border border-gray-100">
+      <div className="flex justify-center mb-6">
+        <img 
+          src="/assets/taleemguru-logo-original.png" 
+          alt="Taleem Guru Official Logo" 
+          className="h-16 w-auto object-contain"
+        />
+      </div>
+
       <div className="text-center mb-8">
         {isRevoked ? (
           <AlertTriangle className="w-16 h-16 text-amber-500 mx-auto mb-4" />

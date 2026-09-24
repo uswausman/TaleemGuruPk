@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldAlert,
   Lock,
@@ -45,6 +45,15 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [resetCooldown, setResetCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resetCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldown]);
 
   const handleAdminEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,6 +209,13 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
   const handleAdminPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
+
+    if (resetCooldown > 0) {
+      setErrorMsg(`Please wait ${resetCooldown}s before requesting another reset email.`);
+      return;
+    }
+
     const cleanEmail = (email || '').trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setErrorMsg('Please enter a valid email address.');
@@ -212,9 +228,17 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
     try {
       await resetPasswordWithEmail(cleanEmail);
+      setResetCooldown(60);
       setSuccessMsg(`Password reset instructions sent to ${cleanEmail}. Please check your email.`);
     } catch (err: any) {
-      console.error('Admin password reset error:', err);
+      console.warn('Admin password reset notice:', err?.message || err);
+      const isRateLimited =
+        String(err?.message || '').toLowerCase().includes('rate limit') ||
+        String(err?.message || '').toLowerCase().includes('once every') ||
+        err?.status === 429;
+      if (isRateLimited) {
+        setResetCooldown(60);
+      }
       setErrorMsg(formatAuthErrorMessage(err));
     } finally {
       setIsLoading(false);
@@ -226,13 +250,19 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
         {/* Header Banner */}
         <div className="p-6 sm:p-8 bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 text-white border-b border-indigo-900/40 text-center relative">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center text-cyan-400 mb-3 shadow-inner">
-            <ShieldAlert className="w-7 h-7" />
+          <div className="flex justify-center mb-3">
+            <div className="bg-white/95 rounded-2xl p-3 shadow-xl border border-white/20">
+              <img 
+                src="/assets/taleemguru-logo-original.png" 
+                alt="Taleem Guru Official Logo" 
+                className="h-16 sm:h-20 w-auto object-contain"
+              />
+            </div>
           </div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-indigo-500/20 text-cyan-300 border border-indigo-400/20 mb-2">
             <Sparkles className="w-3.5 h-3.5" /> Staff & Admin Security Gate
           </div>
-          <h1 className="text-2xl font-black text-white">Taleem Guru Administration</h1>
+          <h1 className="text-xl sm:text-2xl font-black text-white">Taleem Guru Administration</h1>
           <p className="text-xs text-slate-300 mt-1 max-w-sm mx-auto">
             Authorized portal for teachers, paper setters, and board coordinators. Please authenticate to proceed.
           </p>
@@ -277,11 +307,17 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
               <button
                 type="submit"
-                disabled={isLoading}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-400 text-white font-extrabold rounded-xl shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isLoading || resetCooldown > 0}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-400 dark:disabled:bg-slate-700 text-white font-extrabold rounded-xl shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 <KeyRound className="w-4 h-4" />
-                <span>{isLoading ? 'Sending Link...' : 'Send Password Reset Email'}</span>
+                <span>
+                  {isLoading
+                    ? 'Sending Link...'
+                    : resetCooldown > 0
+                    ? `Resend available in ${resetCooldown}s`
+                    : 'Send Password Reset Email'}
+                </span>
               </button>
 
               <div className="text-center pt-2">

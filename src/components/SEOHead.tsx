@@ -105,6 +105,14 @@ const VIEW_METADATA: Record<string, PageMeta> = {
     keywords: ['Past papers', 'BISE Lahore past papers', 'FBISE past papers', 'Solved matric papers', '10 year past papers'],
     schemaType: 'Course',
   },
+  search: {
+    title: 'Search Educational Content - MCQs, Tests, Past Papers & Notes | Taleem Guru',
+    description:
+      'Search across thousands of verified MCQs, online tests, solved past papers, study notes, and educational documents for Matric, Inter, MDCAT, and ECAT.',
+    canonicalPath: '/search',
+    keywords: ['Search MCQs', 'Search past papers', 'Online tests Pakistan', 'Study notes search', 'Taleem Guru search'],
+    schemaType: 'ItemPage',
+  },
   'entry-tests': {
     title: 'MDCAT, ECAT, NUMS, NUST & GIKI Entry Test Preparation | Taleem Guru',
     description:

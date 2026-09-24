@@ -72,7 +72,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           setDbUsers(Array.isArray(data) ? data : []);
         }
       } catch (err) {
-        console.error('Failed to load leaderboard:', err);
+        console.warn('Notice: Failed to load leaderboard from database:', err);
       } finally {
         if (isMounted) {
           setIsLoading(false);

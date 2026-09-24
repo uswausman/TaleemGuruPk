@@ -25,6 +25,7 @@ import {
   Layers,
   FileText,
   SlidersHorizontal,
+  Sparkles,
 } from 'lucide-react';
 import { AdminUser, StaffRole } from '../../types';
 import { StaffAcademicAssignments } from './StaffAcademicAssignments';
@@ -34,6 +35,7 @@ import {
   updateAdminUserRoleApi,
   updateAdminUserStatusApi,
   updateAdminUserProfileApi,
+  adminResetUserPasswordApi,
 } from '../../lib/api';
 
 export type StaffRoleType = StaffRole;
@@ -62,6 +64,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
   const [createName, setCreateName] = useState('');
   const [createEmail, setCreateEmail] = useState('');
   const [createPassword, setCreatePassword] = useState('');
+  const [createConfirmPassword, setCreateConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [createRoles, setCreateRoles] = useState<StaffRole[]>(['Teacher']);
   const [createStatus, setCreateStatus] = useState<'Active' | 'Inactive'>('Active');
@@ -69,11 +72,23 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
   const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
+  // Reset Staff Password Modal state
+  const [passwordResetTarget, setPasswordResetTarget] = useState<AdminUser | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState<string | null>(null);
+  const [resetPasswordSuccess, setResetPasswordSuccess] = useState<string | null>(null);
+
   // Edit Staff Modal state
   const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
   const [editName, setEditName] = useState('');
   const [editRoles, setEditRoles] = useState<StaffRole[]>(['Teacher']);
   const [editStatus, setEditStatus] = useState<'Active' | 'Inactive' | 'Suspended'>('Active');
+  const [editPassword, setEditPassword] = useState('');
+  const [editConfirmPassword, setEditConfirmPassword] = useState('');
+  const [showEditPassword, setShowEditPassword] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const [editSuccess, setEditSuccess] = useState<string | null>(null);
@@ -150,6 +165,10 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
       setCreateError('Password must be at least 6 characters long.');
       return;
     }
+    if (createConfirmPassword && createPassword !== createConfirmPassword) {
+      setCreateError('Passwords do not match. Please verify your confirm password.');
+      return;
+    }
 
     setIsCreating(true);
     try {
@@ -201,12 +220,69 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
     }
   };
 
+  // Generate random password helper
+  const handleGenerateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+    let pass = '';
+    for (let i = 0; i < 12; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setResetNewPassword(pass);
+    setResetConfirmPassword(pass);
+    setShowResetPassword(true);
+  };
+
+  // Submit Reset Password by Admin
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordResetTarget) return;
+
+    setResetPasswordError(null);
+    setResetPasswordSuccess(null);
+
+    if (!resetNewPassword || resetNewPassword.length < 6) {
+      setResetPasswordError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetPasswordError('Passwords do not match. Please verify.');
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const res = await adminResetUserPasswordApi(passwordResetTarget.id, resetNewPassword);
+      if (res.success) {
+        setResetPasswordSuccess(`Password for ${passwordResetTarget.email} has been reset successfully!`);
+        setTimeout(() => {
+          setPasswordResetTarget(null);
+          setResetPasswordSuccess(null);
+          setResetNewPassword('');
+          setResetConfirmPassword('');
+        }, 1500);
+      } else {
+        setResetPasswordError(res.error || 'Failed to reset password.');
+      }
+    } catch (err: any) {
+      setResetPasswordError(err.message || 'Error communicating with server.');
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   // Open Edit Modal
   const handleOpenEdit = (user: AdminUser) => {
     setEditTarget(user);
     setEditName(user.name);
-    setEditRoles([(staffRoles.includes(user.roles[0]) ? user.roles[0] : 'Teacher') as StaffRole]);
+    const resolvedRoles = (user.roles && user.roles.length > 0)
+      ? user.roles
+      : [user.role as StaffRole || 'Teacher'];
+    setEditRoles(resolvedRoles as StaffRole[]);
     setEditStatus((user.status as any) || 'Active');
+    setEditPassword('');
+    setEditConfirmPassword('');
+    setShowEditPassword(false);
     setEditError(null);
     setEditSuccess(null);
   };
@@ -215,6 +291,17 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
   const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editTarget) return;
+
+    if (editPassword.trim()) {
+      if (editPassword.length < 6) {
+        setEditError('Password must be at least 6 characters long.');
+        return;
+      }
+      if (editPassword !== editConfirmPassword) {
+        setEditError('Passwords do not match. Please verify.');
+        return;
+      }
+    }
 
     setIsEditing(true);
     setEditError(null);
@@ -240,6 +327,14 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
         await updateAdminUserStatusApi(editTarget.id, editStatus);
       }
 
+      // 4. Update password if provided
+      if (editPassword.trim()) {
+        const pwRes = await adminResetUserPasswordApi(editTarget.id, editPassword);
+        if (!pwRes.success) {
+          throw new Error(pwRes.error || 'Failed to update credentials.');
+        }
+      }
+
       const updatedUser: AdminUser = {
         ...editTarget,
         name: editName.trim(),
@@ -248,11 +343,13 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
       };
 
       onUpdateStudent(updatedUser);
-      setEditSuccess('Staff details updated successfully.');
+      setEditSuccess('Staff profile updated successfully.');
 
       setTimeout(() => {
         setEditTarget(null);
         setEditSuccess(null);
+        setEditPassword('');
+        setEditConfirmPassword('');
         if (onRefresh) onRefresh();
       }, 1000);
     } catch (err: any) {
@@ -265,7 +362,10 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
   // Open Change Role Modal
   const handleOpenChangeRole = (user: AdminUser) => {
     setRoleChangeTarget(user);
-    setNewSelectedRoles(user.roles || ['Teacher']);
+    const resolvedRoles = (user.roles && user.roles.length > 0)
+      ? user.roles
+      : [user.role as StaffRole || 'Teacher'];
+    setNewSelectedRoles(resolvedRoles as StaffRole[]);
     setRoleChangeError(null);
     setRoleChangeSuccess(null);
   };
@@ -684,7 +784,11 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
 
                       {/* Role Badge */}
                       <td className="py-3.5 px-4">
-                        {getRoleBadge(staff.roles[0])}
+                        <div className="flex flex-wrap gap-1">
+                          {staff.roles && staff.roles.length > 0
+                            ? staff.roles.map((r) => <span key={r}>{getRoleBadge(r)}</span>)
+                            : getRoleBadge(staff.roles[0])}
+                        </div>
                       </td>
 
                       {/* Status */}
@@ -713,6 +817,22 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                           >
                             <Edit3 className="w-3 h-3 text-indigo-500" />
                             <span>Edit</span>
+                          </button>
+
+                          {/* Reset Password */}
+                          <button
+                            onClick={() => {
+                              setPasswordResetTarget(staff);
+                              setResetNewPassword('');
+                              setResetConfirmPassword('');
+                              setResetPasswordError(null);
+                              setResetPasswordSuccess(null);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-800/80 bg-amber-50/50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 text-[11px] font-semibold flex items-center gap-1 transition-colors hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer"
+                            title="Reset Staff Password"
+                          >
+                            <Lock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                            <span>Reset Pwd</span>
                           </button>
 
                           {/* Change Role */}
@@ -862,6 +982,25 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                       {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                   </div>
+                </div>
+
+                {/* Confirm Password */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Confirm Password <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      minLength={6}
+                      placeholder="Repeat password"
+                      value={createConfirmPassword}
+                      onChange={(e) => setCreateConfirmPassword(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
                     Credentials are automatically synced with Supabase Auth and never stored in plaintext.
                   </p>
@@ -873,7 +1012,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                     Staff Role <span className="text-red-500">*</span>
                   </label>
                   <div className="space-y-1.5">
-                    {(['Teacher', 'Editor', 'ContentManager', 'Moderator', 'Admin'] as StaffRole[]).map((r) => {
+                    {(['Student', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'Admin'] as StaffRole[]).map((r) => {
                       const isSelected = createRoles.includes(r);
                       return (
                         <button
@@ -881,7 +1020,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                           key={r}
                           onClick={() => {
                             setCreateRoles(prev => 
-                              isSelected ? prev.filter(role => role !== r) : [...prev, r]
+                              isSelected ? (prev.length > 1 ? prev.filter(role => role !== r) : prev) : [...prev, r]
                             );
                           }}
                           className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
@@ -975,105 +1114,241 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
       {/* EDIT STAFF MODAL */}
       {editTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 relative overflow-hidden animate-in zoom-in-95 duration-150">
-            <button
-              onClick={() => setEditTarget(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="flex items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
-              <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                <Edit3 className="w-5 h-5" />
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Fixed Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900 sticky top-0 z-10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Staff User Profile</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    {editTarget.email}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Staff Member</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-mono">
-                  {editTarget.email}
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setEditTarget(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            {editError && (
-              <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800/60 flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{editError}</span>
-              </div>
-            )}
+            {/* Scrollable Body Content */}
+            <form onSubmit={handleEditSubmit} className="flex flex-col flex-1 overflow-hidden">
+              <div className="p-5 sm:p-6 overflow-y-auto space-y-6 flex-1">
+                {editError && (
+                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800/60 flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{editError}</span>
+                  </div>
+                )}
 
-            {editSuccess && (
-              <div className="mt-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300">
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{editSuccess}</span>
-              </div>
-            )}
+                {editSuccess && (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{editSuccess}</span>
+                  </div>
+                )}
 
-            <form onSubmit={handleEditSubmit} className="mt-4 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                />
+                {/* 2-Column Responsive Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Left Column: Personal Info & Security */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      Personal Details
+                    </h4>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Full Name
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="e.g. Prof. Tariq Mahmood"
+                        className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Email Address
+                      </label>
+                      <input
+                        type="email"
+                        disabled
+                        value={editTarget.email}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-100 dark:bg-slate-800/60 text-slate-500 dark:text-slate-400 cursor-not-allowed font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Account Status
+                      </label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value as any)}
+                        className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
+                      >
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                        <option value="Suspended">Suspended</option>
+                      </select>
+                    </div>
+
+                    {/* Security Sub-section */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                          Account Security
+                        </h4>
+                        <span className="text-[11px] text-slate-400">Leave blank to keep unchanged</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">
+                              Temporary Password (min 6 characters)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%^&*';
+                                let pass = '';
+                                for (let i = 0; i < 12; i++) {
+                                  pass += chars.charAt(Math.floor(Math.random() * chars.length));
+                                }
+                                setEditPassword(pass);
+                                setEditConfirmPassword(pass);
+                                setShowEditPassword(true);
+                              }}
+                              className="text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              Generate Random
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <input
+                              type={showEditPassword ? 'text' : 'password'}
+                              minLength={6}
+                              value={editPassword}
+                              onChange={(e) => setEditPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full px-3 py-2 pr-9 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowEditPassword(!showEditPassword)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                            >
+                              {showEditPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                            Confirm Temporary Password
+                          </label>
+                          <input
+                            type={showEditPassword ? 'text' : 'password'}
+                            minLength={6}
+                            value={editConfirmPassword}
+                            onChange={(e) => setEditConfirmPassword(e.target.value)}
+                            placeholder="••••••••"
+                            className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                      <StaffAcademicAssignments userUid={editTarget.uid || editTarget.id} />
+                    </div>
+                  </div>
+
+                  {/* Right Column: Staff Roles Selection */}
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                        Assign Staff Roles (Multiple Allowed)
+                      </h4>
+                      <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                        {editRoles.length} selected
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {[
+                        { role: 'Teacher', desc: 'Create tests, track student quiz scores' },
+                        { role: 'Editor', desc: 'Curate MCQs, past papers, notes' },
+                        { role: 'ContentManager', label: 'Content Manager', desc: 'Manage curriculum suites and question bank' },
+                        { role: 'Moderator', desc: 'Review reports, feedback, and audit logs' },
+                        { role: 'Admin', desc: 'Full administrative staff and user management' },
+                        { role: 'Student', desc: 'Candidate learner access' },
+                      ].map((item) => {
+                        const r = item.role as StaffRole;
+                        const isSelected = editRoles.includes(r);
+                        return (
+                          <label
+                            key={r}
+                            className={`flex items-start p-3 border rounded-lg cursor-pointer transition-all ${
+                              isSelected
+                                ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40 shadow-xs'
+                                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/40 hover:bg-slate-50 dark:hover:bg-slate-800/80'
+                            }`}
+                            style={{ borderRadius: '8px' }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {
+                                setEditRoles(prev =>
+                                  isSelected
+                                    ? (prev.length > 1 ? prev.filter(role => role !== r) : prev)
+                                    : [...prev, r]
+                                );
+                              }}
+                              className="mt-1 h-4 w-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+                            />
+                            <div className="ml-3">
+                              <span className="block text-sm font-medium text-slate-800 dark:text-slate-100">
+                                {item.label || item.role}
+                              </span>
+                              <span className="block text-xs text-slate-500 dark:text-slate-400">
+                                {item.desc}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Role Assignment
-                </label>
-                <select
-                  value={editRoles[0] || 'Teacher'}
-                  onChange={(e) => setEditRoles([e.target.value as StaffRole])}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden font-semibold"
-                >
-                  <option value="Teacher">Teacher</option>
-                  <option value="Editor">Editor</option>
-                  <option value="ContentManager">ContentManager</option>
-                  <option value="Moderator">Moderator</option>
-                  <option value="Admin">Admin</option>
-                </select>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                  {getRoleDescription(editRoles[0] || 'Teacher')}
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Account Status
-                </label>
-                <select
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden font-semibold"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                  <option value="Suspended">Suspended</option>
-                </select>
-              </div>
-
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                <StaffAcademicAssignments userUid={editTarget.uid || editTarget.id} />
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              {/* Sticky Action Footer */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-900/95 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3 sticky bottom-0 z-10">
                 <button
                   type="button"
                   onClick={() => setEditTarget(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isEditing}
-                  className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  className="px-4 py-2 text-sm font-medium text-white bg-slate-900 hover:bg-slate-800 dark:bg-blue-600 dark:hover:bg-blue-500 rounded-lg transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isEditing ? (
                     <>
@@ -1142,7 +1417,7 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                   Select Roles:
                 </label>
                 <div className="space-y-1.5">
-                  {(['Teacher', 'Editor', 'ContentManager', 'Moderator', 'Admin'] as StaffRoleType[]).map((r) => {
+                  {(['Student', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'Admin'] as StaffRoleType[]).map((r) => {
                     const isSelected = newSelectedRoles.includes(r);
                     return (
                       <label
@@ -1202,6 +1477,141 @@ export const AdminStaffTab: React.FC<AdminStaffTabProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESET STAFF PASSWORD MODAL */}
+      {passwordResetTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full shadow-2xl p-6 relative overflow-hidden animate-in zoom-in-95 duration-150">
+            <button
+              onClick={() => {
+                setPasswordResetTarget(null);
+                setResetPasswordError(null);
+                setResetPasswordSuccess(null);
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Reset User Password</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Authoritative administrative password override
+                </p>
+              </div>
+            </div>
+
+            {resetPasswordError && (
+              <div className="mt-4 p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800/60 flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{resetPasswordError}</span>
+              </div>
+            )}
+
+            {resetPasswordSuccess && (
+              <div className="mt-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/60 flex items-start gap-2 text-xs text-emerald-700 dark:text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{resetPasswordSuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleResetPasswordSubmit} className="mt-4 space-y-4">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs">
+                <div className="font-bold text-slate-900 dark:text-white">{passwordResetTarget.name}</div>
+                <div className="text-slate-500 dark:text-slate-400 font-mono text-[11px]">{passwordResetTarget.email}</div>
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-slate-500 dark:text-slate-400">Assigned Roles:</span>
+                  {passwordResetTarget.roles?.map(r => getRoleBadge(r))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                    New Password <span className="text-red-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateRandomPassword}
+                    className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold"
+                  >
+                    Generate Random Password
+                  </button>
+                </div>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Enter new password (min 6 chars)"
+                    value={resetNewPassword}
+                    onChange={(e) => setResetNewPassword(e.target.value)}
+                    className="w-full pl-9 pr-9 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5"
+                  >
+                    {showResetPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Confirm New Password <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    placeholder="Confirm new password"
+                    value={resetConfirmPassword}
+                    onChange={(e) => setResetConfirmPassword(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordResetTarget(null);
+                    setResetPasswordError(null);
+                    setResetPasswordSuccess(null);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isResettingPassword || !resetNewPassword || !resetConfirmPassword}
+                  className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isResettingPassword ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Resetting Password...
+                    </>
+                  ) : (
+                    'Confirm Password Reset'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

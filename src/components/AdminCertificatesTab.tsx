@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldAlert, ShieldCheck, Search, Loader2, CheckCircle } from 'lucide-react';
+import { ShieldAlert, ShieldCheck, Search, Loader2 } from 'lucide-react';
 import { Certificate } from '../types';
+import { fetchAdminCertificatesApi, revokeAdminCertificateApi, restoreAdminCertificateApi } from '../lib/api';
 
 export const AdminCertificatesTab: React.FC = () => {
   const [certs, setCerts] = useState<Certificate[]>([]);
@@ -8,17 +9,14 @@ export const AdminCertificatesTab: React.FC = () => {
   const [revoking, setRevoking] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchCerts();
+    loadCerts();
   }, []);
 
-  const fetchCerts = async () => {
+  const loadCerts = async () => {
     setLoading(true);
     try {
-      const response = await fetch('/api/admin/certificates', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('taleemguru_admin_token')}` }
-      });
-      const data = await response.json();
-      setCerts(data.certificates || []);
+      const data = await fetchAdminCertificatesApi();
+      setCerts(data || []);
     } catch (err) {
       console.error('Failed to fetch certificates', err);
     } finally {
@@ -30,15 +28,12 @@ export const AdminCertificatesTab: React.FC = () => {
     setRevoking(cert.certificateId);
     try {
       const isRevoking = cert.status === 'VALID';
-      await fetch(`/api/admin/certificates/${cert.certificateId}/${isRevoking ? 'revoke' : 'restore'}`, {
-        method: 'PATCH',
-        headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('taleemguru_admin_token')}`
-        },
-        body: JSON.stringify(isRevoking ? { reason: 'Admin action' } : {})
-      });
-      fetchCerts();
+      if (isRevoking) {
+        await revokeAdminCertificateApi(cert.certificateId, 'Revoked by administrator');
+      } else {
+        await restoreAdminCertificateApi(cert.certificateId);
+      }
+      loadCerts();
     } catch (err) {
       console.error('Failed to update status', err);
     } finally {

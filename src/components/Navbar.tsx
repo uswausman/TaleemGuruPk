@@ -196,10 +196,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div
             id="nav-logo"
             onClick={() => onNavigate('home')}
-            className="flex items-center gap-3 cursor-pointer select-none shrink-0 group"
+            className="flex items-center gap-3 cursor-pointer select-none shrink-0 group py-1"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden group-hover:scale-105 transition-transform">
-              <img src="/favicon.svg" alt="Taleem Guru Logo" className="w-7 h-7 object-contain" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden group-hover:scale-105 transition-transform shrink-0">
+              <img 
+                src="/assets/taleemguru-logo-original.png" 
+                alt="Taleem Guru Official Logo" 
+                className="w-8 h-8 object-contain" 
+                loading="eager"
+              />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
@@ -207,7 +212,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   TALEEM <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">GURU</span>
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium tracking-wide -mt-0.5">
+              <p className="text-[10px] text-slate-400 font-medium tracking-wide -mt-0.5 hidden xs:block sm:block">
                 Learn. Practice. Test. Improve.
               </p>
             </div>

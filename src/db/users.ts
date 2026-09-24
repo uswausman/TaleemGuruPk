@@ -427,10 +427,17 @@ export async function updateUserProfile(
   }>
 ) {
   try {
+    const safeUpdates: Record<string, any> = {};
+    if (typeof updates.name === 'string') safeUpdates.name = updates.name.trim().slice(0, 100);
+    if (typeof updates.targetExam === 'string') safeUpdates.targetExam = updates.targetExam.trim().slice(0, 100);
+    if (typeof updates.classLevel === 'string') safeUpdates.classLevel = updates.classLevel.trim().slice(0, 100);
+    if (typeof updates.board === 'string') safeUpdates.board = updates.board.trim().slice(0, 100);
+    if (typeof updates.avatar === 'string') safeUpdates.avatar = updates.avatar.trim().slice(0, 100);
+
     const updated = await db
       .update(users)
       .set({
-        ...updates,
+        ...safeUpdates,
         updatedAt: new Date(),
       })
       .where(eq(users.uid, uid))
