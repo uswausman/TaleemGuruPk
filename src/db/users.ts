@@ -945,22 +945,12 @@ export async function createUserInDb(data: {
         streakDays: 0,
         testsTaken: 0,
       })
-      .onConflictDoUpdate({
-        target: users.uid,
-        set: {
-          email: cleanEmail,
-          name: data.name || cleanEmail.split('@')[0],
-          roles: data.roles || ['Student'],
-          status: data.status || 'Active',
-          permissions: initialPermissions,
-          updatedAt: new Date(),
-        },
-      })
       .returning();
     return created;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Failed to create user in database:', error);
-    throw new Error('Failed to create user account', { cause: error });
+    const specificMessage = error?.message || (typeof error === 'string' ? error : 'Database user record creation failed');
+    throw new Error(specificMessage, { cause: error });
   }
 }
 
