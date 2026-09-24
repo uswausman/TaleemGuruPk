@@ -19,7 +19,7 @@ import {
   Award,
   RefreshCw,
 } from 'lucide-react';
-import { TestConfig, MCQ, TestType } from '../../types';
+import { TestConfig, MCQ, TestType, ContentStatus } from '../../types';
 import { BOARDS_LIST, SCHOOL_CLASSES } from '../../data/mockData';
 import { SUBJECTS_LIST } from '../SubjectsView';
 import { AdminConfirmDialog } from './AdminConfirmDialog';
@@ -73,7 +73,7 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
   const [formAllowRetake, setFormAllowRetake] = useState<boolean>(true);
   const [formMaxAttempts, setFormMaxAttempts] = useState<number>(0);
   const [formReviewPolicy, setFormReviewPolicy] = useState<'immediate' | 'after_submission' | 'none'>('immediate');
-  const [formStatus, setFormStatus] = useState<'Published' | 'Draft'>('Published');
+  const [formStatus, setFormStatus] = useState<ContentStatus>('Published');
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([]);
   const [questionSearch, setQuestionSearch] = useState('');
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
@@ -309,7 +309,7 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
     const matchesStatus =
       statusFilter === 'All' ||
       (statusFilter === 'Published' && (t.status === 'Published' || !t.status)) ||
-      (statusFilter === 'Draft' && t.status === 'Draft');
+      t.status === statusFilter;
 
     return matchesSearch && matchesSub && matchesClass && matchesType && matchesStatus;
   });
@@ -421,8 +421,12 @@ export const AdminQuizzesTab: React.FC<AdminQuizzesTabProps> = ({
               className="w-full p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
             >
               <option value="All">All Statuses</option>
-              <option value="Published">Published</option>
               <option value="Draft">Draft</option>
+              <option value="Pending Review">Pending Review</option>
+              <option value="Approved">Approved</option>
+              <option value="Published">Published</option>
+              <option value="Rejected">Rejected</option>
+              <option value="Archived">Archived</option>
             </select>
           </div>
         </div>

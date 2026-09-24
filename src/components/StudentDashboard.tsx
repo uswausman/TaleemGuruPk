@@ -1329,7 +1329,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <div className="col-span-full">
                 <EmptyState
                   title="No Certificates Earned Yet"
-                  description="Pass any assessment with 60%+ score to earn your official verifiable TaleemGuru Certificate."
+                  description="Pass any assessment with 50%+ score to earn your verifiable TaleemGuru Merit Certificate."
                 />
               </div>
             )}

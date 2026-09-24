@@ -23,7 +23,7 @@ import {
   Check,
   ShieldCheck,
 } from 'lucide-react';
-import { StudyNote, PastPaper, MCQ } from '../../types';
+import { StudyNote, PastPaper, MCQ, ContentStatus } from '../../types';
 import {
   PAKISTAN_BOARDS,
   ACADEMIC_CLASSES,
@@ -84,7 +84,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
   const [noteType, setNoteType] = useState<StudyNote['type']>('Notes');
   const [noteSnippet, setNoteSnippet] = useState('');
   const [noteFullContent, setNoteFullContent] = useState('');
-  const [noteStatus, setNoteStatus] = useState<'Published' | 'Draft' | 'Archived'>('Published');
+  const [noteStatus, setNoteStatus] = useState<ContentStatus>('Published');
   const [notePdfUrl, setNotePdfUrl] = useState('');
   const [noteThumbnail, setNoteThumbnail] = useState('');
   const [noteKeyPointsStr, setNoteKeyPointsStr] = useState('');
@@ -102,7 +102,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
   const [paperYear, setPaperYear] = useState<number>(2024);
   const [paperGroup, setPaperGroup] = useState<PastPaper['paperGroup']>('Annual');
   const [paperType, setPaperType] = useState<PastPaper['type']>('Objective (MCQs)');
-  const [paperStatus, setPaperStatus] = useState<'Published' | 'Draft' | 'Archived'>('Published');
+  const [paperStatus, setPaperStatus] = useState<ContentStatus>('Published');
   const [paperPdfUrl, setPaperPdfUrl] = useState('');
   const [paperThumbnail, setPaperThumbnail] = useState('');
   const [paperDescription, setPaperDescription] = useState('');
@@ -1041,8 +1041,12 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
             className="w-full p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
           >
             <option value="All">All Statuses</option>
-            <option value="Published">Published Only</option>
             <option value="Draft">Draft Only</option>
+            <option value="Pending Review">Pending Review</option>
+            <option value="Approved">Approved</option>
+            <option value="Published">Published Only</option>
+            <option value="Rejected">Rejected</option>
+            <option value="Archived">Archived Only</option>
           </select>
         </div>
       </div>

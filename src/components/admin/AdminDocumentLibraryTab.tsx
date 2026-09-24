@@ -666,8 +666,11 @@ export const AdminDocumentLibraryTab: React.FC = () => {
             className="w-full p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
           >
             <option value="All">All Statuses</option>
-            <option value="Published">Published Only</option>
             <option value="Draft">Draft Only</option>
+            <option value="Pending Review">Pending Review</option>
+            <option value="Approved">Approved</option>
+            <option value="Published">Published Only</option>
+            <option value="Rejected">Rejected</option>
             <option value="Archived">Archived Only</option>
           </select>
         </div>

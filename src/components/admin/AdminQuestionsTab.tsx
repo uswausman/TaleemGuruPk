@@ -661,8 +661,11 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
               className="w-full text-xs py-1.5 px-2 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:ring-1 focus:ring-blue-500"
             >
               <option value="All">All Statuses</option>
-              <option value="Published">Published</option>
               <option value="Draft">Draft</option>
+              <option value="Pending Review">Pending Review</option>
+              <option value="Approved">Approved</option>
+              <option value="Published">Published</option>
+              <option value="Rejected">Rejected</option>
               <option value="Archived">Archived</option>
             </select>
           </div>
