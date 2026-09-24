@@ -61,7 +61,13 @@ export async function checkDatabaseHealth(): Promise<{ connected: boolean; laten
   }
 
   try {
+    // 1. Run basic ping connectivity query
     await db.execute(sql`SELECT 1`);
+
+    // 2. Validate schema: check if the users table exists and is readable.
+    // This query fails if the users table does not exist, verifying our schema integrity!
+    await db.execute(sql`SELECT id FROM users LIMIT 1`);
+
     const latencyMs = Math.round((performance.now() - start) * 100) / 100;
     return { connected: true, latencyMs };
   } catch (err: any) {
