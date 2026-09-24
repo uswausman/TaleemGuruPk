@@ -9,15 +9,15 @@ import {
   getBoardsFromDb as getHierarchyBoards,
   getClassesFromDb as getHierarchyClasses,
   getSubjectsFromDb as getHierarchySubjects,
-} from '../db/content.ts';
-import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from '../lib/config.ts';
+} from '../db/content';
+import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from '../lib/config';
 import {
   ROUTE_SEO_REGISTRY,
   determineRobotsDirective,
   buildDynamicTitle,
   buildDynamicDescription,
   generateSchemaGraph,
-} from '../lib/seo.ts';
+} from '../lib/seo';
 
 /**
  * Generate a dynamic XML sitemap grounded in real PostgreSQL content.

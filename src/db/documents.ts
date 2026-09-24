@@ -1,7 +1,7 @@
-import { db } from './index.ts';
-import { documents, documentVersions, documentDownloadEvents } from './schema.ts';
+import { db } from './index';
+import { documents, documentVersions, documentDownloadEvents } from './schema';
 import { eq, and, desc, sql, ilike, inArray } from 'drizzle-orm';
-import type { DocumentItem, DocumentVersion, DocumentDownloadEvent } from '../types.ts';
+import { DocumentItem, DocumentVersion, DocumentDownloadEvent } from '../types';
 
 export interface DocumentFilters {
   status?: string;

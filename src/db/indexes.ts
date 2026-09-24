@@ -3,7 +3,7 @@
  * Ensures optimal PostgreSQL indexes exist for high-performance querying, search, pagination, and analytics.
  */
 
-import { db } from './index.ts';
+import { db } from './index';
 import { sql } from 'drizzle-orm';
 
 export async function ensurePerformanceIndexes(): Promise<void> {

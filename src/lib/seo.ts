@@ -1,5 +1,5 @@
-import type { ViewMode } from '../types.ts';
-import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from './config.ts';
+import { ViewMode } from '../types';
+import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from './config';
 
 export interface RouteSeoConfig {
   title: string;

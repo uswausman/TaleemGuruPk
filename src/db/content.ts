@@ -1,5 +1,5 @@
 import { eq, desc, and, sql, ilike, inArray } from 'drizzle-orm';
-import { db } from './index.ts';
+import { db } from './index';
 import {
   mcqs,
   tests,
@@ -16,10 +16,10 @@ import {
   auditLogs,
   documents,
   contentVersions,
-} from './schema.ts';
-import { saveAuditLogToDb } from './users.ts';
-import type { MCQ, TestConfig, PastPaper, StudyNote } from '../types.ts';
-import { MCQS_DATABASE, POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData.ts';
+} from './schema';
+import { saveAuditLogToDb } from './users';
+import type { MCQ, TestConfig, PastPaper, StudyNote } from '../types';
+import { MCQS_DATABASE, POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData';
 import {
   MASTER_PAST_PAPERS,
   MASTER_STUDY_NOTES,
@@ -27,7 +27,7 @@ import {
   ACADEMIC_CLASSES,
   ACADEMIC_SUBJECTS,
   ACADEMIC_CHAPTERS,
-} from '../data/educationalHierarchy.ts';
+} from '../data/educationalHierarchy';
 
 export interface MCQFilters {
   subject?: string;

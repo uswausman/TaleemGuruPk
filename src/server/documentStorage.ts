@@ -1,12 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { db } from '../db/index.ts';
-import { documents, documentVersions, documentDownloadEvents, pastPapers, studyNotes } from '../db/schema.ts';
+import { db } from '../db/index';
+import { documents, documentVersions, documentDownloadEvents, pastPapers, studyNotes } from '../db/schema';
 import { eq, desc, sql } from 'drizzle-orm';
-import { brandPdfBuffer, computeHash } from './documentBranding.ts';
-import { sanitizeDownloadFilename, MAX_DOCUMENT_SIZE_BYTES } from './documentSecurity.ts';
-import type { DocumentItem } from '../types.ts';
+import { brandPdfBuffer, computeHash } from './documentBranding';
+import { sanitizeDownloadFilename, MAX_DOCUMENT_SIZE_BYTES } from './documentSecurity';
+import { DocumentItem } from '../types';
 
 export const ORIGINALS_DIR = path.resolve(process.cwd(), 'storage', 'documents', 'originals');
 export const BRANDED_DIR = path.resolve(process.cwd(), 'storage', 'documents', 'branded');
