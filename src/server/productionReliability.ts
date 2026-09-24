@@ -29,9 +29,18 @@ export function validateEnvironmentVariables(): { valid: boolean; missing: strin
   const missing: string[] = [];
   const warnings: string[] = [];
 
-  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!dbUrl) {
-    missing.push('DATABASE_URL (or POSTGRES_URL)');
+  const dbConfigured = Boolean(
+    process.env.SQL_HOST ||
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    (process.env.POSTGRES_HOST && process.env.POSTGRES_HOST !== 'localhost' && process.env.POSTGRES_HOST !== '127.0.0.1') ||
+    (process.env.PGHOST && process.env.PGHOST !== 'localhost' && process.env.PGHOST !== '127.0.0.1')
+  );
+
+  if (!dbConfigured) {
+    missing.push('DATABASE_URL or POSTGRES_URL or SQL_HOST');
   }
 
   if (!process.env.VITE_SUPABASE_URL && !process.env.SUPABASE_URL) {
@@ -48,7 +57,7 @@ export function validateEnvironmentVariables(): { valid: boolean; missing: strin
 export async function checkDatabaseHealth(): Promise<{ connected: boolean; latencyMs: number; error?: string }> {
   const start = performance.now();
   if (!db) {
-    return { connected: true, latencyMs: 0 }; // Treat as connected during startup rollout to prevent Cloud Run 503 deployment failures
+    return { connected: false, latencyMs: 0, error: 'Database instance not initialized' };
   }
 
   try {
@@ -57,10 +66,12 @@ export async function checkDatabaseHealth(): Promise<{ connected: boolean; laten
     return { connected: true, latencyMs };
   } catch (err: any) {
     const latencyMs = Math.round((performance.now() - start) * 100) / 100;
-    // Never expose raw SQL or internal DB connection strings in health check output
-    const safeError = err?.message ? err.message.replace(/postgresql:\/\/[^@]+@/, 'postgresql://***@') : 'Database connection error';
-    // During Cloud Run rollout, tolerate transient DB connection delays
-    return { connected: true, latencyMs, error: safeError };
+    // Extract sanitized underlying cause or message without exposing secrets or connection URLs
+    const rawCause = err?.cause?.message ? String(err.cause.message) : (err?.message ? String(err.message) : 'Database connection error');
+    const safeError = rawCause
+      .replace(/postgresql:\/\/[^@]+@/gi, 'postgresql://***@')
+      .replace(/postgres:\/\/[^@]+@/gi, 'postgres://***@');
+    return { connected: false, latencyMs, error: safeError };
   }
 }
 
@@ -68,14 +79,16 @@ export async function getSystemHealthReport(): Promise<HealthStatus> {
   const dbHealth = await checkDatabaseHealth();
   const envCheck = validateEnvironmentVariables();
 
+  const isHealthy = dbHealth.connected;
+
   return {
-    status: 'healthy',
+    status: isHealthy ? 'healthy' : 'degraded',
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     database: dbHealth,
     environment: {
       nodeEnv: process.env.NODE_ENV || 'development',
-      databaseConfigured: true,
+      databaseConfigured: envCheck.valid,
       authConfigured: true,
     },
   };

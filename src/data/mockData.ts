@@ -1,4 +1,4 @@
-import {
+import type {
   MCQ,
   BoardInfo,
   PastPaper,
@@ -8,12 +8,12 @@ import {
   TestConfig,
   TestResult,
   AdminUser,
-} from '../types';
+} from '../types.ts';
 import {
   PAKISTAN_BOARDS,
   MASTER_PAST_PAPERS,
   MASTER_STUDY_NOTES,
-} from './educationalHierarchy';
+} from './educationalHierarchy.ts';
 
 export const PROVINCES = ['All', 'Punjab', 'Federal', 'Sindh', 'KPK', 'Balochistan', 'AJK'] as const;
 

@@ -299,7 +299,7 @@ apiRouter.get('/db-health', async (req: Request, res: Response) => {
     const dbHealth = await checkDatabaseHealth();
     res.status(200).json(dbHealth);
   } catch (error: any) {
-    res.status(200).json({ connected: true, latencyMs: 0 });
+    res.status(200).json({ connected: false, latencyMs: 0, error: 'Database health check failed' });
   }
 });
 
