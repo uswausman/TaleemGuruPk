@@ -1999,17 +1999,19 @@ apiRouter.patch('/admin/certificates/:id/restore', requireHighAdmin, async (req:
 
 // 13. Public Leaderboard
 apiRouter.get('/leaderboard', async (req: Request, res: Response) => {
+  const requestId = `req-leaderboard-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   try {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
     const topUsers = await getTopLeaderboard(limit);
     res.json({ leaderboard: topUsers });
   } catch (error: any) {
-    console.error('Error fetching leaderboard:', error);
+    console.error(`[Leaderboard Failure] Request ID: ${requestId} - Internal Error:`, error);
+    if (error?.cause) {
+      console.error(`[Leaderboard Failure] Request ID: ${requestId} - Underlying Cause:`, error.cause);
+    }
     res.status(500).json({ 
       error: 'Failed to fetch leaderboard',
-      message: error?.message || String(error),
-      cause: error?.cause?.message || String(error?.cause || ''),
-      stack: error?.stack
+      requestId
     });
   }
 });
