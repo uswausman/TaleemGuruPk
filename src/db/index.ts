@@ -53,6 +53,7 @@ export const createPool = (): Pool => {
           database: process.env.SQL_DB_NAME,
           ssl: isUnixSocket ? false : (process.env.SQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined),
           max: 10,
+          idleTimeoutMillis: 10000,
           connectionTimeoutMillis: 15000,
         });
       }
@@ -67,6 +68,7 @@ export const createPool = (): Pool => {
             connectionString,
             ssl: isLocal || hasSslDisabled ? false : { rejectUnauthorized: false },
             max: 10,
+            idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
         }
@@ -80,6 +82,7 @@ export const createPool = (): Pool => {
             port: process.env.POSTGRES_PORT ? parseInt(process.env.POSTGRES_PORT, 10) : 5432,
             ssl: { rejectUnauthorized: false },
             max: 10,
+            idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
         } else if (process.env.PGHOST && !isLocalHost(process.env.PGHOST)) {
@@ -91,6 +94,7 @@ export const createPool = (): Pool => {
             port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
             ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
             max: 10,
+            idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
         }
@@ -123,13 +127,19 @@ export const createPool = (): Pool => {
             database: process.env.PGDATABASE || 'postgres',
             port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
             max: 10,
+            idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
           });
         }
       }
 
       global._postgresPool.on('error', (err) => {
-        console.error('Unexpected error on idle SQL pool client:', err?.message || 'SQL Client Error');
+        const msg = err?.message || '';
+        if (msg.includes('Connection terminated unexpectedly') || msg.includes('idle')) {
+          console.info('PostgreSQL idle client connection terminated (expected and managed in serverless/idle states).');
+        } else {
+          console.error('Unexpected error on idle SQL pool client:', err);
+        }
       });
     } catch (outerErr: any) {
       console.error('Fatal synchronous error initializing database pool:', outerErr);
