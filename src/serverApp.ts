@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'node:crypto';
+import { resolveDatabaseConnectionString, createPool } from './db/index.ts';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -987,6 +988,52 @@ documentRouter.get('/download', documentRateLimitMiddleware, async (req: Request
     return res.send(inputBuffer);
   } catch (error: any) {
     res.status(400).json({ error: error.message || 'Error processing document download' });
+  }
+});
+
+apiRouter.get('/health/db', async (req: Request, res: Response) => {
+  try {
+    const resolved = resolveDatabaseConnectionString();
+    let connInfo = { selectedEnvVar: 'NONE', host: 'unknown', port: '5432', database: 'unknown', username: 'unknown' };
+    
+    if (resolved) {
+      try {
+        const u = new URL(resolved.url);
+        connInfo = {
+          selectedEnvVar: resolved.selectedEnvVar,
+          host: u.hostname,
+          port: u.port || '5432',
+          database: u.pathname.replace('/', ''),
+          username: u.username,
+        };
+      } catch (e) {}
+    }
+
+    const pool = createPool();
+    const pingRes = await pool.query('SELECT 1 as connected');
+    const userCountRes = await pool.query('SELECT count(*) as total FROM users');
+    const leaderboardRes = await pool.query('SELECT id, name, email, points FROM users ORDER BY points DESC LIMIT 3');
+
+    return res.json({
+      status: 'healthy',
+      database: connInfo,
+      tests: {
+        ping: pingRes.rows[0]?.connected === 1,
+        totalUsers: parseInt(userCountRes.rows[0]?.total || '0', 10),
+        leaderboardSampleCount: leaderboardRes.rows.length,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Health DB check failed:', err);
+    return res.status(500).json({
+      status: 'unhealthy',
+      error: {
+        code: err?.code,
+        message: err?.message,
+      },
+      timestamp: new Date().toISOString(),
+    });
   }
 });
 
