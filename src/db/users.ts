@@ -400,8 +400,10 @@ export async function getAllUsersFromDb(limit = 150) {
 
 export async function getUserByUid(uid: string) {
   try {
+    if (!uid) return null;
     const records = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
     const user = records[0] || null;
+
     if (user && user.email) {
       const normalized = user.email.toLowerCase().trim();
       const bootstrapConfig = TRUSTED_BOOTSTRAP_ADMINS[normalized];
@@ -419,9 +421,16 @@ export async function getUserByUid(uid: string) {
       }
     }
     return user;
-  } catch (error) {
-    console.error('Failed to get user by UID:', error);
-    throw new Error('Database query failed for user', { cause: error });
+  } catch (error: any) {
+    const cause = error?.cause || error;
+    console.error('USER UID LOOKUP DATABASE ERROR', {
+      lookupUid: uid,
+      databaseErrorCode: cause?.code || error?.code,
+      databaseMessage: cause?.message || error?.message,
+      databaseConstraint: cause?.constraint || error?.constraint,
+      databaseTable: cause?.table || error?.table,
+    });
+    throw new Error('Database query failed for user UID lookup', { cause: error });
   }
 }
 
