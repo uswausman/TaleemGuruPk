@@ -1255,7 +1255,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body || {};
     const cleanEmail = (email || '').trim().toLowerCase();
-    const cleanPassword = (password || '').trim();
+    const cleanPassword = (password || '');
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       return res.status(400).json({ error: 'Please enter a valid administrator or staff email address.' });
