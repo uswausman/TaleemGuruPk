@@ -1,9 +1,11 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.ts';
 
 declare global {
   var _postgresPool: Pool | undefined;
+  var _drizzleDb: NodePgDatabase<typeof schema> | undefined;
+  var _drizzlePoolRef: Pool | undefined;
 }
 
 /**
@@ -261,6 +263,27 @@ export const createPool = (): Pool => {
   return global._postgresPool!;
 };
 
-const pool = createPool();
+export function getDb(): NodePgDatabase<typeof schema> {
+  const currentPool = createPool();
+  if (!global._drizzleDb || global._drizzlePoolRef !== currentPool) {
+    global._drizzleDb = drizzle(currentPool, { schema });
+    global._drizzlePoolRef = currentPool;
+    console.info('[DB_POOL_DIAGNOSTIC]', {
+      poolCreated: Boolean(currentPool),
+      poolReused: false,
+      poolReplacement: true,
+    });
+  }
+  return global._drizzleDb;
+}
 
-export const db = drizzle(pool, { schema });
+export const db = new Proxy({} as NodePgDatabase<typeof schema>, {
+  get(_target, prop, receiver) {
+    const instance = getDb();
+    const value = Reflect.get(instance, prop, receiver);
+    if (typeof value === 'function') {
+      return value.bind(instance);
+    }
+    return value;
+  },
+});
