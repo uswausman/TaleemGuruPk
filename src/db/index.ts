@@ -7,57 +7,99 @@ declare global {
 }
 
 /**
+ * Sanitizes and validates Supabase connection strings to prevent authentication failures on Supabase Pooler (Port 6543 / 5432).
+ */
+export function sanitizeSupabaseConnectionString(urlStr: string): string {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    
+    // Check if connecting via Supabase Pooler (e.g. *.pooler.supabase.com)
+    if (host.includes('pooler.supabase.com')) {
+      let projectRef = 'gshwabwmhzxbxbetqgcp';
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+      if (supabaseUrl) {
+        try {
+          const sHost = new URL(supabaseUrl).hostname;
+          projectRef = sHost.split('.')[0] || projectRef;
+        } catch (e) {}
+      }
+      
+      // Supabase pooler requires username format: postgres.[project_ref]
+      if (parsed.username === 'postgres' && projectRef && !parsed.username.includes('.')) {
+        parsed.username = `postgres.${projectRef}`;
+      }
+      
+      // Transaction pooler uses port 6543
+      if (parsed.port === '5432' || !parsed.port) {
+        parsed.port = '6543';
+      }
+      return parsed.toString();
+    }
+  } catch (e) {
+    // If URL parsing fails, return original string
+  }
+  return urlStr;
+}
+
+/**
  * Resolves the primary connection string from standard environment variables.
  * Supports standard Vercel, Supabase, Neon, and general PostgreSQL configurations.
  */
-export function resolveDatabaseConnectionString(): string | undefined {
+export function resolveDatabaseConnectionString(): { url: string; selectedEnvVar: string } | undefined {
   const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
   const isProd = process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
 
   // 1. Authoritative Supabase connection variables
-  const supabaseUrl = process.env.SUPABASE_DATABASE_URL || process.env.SUPABASE_DB_URL;
-  if (supabaseUrl && supabaseUrl.trim().length > 0) {
-    return supabaseUrl.trim();
+  const supabaseCandidates = [
+    { name: 'SUPABASE_DATABASE_URL', val: process.env.SUPABASE_DATABASE_URL },
+    { name: 'SUPABASE_DB_URL', val: process.env.SUPABASE_DB_URL },
+  ];
+
+  for (const item of supabaseCandidates) {
+    if (item.val && item.val.trim().length > 0) {
+      const sanitized = sanitizeSupabaseConnectionString(item.val.trim());
+      return { url: sanitized, selectedEnvVar: item.name };
+    }
   }
 
-  // 2. Fallback candidate connection variables (like DATABASE_URL, POSTGRES_URL)
+  // 2. Fallback candidate connection variables (DATABASE_URL, POSTGRES_URL, etc.)
   const candidates = [
-    process.env.DATABASE_URL,
-    process.env.POSTGRES_URL,
-    process.env.POSTGRES_PRISMA_URL,
-    process.env.POSTGRES_URL_NON_POOLING,
-    process.env.PG_CONNECTION_STRING,
+    { name: 'DATABASE_URL', val: process.env.DATABASE_URL },
+    { name: 'POSTGRES_URL', val: process.env.POSTGRES_URL },
+    { name: 'POSTGRES_PRISMA_URL', val: process.env.POSTGRES_PRISMA_URL },
+    { name: 'POSTGRES_URL_NON_POOLING', val: process.env.POSTGRES_URL_NON_POOLING },
+    { name: 'PG_CONNECTION_STRING', val: process.env.PG_CONNECTION_STRING },
   ];
 
   for (const candidate of candidates) {
-    if (candidate && typeof candidate === 'string' && candidate.trim().length > 0) {
-      const urlStr = candidate.trim();
+    if (candidate.val && typeof candidate.val === 'string' && candidate.val.trim().length > 0) {
+      const rawUrl = candidate.val.trim();
       
-      // If we are on Vercel or in Production, check if this candidate connection string points to Supabase.
-      // If it doesn't (e.g. points to Neon or Vercel Postgres), do NOT silently override/use it.
+      // If we are on Vercel or in Production, check if candidate points to Supabase.
       if (isVercel || isProd) {
         try {
-          const host = new URL(urlStr).host.toLowerCase();
+          const host = new URL(rawUrl).host.toLowerCase();
           if (host.includes('supabase')) {
-            return urlStr;
+            const sanitized = sanitizeSupabaseConnectionString(rawUrl);
+            return { url: sanitized, selectedEnvVar: candidate.name };
           } else {
-            // Log warning that we are skipping non-Supabase database candidate in production to prevent silent override
-            console.warn(`[Database] WARNING: Skipping non-Supabase connection string candidate (host: ${host}) to prevent silent override of authoritative Supabase database.`);
+            console.warn(`[Database] WARNING: Skipping non-Supabase database candidate ${candidate.name} (host: ${host}) in production to prevent silent override of authoritative Supabase database.`);
             continue;
           }
         } catch (e) {
-          // If URL parsing fails, check substring
-          if (urlStr.toLowerCase().includes('supabase')) {
-            return urlStr;
+          if (rawUrl.toLowerCase().includes('supabase')) {
+            const sanitized = sanitizeSupabaseConnectionString(rawUrl);
+            return { url: sanitized, selectedEnvVar: candidate.name };
           } else {
-            console.warn(`[Database] WARNING: Skipping unparseable non-Supabase connection string candidate to prevent silent override of authoritative Supabase database.`);
+            console.warn(`[Database] WARNING: Skipping unparseable non-Supabase candidate ${candidate.name} in production.`);
             continue;
           }
         }
       }
 
-      // In non-production/local environments, we can return the candidate
-      return urlStr;
+      const sanitized = sanitizeSupabaseConnectionString(rawUrl);
+      return { url: sanitized, selectedEnvVar: candidate.name };
     }
   }
 
@@ -112,14 +154,15 @@ export const createPool = (): Pool => {
       }
       // 2. Authoritative Database / Postgres URL (Vercel, Supabase, Neon, Cloud SQL TCP)
       else {
-        const connectionString = resolveDatabaseConnectionString();
+        const resolved = resolveDatabaseConnectionString();
         const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
-        if (connectionString) {
+        if (resolved && resolved.url) {
+          const connectionString = resolved.url;
           const isLocal = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
           const hasSslDisabled = connectionString.includes('sslmode=disable') || process.env.SQL_SSL === 'false';
 
           const redacted = redactConnectionString(connectionString);
-          console.info(`[Database] Initializing connection pool with connectionString: ${redacted}`);
+          console.info(`[Database] Initializing connection pool via ${resolved.selectedEnvVar}: ${redacted}`);
 
           global._postgresPool = new Pool({
             connectionString,
