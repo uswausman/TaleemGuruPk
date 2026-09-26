@@ -229,6 +229,13 @@ export async function getOrCreateUser(
     }
 
     if (existing) {
+      console.info('[PROFILE_PROVISIONING_DIAGNOSTIC]', {
+        authUserId: uid,
+        profileLookup: 'FOUND',
+        provisioningCalled: false,
+        provisioningResult: 'EXISTING',
+      });
+
       const existingEmail = (existing.email || '').toLowerCase().trim();
       const isAccountBootstrapAdmin = isBootstrapAdmin || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(existingEmail) || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(normalizedEmail);
       const effectiveBootstrap = bootstrapConfig || TRUSTED_BOOTSTRAP_ADMINS[existingEmail] || TRUSTED_BOOTSTRAP_ADMINS[normalizedEmail];
@@ -307,6 +314,13 @@ export async function getOrCreateUser(
         },
       })
       .returning();
+
+    console.info('[PROFILE_PROVISIONING_DIAGNOSTIC]', {
+      authUserId: uid,
+      profileLookup: 'NOT_FOUND',
+      provisioningCalled: true,
+      provisioningResult: result[0] ? 'CREATED' : 'FAILED',
+    });
 
     return result[0];
   } catch (error) {
