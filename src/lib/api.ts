@@ -1,11 +1,46 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 
+let refreshPromise: Promise<any> | null = null;
+
 async function getAuthHeader(): Promise<Record<string, string>> {
   if (isSupabaseConfigured) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        return { Authorization: `Bearer ${session.access_token}` };
+      
+      if (session) {
+        const bufferSeconds = 60;
+        const isExpired = session.expires_at && (session.expires_at - bufferSeconds) < (Date.now() / 1000);
+        
+        if (isExpired) {
+          if (!refreshPromise) {
+            console.info('[AUTH_TOKEN_REFRESH] Token expired or soon to expire. Attempting refresh...');
+            refreshPromise = supabase.auth.refreshSession()
+              .then((res) => {
+                if (res.error) {
+                  console.error('[AUTH_TOKEN_REFRESH] Error refreshing Supabase session:', res.error.message);
+                  return null;
+                }
+                console.info('[AUTH_TOKEN_REFRESH] Session refreshed successfully!');
+                return res.data.session;
+              })
+              .catch((err) => {
+                console.error('[AUTH_TOKEN_REFRESH] Exception during Supabase session refresh:', err);
+                return null;
+              })
+              .finally(() => {
+                refreshPromise = null;
+              });
+          }
+          const newSession = await refreshPromise;
+          if (newSession?.access_token) {
+            return { Authorization: `Bearer ${newSession.access_token}` };
+          } else {
+            console.warn('[AUTH_TOKEN_REFRESH] Refresh failed. Sending empty Authorization to prevent 401 loop.');
+            return {};
+          }
+        } else if (session.access_token) {
+          return { Authorization: `Bearer ${session.access_token}` };
+        }
       }
     } catch (error) {
       console.warn('Failed to retrieve Supabase session token:', error);
