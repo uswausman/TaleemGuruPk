@@ -237,11 +237,9 @@ export const createPool = (): Pool => {
 
       global._postgresPool.on('error', (err) => {
         const msg = err?.message || '';
-        if (msg.includes('Connection terminated unexpectedly') || msg.includes('idle')) {
-          console.info('PostgreSQL idle client connection terminated (expected and managed in serverless/idle states).');
-        } else {
-          console.error('Unexpected error on idle SQL pool client:', err);
-        }
+        console.warn('[Database] Pool client error encountered:', msg);
+        // Clear global pool so the next query re-initializes a fresh connection pool
+        global._postgresPool = undefined;
       });
     } catch (outerErr: any) {
       console.error('Fatal synchronous error initializing database pool:', outerErr);
