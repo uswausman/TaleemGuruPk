@@ -55,6 +55,7 @@ function initializeSupabaseClient(): SupabaseClient {
               },
             }),
             getSession: async () => ({ data: { session: null }, error: null }),
+            refreshSession: async () => ({ data: { session: null }, error: null }),
             getUser: async () => ({ data: { user: null }, error: null }),
             signInWithPassword: async () => { throw configError; },
             signUp: async () => { throw configError; },
