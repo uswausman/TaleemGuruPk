@@ -1514,12 +1514,21 @@ apiRouter.post('/auth/sync', requireAuth, async (req: AuthRequest, res: Response
   }
 });
 
-// 3. Get Current User Profile
-apiRouter.get('/user/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+// 3. Get Current User Profile (/api/auth/me and /api/user/profile)
+const handleGetUserProfile = async (req: AuthRequest, res: Response) => {
   try {
     const uid = req.user?.uid;
     const email = (req.user?.email || '').toLowerCase().trim();
-    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+    if (!uid) {
+      console.info('[AUTH_ME_DIAGNOSTIC]', {
+        authSession: 'NOT_FOUND',
+        authUid: 'NONE',
+        profileLookup: 'NOT_FOUND',
+        provisioningAttempted: false,
+        provisioningResult: 'FAILED',
+      });
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     const normalizedEmail = email;
     const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
@@ -1527,16 +1536,26 @@ apiRouter.get('/user/profile', requireAuth, async (req: AuthRequest, res: Respon
     const bootstrapConfig = bootstrapAdmins[normalizedEmail];
 
     let profile = await getUserByUid(uid);
+    const profileFound = Boolean(profile);
+
     if (!profile) {
       // First-time authenticated user: create initial database record
-      // Provider name is used ONLY as initial fallback on initial creation
       const initialName = isBootstrap
         ? (bootstrapConfig?.name || 'Admin')
         : (req.user?.name || (email ? email.split('@')[0] : 'Learner'));
+
       profile = await getOrCreateUser(uid, normalizedEmail, {
         name: initialName,
       });
     }
+
+    console.info('[AUTH_ME_DIAGNOSTIC]', {
+      authSession: 'FOUND',
+      authUid: uid,
+      profileLookup: profileFound ? 'FOUND' : 'NOT_FOUND',
+      provisioningAttempted: !profileFound,
+      provisioningResult: profileFound ? 'EXISTING' : (profile ? 'CREATED' : 'FAILED'),
+    });
 
     if (isBootstrap && profile) {
       profile.roles = ['Admin'];
@@ -1545,12 +1564,15 @@ apiRouter.get('/user/profile', requireAuth, async (req: AuthRequest, res: Respon
       profile.name = profile.roles.includes('Admin') ? 'Admin' : (email ? email.split('@')[0] : 'Learner');
     }
 
-    res.json({ profile: sanitizeUserForClient(profile) });
+    res.json({ profile: sanitizeUserForClient(profile), user: sanitizeUserForClient(profile) });
   } catch (error: any) {
-    console.error('Error fetching profile:', error);
+    console.error('Error fetching profile in /api/auth/me:', error);
     res.status(500).json({ error: 'Failed to fetch user profile' });
   }
-});
+};
+
+apiRouter.get('/auth/me', requireAuth, handleGetUserProfile);
+apiRouter.get('/user/profile', requireAuth, handleGetUserProfile);
 
 // 4. Update Profile (Authoritative database update when student changes profile)
 apiRouter.put('/user/profile', requireAuth, async (req: AuthRequest, res: Response) => {
