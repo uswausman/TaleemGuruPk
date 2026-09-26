@@ -102,21 +102,19 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
             adminVerified = true;
             sessionToken = cred.session?.access_token || null;
             const roleDisplay = verifiedRoles.includes('teacher') ? 'Teacher' : 'Admin';
+            const resolvedRoles: any = Array.isArray(userProfile?.roles) && userProfile.roles.length > 0
+              ? userProfile.roles
+              : (roleDisplay === 'Teacher' ? ['Teacher'] : ['Admin']);
             adminData = {
               id: user.uid,
               name: userProfile?.name || user.displayName || cleanEmail.split('@')[0].toUpperCase() || 'Administrator',
               email: normalizedUserEmail,
-              roles: (roleDisplay === 'Teacher' ? ['Teacher'] : ['Admin']) as any,
+              roles: resolvedRoles,
               status: 'Active',
               testsCompleted: 0,
               points: 9999,
               joinedDate: new Date().toLocaleDateString('en-GB'),
             };
-          } else {
-            await logoutUser();
-            setErrorMsg(`Access Denied: The account ${normalizedUserEmail} is registered with roles "${(userProfile?.roles || ['Student']).join(', ')}" and does not possess administrative privileges.`);
-            setIsLoading(false);
-            return;
           }
         }
       } catch (err: any) {
@@ -138,7 +136,9 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
               adminVerified = true;
               sessionToken = data.token;
               const isTeacher = (data.user.roles || []).includes('Teacher') || data.user.role === 'Teacher';
-              const resolvedRoles: any = isTeacher ? ['Teacher'] : ['Admin'];
+              const resolvedRoles: any = Array.isArray(data.user.roles) && data.user.roles.length > 0
+                ? data.user.roles
+                : (isTeacher ? ['Teacher'] : ['Admin']);
               adminData = {
                 id: data.user.uid,
                 name: data.user.name || 'Administrator',
@@ -175,10 +175,14 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
           triggerLoginSuccess(adminData!);
         }, 600);
       } else {
+        await logoutUser().catch(() => {});
         throw new Error('Access Denied: The account does not possess administrative privileges.');
       }
     } catch (err: any) {
       console.error('Admin login error:', err);
+      try {
+        await logoutUser();
+      } catch {}
       setErrorMsg(formatAuthErrorMessage(err));
     } finally {
       setIsLoading(false);
