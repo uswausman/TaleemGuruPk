@@ -28,6 +28,7 @@ import {
 import { TestResult, MCQ, StudentProfile } from '../types';
 import { Card } from './ui/Card';
 import { Badge } from './ui/Badge';
+import { EmptyState } from './ui/EmptyState';
 
 export interface StudyRoadmapTrendsChartProps {
   historyResults: TestResult[];
@@ -64,38 +65,7 @@ export const StudyRoadmapTrendsChart: React.FC<StudyRoadmapTrendsChartProps> = (
   // Format and calculate cumulative time-series data
   const trendData = useMemo<TrendDataPoint[]>(() => {
     if (!historyResults || historyResults.length === 0) {
-      // Provide realistic baseline pedagogical trajectory if student is newly enrolled
-      const demoDates = ['Session 1', 'Session 2', 'Session 3', 'Session 4', 'Session 5', 'Session 6'];
-      const demoSubjects = ['Physics', 'Chemistry', 'Biology', 'Mathematics', 'Computer Science', 'English'];
-      let cumQ = 0;
-      let cumC = 0;
-      let cumTime = 0;
-
-      return demoDates.map((label, i) => {
-        const qCount = 15 + i * 5;
-        const acc = Math.min(95, 65 + i * 5);
-        const correct = Math.round((qCount * acc) / 100);
-        cumQ += qCount;
-        cumC += correct;
-        cumTime += Math.round(qCount * 1.2);
-
-        return {
-          id: `demo-${i}`,
-          name: label,
-          date: label,
-          testTitle: `${demoSubjects[i % demoSubjects.length]} Diagnostic Test ${i + 1}`,
-          subject: demoSubjects[i % demoSubjects.length],
-          sessionQuestions: qCount,
-          sessionCorrect: correct,
-          sessionWrong: qCount - correct,
-          sessionAccuracy: acc,
-          cumulativeQuestions: cumQ,
-          cumulativeCorrect: cumC,
-          cumulativeAccuracy: Math.round((cumC / cumQ) * 100),
-          cumulativeTimeMinutes: cumTime,
-          grade: acc >= 80 ? 'A+' : acc >= 70 ? 'A' : 'B',
-        };
-      });
+      return [];
     }
 
     // Sort chronologically ascending
@@ -192,7 +162,29 @@ export const StudyRoadmapTrendsChart: React.FC<StudyRoadmapTrendsChartProps> = (
     };
   }, [trendData]);
 
-  const isSimulated = historyResults.length === 0;
+  if (trendData.length === 0) {
+    return (
+      <Card className="p-6 sm:p-8 space-y-4 shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-3xl">
+        <div className="flex items-center gap-2 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <span className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-cyan-400">
+            <TrendingUp className="w-4 h-4" />
+          </span>
+          <div>
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+              Cumulative Progress & Mastery Trends
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Track your cumulative question volume, accuracy trajectory, and learning pace over time.
+            </p>
+          </div>
+        </div>
+        <EmptyState
+          title="No tests attempted yet"
+          description="Start practicing to build your progress."
+        />
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-5 sm:p-7 space-y-6 shadow-sm border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-3xl">
@@ -206,15 +198,9 @@ export const StudyRoadmapTrendsChart: React.FC<StudyRoadmapTrendsChartProps> = (
             <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
               Cumulative Progress & Mastery Trends
             </h2>
-            {isSimulated ? (
-              <Badge variant="amber" size="xs">
-                Sample Progression Model
-              </Badge>
-            ) : (
-              <Badge variant="emerald" size="xs">
-                Live MCQ Logs ({historyResults.length} Sessions)
-              </Badge>
-            )}
+            <Badge variant="emerald" size="xs">
+              Live MCQ Logs ({historyResults.length} Sessions)
+            </Badge>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Track your cumulative question volume, accuracy trajectory, and learning pace over time.

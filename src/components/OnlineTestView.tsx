@@ -61,6 +61,20 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
   const shuffledListRef = useRef<MCQ[]>(test.questions || []);
   const hasAutoSubmittedRef = useRef<boolean>(false);
   const attemptIdRef = useRef<string | null>(null);
+  const candidateSessionIdRef = useRef<string>(
+    (() => {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('taleem_guru_candidate_session');
+        if (stored) return stored;
+        const generated = `candidate-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        try {
+          localStorage.setItem('taleem_guru_candidate_session', generated);
+        } catch {}
+        return generated;
+      }
+      return `candidate-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    })()
+  );
 
   // Keep refs synchronized with latest state
   useEffect(() => {
@@ -81,51 +95,63 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
 
     async function initSession() {
       try {
+        const storedSession = typeof localStorage !== 'undefined' ? localStorage.getItem('taleem_guru_candidate_session') || undefined : undefined;
         const response = await startExamApi({
           testId: test.id,
+          candidateSessionId: storedSession,
           studentName,
         });
 
         if (!isMounted) return;
 
-        if (response && response.attemptId) {
-          setAttemptId(response.attemptId);
-          attemptIdRef.current = response.attemptId;
-
-          if (response.questions && response.questions.length > 0) {
-            const mappedQuestions: MCQ[] = response.questions.map((q: any) => ({
-              id: q.id,
-              question: q.question,
-              options: q.options || [],
-              correctAnswer: 0, // Hidden client-side during exam
-              explanation: '',
-              subject: q.subject || test.subject,
-              chapter: q.chapter,
-              topic: q.topic,
-              difficulty: q.difficulty || 'Medium',
-              tags: [],
-            }));
-            setShuffledList(mappedQuestions);
-            shuffledListRef.current = mappedQuestions;
+        if (response) {
+          if (response.candidateSessionId) {
+            candidateSessionIdRef.current = response.candidateSessionId;
+            if (typeof localStorage !== 'undefined') {
+              localStorage.setItem('taleem_guru_candidate_session', response.candidateSessionId);
+            }
           }
 
-          if (response.timeRemainingSeconds !== undefined) {
-            const serverRemaining = Math.max(10, response.timeRemainingSeconds);
-            setTimeRemainingSeconds(serverRemaining);
-            endTimeRef.current = Date.now() + serverRemaining * 1000;
-          }
+          if (response.attemptId) {
+            setAttemptId(response.attemptId);
+            attemptIdRef.current = response.attemptId;
 
-          if (response.savedAnswers) {
-            const initialMap: Record<string, UserAnswer> = {};
-            Object.entries(response.savedAnswers).forEach(([qId, ans]: [string, any]) => {
-              initialMap[qId] = {
-                questionId: qId,
-                selectedOption: ans.selectedOption !== undefined ? ans.selectedOption : null,
-                markedForReview: Boolean(ans.markedForReview),
-                timeSpentSeconds: ans.timeSpentSeconds || 0,
-              };
-            });
-            setAnswers((prev) => ({ ...prev, ...initialMap }));
+            const questionsPayload = response.questions || response.test?.questions;
+            if (questionsPayload && questionsPayload.length > 0) {
+              const mappedQuestions: MCQ[] = questionsPayload.map((q: any) => ({
+                id: q.id,
+                question: q.question,
+                options: q.options || [],
+                correctAnswer: 0, // Hidden client-side during exam
+                explanation: '',
+                subject: q.subject || test.subject,
+                chapter: q.chapter,
+                topic: q.topic,
+                difficulty: q.difficulty || 'Medium',
+                tags: [],
+              }));
+              setShuffledList(mappedQuestions);
+              shuffledListRef.current = mappedQuestions;
+            }
+
+            if (response.timeRemainingSeconds !== undefined) {
+              const serverRemaining = Math.max(10, response.timeRemainingSeconds);
+              setTimeRemainingSeconds(serverRemaining);
+              endTimeRef.current = Date.now() + serverRemaining * 1000;
+            }
+
+            if (response.savedAnswers) {
+              const initialMap: Record<string, UserAnswer> = {};
+              Object.entries(response.savedAnswers).forEach(([qId, ans]: [string, any]) => {
+                initialMap[qId] = {
+                  questionId: qId,
+                  selectedOption: ans.selectedOption !== undefined ? ans.selectedOption : null,
+                  markedForReview: Boolean(ans.markedForReview),
+                  timeSpentSeconds: ans.timeSpentSeconds || 0,
+                };
+              });
+              setAnswers((prev) => ({ ...prev, ...initialMap }));
+            }
           }
         }
       } catch (err) {
@@ -236,7 +262,7 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
     const activeAttemptId = attemptIdRef.current;
     const timeUsed = totalDurationSeconds - Math.max(0, timeRemainingSecs);
 
-    if (activeAttemptId) {
+    if (activeAttemptId && activeAttemptId !== 'undefined' && activeAttemptId !== 'null' && activeAttemptId.trim().length > 0) {
       try {
         const payloadAnswers: Record<string, any> = {};
         Object.entries(answersRef.current).forEach(([qId, ans]) => {
@@ -250,6 +276,7 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
         const evalResponse = await submitExamApi(activeAttemptId, {
           answers: payloadAnswers,
           timeSpentSeconds: Math.max(5, timeUsed),
+          candidateSessionId: candidateSessionIdRef.current,
         });
 
         if (evalResponse && evalResponse.result) {
@@ -338,11 +365,13 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
       };
 
       // Background Autosave to Server
-      if (attemptIdRef.current) {
-        saveExamAnswerApi(attemptIdRef.current, {
+      const curAttemptId = attemptIdRef.current;
+      if (curAttemptId && curAttemptId !== 'undefined' && curAttemptId !== 'null') {
+        saveExamAnswerApi(curAttemptId, {
           questionId: currentMCQ.id,
           selectedOption: optIdx,
           markedForReview: updated[currentMCQ.id]?.markedForReview,
+          candidateSessionId: candidateSessionIdRef.current,
         });
       }
 
@@ -364,11 +393,13 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
         },
       };
 
-      if (attemptIdRef.current) {
-        saveExamAnswerApi(attemptIdRef.current, {
+      const curAttemptId = attemptIdRef.current;
+      if (curAttemptId && curAttemptId !== 'undefined' && curAttemptId !== 'null') {
+        saveExamAnswerApi(curAttemptId, {
           questionId: currentMCQ.id,
           selectedOption: null,
           markedForReview: updated[currentMCQ.id]?.markedForReview,
+          candidateSessionId: candidateSessionIdRef.current,
         });
       }
 
@@ -391,11 +422,13 @@ export const OnlineTestView: React.FC<OnlineTestViewProps> = ({
         },
       };
 
-      if (attemptIdRef.current) {
-        saveExamAnswerApi(attemptIdRef.current, {
+      const curAttemptId = attemptIdRef.current;
+      if (curAttemptId && curAttemptId !== 'undefined' && curAttemptId !== 'null') {
+        saveExamAnswerApi(curAttemptId, {
           questionId: currentMCQ.id,
           selectedOption: updated[currentMCQ.id]?.selectedOption ?? null,
           markedForReview: newMarked,
+          candidateSessionId: candidateSessionIdRef.current,
         });
       }
 

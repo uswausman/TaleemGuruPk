@@ -9,14 +9,50 @@ import {
 } from 'lucide-react';
 import { ViewMode } from '../types';
 import { ReportIssueModal } from './ReportIssueModal';
+import { useSiteSettings, BrandLogoText } from '../context/SiteSettingsContext';
 
 interface FooterProps {
   onNavigate: (view: ViewMode) => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
+  const { siteName, tagline, logoUrl, logoAlt, siteNamePrimaryColor, siteNameSecondaryColor, getSetting } = useSiteSettings();
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  const [email, setEmail] = useState('');
+  const [subEmail, setSubEmail] = useState('');
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const [subMessage, setSubMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(subEmail)) {
+        setSubMessage({ type: 'error', text: 'Please enter a valid email address.' });
+        return;
+    }
+    setIsSubscribing(true);
+    setSubMessage(null);
+    try {
+        const res = await fetch('/api/newsletter/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: subEmail }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            setSubMessage({ type: 'success', text: data.message });
+            setSubEmail('');
+        } else {
+            setSubMessage({ type: 'error', text: data.error || 'Something went wrong.' });
+        }
+    } catch (err) {
+        setSubMessage({ type: 'error', text: 'Failed to connect. Please try again.' });
+    } finally {
+        setIsSubscribing(false);
+    }
+  };
+
+  const footerDesc =
+    getSetting('footer.description') ||
+    `${siteName} is an educational test preparation platform designed for Pakistani students preparing for Matric, Intermediate, MDCAT, ECAT, and competitive exams. We offer chapter-wise interactive MCQs, timed mock examinations, and solved past papers.`;
 
   return (
     <footer className="bg-slate-950 text-slate-300 border-t border-slate-800/80 pt-16 pb-12 relative overflow-hidden">
@@ -30,24 +66,24 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden shrink-0">
                 <img 
-                  src="/assets/taleemguru-logo-original.png" 
-                  alt="Taleem Guru Official Logo" 
+                  src={logoUrl || "/assets/taleemguru-logo-original.png"} 
+                  alt={logoAlt || `${siteName} Official Logo`} 
                   className="w-8 h-8 object-contain"
                   loading="lazy"
                 />
               </div>
               <div>
-                <span className="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
-                  TALEEM <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">GURU</span>
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <BrandLogoText className="text-xl font-black tracking-tight" />
+                </div>
                 <span className="block text-[10px] font-bold text-cyan-400 uppercase tracking-wider">
-                  Learn. Practice. Test. Improve.
+                  {tagline}
                 </span>
               </div>
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed max-w-md">
-              TaleemGuru is an educational test preparation platform designed for Pakistani students preparing for Matric, Intermediate, MDCAT, ECAT, and competitive exams. We offer chapter-wise interactive MCQs, timed mock examinations, and solved past papers.
+              {footerDesc}
             </p>
 
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400 pt-1">
@@ -60,21 +96,29 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
               <h4 className="font-extrabold text-white uppercase tracking-wider text-[11px] mb-3">
                 Get Weekly Exam Tips
               </h4>
-              <form className="relative max-w-xs" onSubmit={(e) => e.preventDefault()}>
+              <form className="relative max-w-xs space-y-2" onSubmit={handleSubscribe}>
                 <input
                   type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  value={subEmail}
+                  onChange={(e) => setSubEmail(e.target.value)}
                   placeholder="Enter your email"
-                  className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  disabled={isSubscribing}
+                  className="w-full pl-3 pr-10 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-50"
                   required
                 />
                 <button
                   type="submit"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-cyan-400 hover:text-white"
+                  disabled={isSubscribing}
+                  className="absolute right-2 top-2 text-cyan-400 hover:text-white disabled:opacity-50"
                 >
-                  <Send className="w-4 h-4" />
+                  {isSubscribing ? '...' : <Send className="w-4 h-4" />}
                 </button>
+                {subMessage && (
+                  <p className={`text-[10px] ${subMessage.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {subMessage.text}
+                  </p>
+                )}
+                <p className="text-[9px] text-slate-500">Subscribe for weekly exam tips. You can unsubscribe anytime.</p>
               </form>
             </div>
           </div>
@@ -206,14 +250,14 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
         {/* Transparency Disclaimer Notice */}
         <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 text-[11px] text-slate-400 leading-relaxed">
           <p>
-            <strong className="text-slate-300 font-semibold">Educational Platform Notice:</strong> TaleemGuru is an independent student study and exam preparation platform. Board names (e.g. BISE Lahore, FBISE Islamabad, BISE Karachi), university names, and public examination references are utilized solely for contextual identification and syllabus-mapping purposes. TaleemGuru is not affiliated with, endorsed by, or operated by any official examination board or government testing agency.
+            <strong className="text-slate-300 font-semibold">Educational Platform Notice:</strong> {siteName} is an independent student study and exam preparation platform. Board names (e.g. BISE Lahore, FBISE Islamabad, BISE Karachi), university names, and public examination references are utilized solely for contextual identification and syllabus-mapping purposes. {siteName} is not affiliated with, endorsed by, or operated by any official examination board or government testing agency.
           </p>
         </div>
 
         {/* Bottom Bar */}
         <div className="pt-6 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4 text-center sm:text-left">
-            <p>© {new Date().getFullYear()} TALEEM GURU Pakistan. Learn. Practice. Test. Improve.</p>
+            <p>© {new Date().getFullYear()} {siteName} Pakistan. {tagline}</p>
             <div className="hidden sm:block text-slate-700">•</div>
             <div className="flex items-center gap-3 text-slate-400">
               <button

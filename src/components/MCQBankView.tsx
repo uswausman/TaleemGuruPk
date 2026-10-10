@@ -19,10 +19,12 @@ import {
 } from 'lucide-react';
 import { MCQ, Difficulty } from '../types';
 import { exportMCQsToWatermarkedPDF, downloadTextWithWatermark } from '../utils/watermark';
+import { parseNavContext, NavigationContext } from '../utils/navigationContext';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { Card } from './ui/Card';
 import { EmptyState } from './ui/EmptyState';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface MCQBankViewProps {
   mcqs?: MCQ[];
@@ -31,6 +33,7 @@ interface MCQBankViewProps {
   onToggleSaveQuestion?: (mcqId: string) => void;
   studentName?: string;
   initialSubject?: string;
+  comparisonContext?: NavigationContext | null;
 }
 
 export const MCQBankView: React.FC<MCQBankViewProps> = ({
@@ -40,12 +43,30 @@ export const MCQBankView: React.FC<MCQBankViewProps> = ({
   onToggleSaveQuestion,
   studentName = 'Student',
   initialSubject = 'All',
+  comparisonContext,
 }) => {
+  const { siteName } = useSiteSettings();
   const effectiveMCQs = mcqs || allMCQs || [];
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSubject, setSelectedSubject] = useState(initialSubject || 'All');
-  const [selectedClass, setSelectedClass] = useState('All');
-  const [selectedBoard, setSelectedBoard] = useState('All');
+
+  const initParsed = parseNavContext(initialSubject);
+
+  const [selectedSubject, setSelectedSubject] = useState(comparisonContext?.subject || (initParsed.subject !== 'All' ? initParsed.subject : 'All'));
+  const [selectedClass, setSelectedClass] = useState(comparisonContext?.classLevel || (initParsed.classLevel !== 'All' ? initParsed.classLevel : 'All'));
+  const [selectedBoard, setSelectedBoard] = useState(comparisonContext?.board || (initParsed.board !== 'All' ? initParsed.board : 'All'));
+
+  React.useEffect(() => {
+    if (comparisonContext) {
+      setSelectedSubject(comparisonContext.subject);
+      setSelectedClass(comparisonContext.classLevel);
+      setSelectedBoard(comparisonContext.board);
+    } else {
+      const c = parseNavContext(initialSubject);
+      if (c.subject && c.subject !== 'All') setSelectedSubject(c.subject);
+      if (c.classLevel && c.classLevel !== 'All') setSelectedClass(c.classLevel);
+      if (c.board && c.board !== 'All') setSelectedBoard(c.board);
+    }
+  }, [comparisonContext, initialSubject]);
   const [selectedDifficulty, setSelectedDifficulty] = useState('All');
   const [selectedExam, setSelectedExam] = useState('All');
   const [revealedAnswers, setRevealedAnswers] = useState<Record<string, boolean>>({});
@@ -54,7 +75,7 @@ export const MCQBankView: React.FC<MCQBankViewProps> = ({
   const [pageSize, setPageSize] = useState<number>(10);
 
   const subjects = ['All', 'Physics', 'Chemistry', 'Biology', 'Mathematics', 'Computer Science', 'Pakistan Studies', 'Islamiat', 'English', 'IQ & Intelligence', 'Current Affairs'];
-  const classes = ['All', 'Class 9 (Matric Pt 1)', 'Class 10 (Matric Pt 2)', 'Class 11 (FSc / ICS Pt 1)', 'Class 12 (FSc / ICS Pt 2)', 'BS / Masters'];
+  const classes = ['All', 'Class 9', 'Class 10', 'Class 11', 'Class 12', 'Class 9 (Matric Pt 1)', 'Class 10 (Matric Pt 2)', 'Class 11 (FSc / ICS Pt 1)', 'Class 12 (FSc / ICS Pt 2)', 'BS / Masters'];
   const boards = ['All', 'BISE Lahore', 'BISE Rawalpindi', 'BISE Faisalabad', 'BISE Gujranwala', 'BSEK Karachi', 'FBISE Islamabad', 'UHS Lahore'];
   const exams = ['All', 'MDCAT', 'ECAT', 'CSS', 'PPSC', 'Pakistan Army', 'NTS'];
   const difficulties = ['All', 'Easy', 'Medium', 'Hard'];
@@ -64,7 +85,7 @@ export const MCQBankView: React.FC<MCQBankViewProps> = ({
   };
 
   const handleCopyQuestion = (mcq: MCQ) => {
-    const text = `Q: ${mcq.question}\n(A) ${mcq.options[0]}\n(B) ${mcq.options[1]}\n(C) ${mcq.options[2]}\n(D) ${mcq.options[3]}\nAnswer: ${mcq.options[mcq.correctAnswer]}\nSource: Taleem Guru Pakistan (www.taleemguru.pk)`;
+    const text = `Q: ${mcq.question}\n(A) ${mcq.options[0]}\n(B) ${mcq.options[1]}\n(C) ${mcq.options[2]}\n(D) ${mcq.options[3]}\nAnswer: ${mcq.options[mcq.correctAnswer]}\nSource: ${siteName} Pakistan (www.taleemguru.pk)`;
     navigator.clipboard.writeText(text);
     setCopiedId(mcq.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -72,23 +93,35 @@ export const MCQBankView: React.FC<MCQBankViewProps> = ({
 
   const filteredMCQs = useMemo(() => {
     return effectiveMCQs.filter((m) => {
-      const qLower = searchQuery.toLowerCase();
+      if (!m) return false;
+      const qLower = (searchQuery || '').toLowerCase();
+      const mQ = (m.question || '').toLowerCase();
+      const mSub = (m.subject || '').toLowerCase();
+      const mChap = (m.chapter || '').toLowerCase();
+      const mTags = Array.isArray(m.tags) ? m.tags : [];
+      const mCls = (m.classLevel || '').toLowerCase();
+      const mBrd = (m.board || '').toLowerCase();
+
       const matchesSearch =
         !searchQuery ||
-        m.question.toLowerCase().includes(qLower) ||
-        m.subject.toLowerCase().includes(qLower) ||
-        m.chapter?.toLowerCase().includes(qLower) ||
-        m.tags.some((t) => t.toLowerCase().includes(qLower));
+        mQ.includes(qLower) ||
+        mSub.includes(qLower) ||
+        mChap.includes(qLower) ||
+        mTags.some((t) => (t || '').toLowerCase().includes(qLower));
 
-      const matchesSubject = selectedSubject === 'All' || m.subject === selectedSubject;
-      const matchesClass = selectedClass === 'All' || m.classLevel === selectedClass;
-      const matchesBoard = selectedBoard === 'All' || m.board === selectedBoard;
+      const selSub = (selectedSubject || 'All');
+      const selCls = (selectedClass || 'All');
+      const selBrd = (selectedBoard || 'All');
+
+      const matchesSubject = selSub === 'All' || mSub === selSub.toLowerCase();
+      const matchesClass = selCls === 'All' || mCls === selCls.toLowerCase() || mCls.includes(selCls.toLowerCase()) || selCls.toLowerCase().includes(mCls);
+      const matchesBoard = selBrd === 'All' || (!m.board || mBrd === selBrd.toLowerCase() || mBrd.includes(selBrd.toLowerCase()) || selBrd.toLowerCase().includes(mBrd));
       const matchesDiff = selectedDifficulty === 'All' || m.difficulty === selectedDifficulty;
       const matchesExam = selectedExam === 'All' || m.exam === selectedExam;
 
       return matchesSearch && matchesSubject && matchesClass && matchesBoard && matchesDiff && matchesExam;
     });
-  }, [mcqs, searchQuery, selectedSubject, selectedClass, selectedBoard, selectedDifficulty, selectedExam]);
+  }, [effectiveMCQs, searchQuery, selectedSubject, selectedClass, selectedBoard, selectedDifficulty, selectedExam]);
 
   const totalPages = Math.ceil(filteredMCQs.length / pageSize);
   const paginatedMCQs = useMemo(() => {
@@ -247,6 +280,13 @@ export const MCQBankView: React.FC<MCQBankViewProps> = ({
 
       {/* MCQs List */}
       <div className="space-y-4">
+        {paginatedMCQs.length === 0 && (
+          <EmptyState
+            title={`No data available for ${selectedBoard} • ${selectedClass} • ${selectedSubject}`}
+            description={`No MCQ questions found matching Board: ${selectedBoard}, Class: ${selectedClass}, Subject: ${selectedSubject}.`}
+          />
+        )}
+
         {paginatedMCQs.map((mcq, idx) => {
           const isRevealed = revealedAnswers[mcq.id];
           const isSaved = savedQuestionIds.includes(mcq.id);

@@ -36,6 +36,7 @@ import {
   canViewAuditLogsForRoles,
   isSectionAllowedForRoles,
 } from '../../utils/staffRolePermissions';
+import { useSiteSettings } from '../../context/SiteSettingsContext';
 
 interface AdminDashboardTabProps {
   adminUser?: AdminUser | null;
@@ -88,6 +89,7 @@ export const AdminDashboardTab: React.FC<AdminDashboardTabProps> = (props) => {
   const rawResults = props.historyResults || props.results || [];
 
   // Live database stats & reports state
+  const { siteName } = useSiteSettings();
   const [dbStats, setDbStats] = useState<any>(null);
   const [teacherStats, setTeacherStats] = useState<any>(null);
   const [reportCounts, setReportCounts] = useState<{ total: number; open: number; resolved: number }>({
@@ -249,7 +251,7 @@ export const AdminDashboardTab: React.FC<AdminDashboardTabProps> = (props) => {
               <Activity className="w-3.5 h-3.5 animate-pulse" /> Real-time Learning Engine Active
             </div>
             <h2 className="text-2xl font-black tracking-tight">
-              Taleem Guru Central Administration
+              {siteName} Central Administration
             </h2>
             <p className="text-slate-300 text-xs sm:text-sm mt-1 max-w-2xl">
               Production dashboard connected to PostgreSQL and Supabase Auth. Verified metrics for Class 9–12, MDCAT, ECAT, CSS, and Pakistan education boards.
@@ -305,27 +307,27 @@ export const AdminDashboardTab: React.FC<AdminDashboardTabProps> = (props) => {
           <div
             key={stat.title}
             onClick={() => onNavigateTab(stat.tab)}
-            className={`p-4 rounded-2xl border transition-all hover:shadow-md cursor-pointer ${stat.bg} flex flex-col justify-between`}
+            className={`p-5 rounded-2xl border transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 cursor-pointer ${stat.bg} flex flex-col justify-between group`}
           >
             <div className="flex items-center justify-between">
-              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 shadow-2xs">
+              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 shadow-xs group-hover:scale-105 transition-transform">
                 {stat.icon}
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-slate-800">
+              <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-white/90 dark:bg-slate-900/90 text-slate-700 dark:text-slate-300 border border-slate-200/80 dark:border-slate-800 shadow-2xs">
                 {stat.badge}
               </span>
             </div>
 
-            <div className="mt-3">
-              <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            <div className="mt-4">
+              <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
                 {stat.value}
               </div>
-              <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mt-0.5">
+              <div className="text-xs font-extrabold text-slate-800 dark:text-slate-200 mt-1">
                 {stat.title}
               </div>
               <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 flex items-center justify-between">
                 <span>{stat.subValue}</span>
-                <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 opacity-60" />
+                <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-600 dark:group-hover:text-cyan-400 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all" />
               </div>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import {
+import type {
   BoardInfo,
   AcademicClassInfo,
   AcademicSubjectInfo,
@@ -6,7 +6,7 @@ import {
   TopicInfo,
   StudyNote,
   PastPaper,
-} from '../types';
+} from '../types.ts';
 
 // ==========================================
 // 1. BOARDS (Punjab, Federal, Sindh, KPK, Balochistan, AJK)

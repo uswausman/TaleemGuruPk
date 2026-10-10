@@ -979,9 +979,9 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
 
       {/* Add / Edit Question Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full shadow-2xl p-6 relative my-8">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl relative flex flex-col max-h-[90vh] my-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 {editingQuestion ? (
                   <>
@@ -994,6 +994,7 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                 )}
               </h3>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg cursor-pointer"
               >
@@ -1001,7 +1002,8 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 mt-4 text-xs">
+              <div className="flex-1 overflow-y-auto pr-1.5 space-y-4">
               {/* Question Text */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1282,9 +1284,10 @@ export const AdminQuestionsTab: React.FC<AdminQuestionsTabProps> = ({
                   </select>
                 </div>
               </div>
+              </div>
 
               {/* Submit Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

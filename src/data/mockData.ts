@@ -1,4 +1,4 @@
-import {
+import type {
   MCQ,
   BoardInfo,
   PastPaper,
@@ -8,12 +8,12 @@ import {
   TestConfig,
   TestResult,
   AdminUser,
-} from '../types';
+} from '../types.ts';
 import {
   PAKISTAN_BOARDS,
   MASTER_PAST_PAPERS,
   MASTER_STUDY_NOTES,
-} from './educationalHierarchy';
+} from './educationalHierarchy.ts';
 
 export const PROVINCES = ['All', 'Punjab', 'Federal', 'Sindh', 'KPK', 'Balochistan', 'AJK'] as const;
 
@@ -194,6 +194,56 @@ export const ENTRY_TESTS_DATA = [
     subjects: ['Verbal', 'Analytical', 'Quantitative', 'Subject-specific'],
     description: 'National Aptitude Test for bachelor admissions and Graduate Assessment Test for MPhil/MS.',
     duration: '120 Minutes',
+  },
+  {
+    id: 'css-mpt',
+    name: 'CSS MPT Screening Exam',
+    type: 'Civil Services & CSS',
+    organizer: 'FPSC (Federal Public Service Commission)',
+    totalMarks: 200,
+    subjects: ['Pakistan Affairs (50)', 'Current Affairs & GK (50)', 'English Grammar (50)', 'General Science & Ability (50)'],
+    description: 'Mandatory preliminary screening test for Central Superior Services competitive examination.',
+    duration: '200 Minutes',
+  },
+  {
+    id: 'pms',
+    name: 'PMS Screening Exam',
+    type: 'Civil Services & PMS',
+    organizer: 'PPSC / SPSC / KPPSC / BPSC',
+    totalMarks: 100,
+    subjects: ['General Knowledge (30)', 'Pakistan Studies (20)', 'Current Affairs (20)', 'Islamic Studies (15)', 'Basic Math & Urdu (15)'],
+    description: 'Provincial administrative service preliminary recruitment screening examination.',
+    duration: '90 Minutes',
+  },
+  {
+    id: 'pak-army',
+    name: 'Pakistan Army Initial Test (PMA Long Course / TCC)',
+    type: 'Armed Forces',
+    organizer: 'Pakistan Army / AS&RC Selection Centers',
+    totalMarks: 150,
+    subjects: ['Verbal Intelligence (84)', 'Non-Verbal Intelligence (64)', 'Academic: English, Math, GK (50)'],
+    description: 'Initial computer-based intelligence and academic examination for PMA Long Course and Cadet officers.',
+    duration: '90 Minutes',
+  },
+  {
+    id: 'pak-navy',
+    name: 'Pakistan Navy Initial Test (PN Cadet & SSC)',
+    type: 'Armed Forces',
+    organizer: 'Pakistan Navy Selection Centers',
+    totalMarks: 150,
+    subjects: ['Verbal & Non-Verbal (100)', 'Academic: Physics, Maths, English (75)'],
+    description: 'Initial computerized entrance and intelligence test for PN Cadet permanent and short commission.',
+    duration: '75 Minutes',
+  },
+  {
+    id: 'pak-airforce',
+    name: 'Pakistan Air Force Initial Test (GDP & CAE)',
+    type: 'Armed Forces',
+    organizer: 'Pakistan Air Force Selection Centers',
+    totalMarks: 150,
+    subjects: ['E-Testing Intelligence (100)', 'Physics (75)', 'Mathematics (75)', 'English (50)'],
+    description: 'Computerized e-testing exam for General Duty Pilot, Aeronautical Engineering and Air Defence.',
+    duration: '105 Minutes',
   },
 ];
 
@@ -730,7 +780,7 @@ export const POPULAR_TESTS: TestConfig[] = [
     testType: 'Chapter Test',
     category: 'Matric',
     subject: 'Physics',
-    classLevel: 'Class 10 (Matric Pt 2)',
+    classLevel: 'Class 10',
     board: 'BISE Lahore',
     durationMinutes: 15,
     totalQuestions: 10,
@@ -746,7 +796,7 @@ export const POPULAR_TESTS: TestConfig[] = [
     testType: 'Entry Test',
     category: 'MDCAT',
     subject: 'Biology',
-    classLevel: 'Class 12 (FSc / ICS Pt 2)',
+    classLevel: 'Class 12',
     exam: 'MDCAT',
     durationMinutes: 20,
     totalQuestions: 15,
@@ -878,60 +928,6 @@ export const VIDEO_LECTURES_DATA: VideoLecture[] = [
 // No fabricated, hardcoded, or demo student rankings.
 export const LEADERBOARD_DATA: LeaderboardUser[] = [];
 
-export const SAMPLE_PAST_RESULTS: TestResult[] = [
-  {
-    id: 'res-phys-chap5-1',
-    testId: 'test-class10-phy-chap5',
-    testTitle: 'Class 10 Physics - Chapter 5 Geometrical Optics Test',
-    testType: 'Chapter Test',
-    subject: 'Physics',
-    category: 'Matric',
-    timestamp: '10/09/2026, 03:45 PM',
-    totalQuestions: 10,
-    answeredCount: 10,
-    correctCount: 9,
-    wrongCount: 1,
-    skippedCount: 0,
-    marksObtained: 9,
-    totalMarks: 10,
-    percentage: 90,
-    grade: 'A+',
-    timeUsedSeconds: 420,
-    totalDurationSeconds: 900,
-    percentileRank: 95,
-    answers: [
-      { questionId: 'mcq-1', selectedOption: 1, markedForReview: false, timeSpentSeconds: 28 },
-      { questionId: 'mcq-2', selectedOption: 1, markedForReview: false, timeSpentSeconds: 32 },
-      { questionId: 'mcq-3', selectedOption: 1, markedForReview: false, timeSpentSeconds: 22 },
-      { questionId: 'mcq-4', selectedOption: 2, markedForReview: false, timeSpentSeconds: 45 },
-    ],
-    questions: MCQS_DATABASE.slice(0, 4),
-  },
-  {
-    id: 'res-mdcat-bio-2',
-    testId: 'test-mdcat-biology-mock',
-    testTitle: 'MDCAT Biology High-Yield Mock Series 2024',
-    testType: 'Entry Test',
-    subject: 'Biology',
-    category: 'MDCAT',
-    timestamp: '08/09/2026, 11:20 AM',
-    totalQuestions: 15,
-    answeredCount: 14,
-    correctCount: 12,
-    wrongCount: 2,
-    skippedCount: 1,
-    marksObtained: 11.5,
-    totalMarks: 15,
-    percentage: 76.6,
-    grade: 'A',
-    timeUsedSeconds: 980,
-    totalDurationSeconds: 1200,
-    percentileRank: 88,
-    answers: [
-      { questionId: 'mcq-5', selectedOption: 0, markedForReview: false, timeSpentSeconds: 35 },
-      { questionId: 'mcq-6', selectedOption: 1, markedForReview: false, timeSpentSeconds: 40 },
-    ],
-    questions: MCQS_DATABASE.filter((m) => m.subject === 'Biology').slice(0, 4),
-  },
-];
+export const SAMPLE_PAST_RESULTS: TestResult[] = [];
+
 

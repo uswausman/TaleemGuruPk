@@ -13,6 +13,7 @@ export type ViewMode =
   | 'past-papers'
   | 'notes'
   | 'study-material'
+  | 'syllabus'
   | 'entry-tests'
   | 'competitive-exams'
   | 'armed-forces'
@@ -233,6 +234,7 @@ export interface SafeExamQuestion {
 export interface ExamStartResponse {
   success: boolean;
   attemptId: string;
+  candidateSessionId?: string;
   test: {
     id: string;
     title: string;

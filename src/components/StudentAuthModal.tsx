@@ -32,6 +32,7 @@ import {
   isSupabaseConfigured,
 } from '../lib/supabaseService';
 import { getAuthRedirectUrl } from '../lib/config';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface StudentAuthModalProps {
   isOpen: boolean;
@@ -48,6 +49,7 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
   onUpdateStudent,
   initialMode = 'login',
 }) => {
+  const { siteName, logoUrl, logoAlt } = useSiteSettings();
   const [mode, setMode] = useState<'login' | 'register' | 'forgot-password'>(initialMode);
   const [name, setName] = useState(currentStudent?.name || '');
   const [email, setEmail] = useState(currentStudent?.email || '');
@@ -233,7 +235,7 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
           const newProfile = mapSupabaseUserToStudentProfile(user);
           await syncUserProfile(user.uid, newProfile);
           onUpdateStudent(newProfile);
-          setSuccessMsg('Account registered successfully via Supabase Auth! Welcome to Taleem Guru.');
+          setSuccessMsg(`Account registered successfully via Supabase Auth! Welcome to ${siteName}.`);
           setTimeout(() => {
             onClose();
           }, 800);
@@ -273,8 +275,8 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
                     email: adminData.user.email,
                     role: adminData.user.role,
                     status: 'Active',
-                    testsCompleted: 0,
-                    points: 9999,
+                    testsCompleted: adminData.user.testsTaken || 0,
+                    points: adminData.user.points || 0,
                     joinedDate: new Date().toLocaleDateString('en-GB'),
                   }));
                 } catch {}
@@ -286,9 +288,9 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
                   targetExam: 'MDCAT / BISE Board Exam',
                   classLevel: 'Class 12 (FSc Pre-Medical)',
                   board: 'Federal Board (FBISE)',
-                  points: 9999,
-                  streakDays: 30,
-                  testsTaken: 100,
+                  points: adminData.user.points || 0,
+                  streakDays: adminData.user.streakDays || 0,
+                  testsTaken: adminData.user.testsTaken || 0,
                   savedQuestionIds: [],
                   wrongQuestionIds: [],
                   certificates: [],
@@ -359,15 +361,15 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 overflow-hidden shrink-0">
               <img 
-                src="/assets/taleemguru-logo-original.png" 
-                alt="Taleem Guru Official Logo" 
+                src={logoUrl || "/assets/taleemguru-logo-original.png"} 
+                alt={logoAlt || `${siteName} Official Logo`} 
                 className="w-8 h-8 object-contain" 
               />
             </div>
             <div>
               <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cyan-400">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Taleem Guru Official Portal</span>
+                <span>{siteName} Official Portal</span>
               </div>
               <h2 className="text-lg sm:text-xl font-black mt-0.5">
                 {mode === 'login'

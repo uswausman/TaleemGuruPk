@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ViewMode, TestConfig, TestResult, StudentProfile, AdminUser, MCQ, PastPaper, StudyNote, RouteAuthResult } from './types';
 import {
-  MCQS_DATABASE,
   POPULAR_TESTS,
   PAST_PAPERS_DATA,
   STUDY_NOTES_DATA,
   SAMPLE_PAST_RESULTS,
+  ENTRY_TESTS_DATA,
 } from './data/mockData';
 
 // Component imports
@@ -32,6 +32,7 @@ import { PublicSearchView } from './components/PublicSearchView';
 import { StudentAuthModal } from './components/StudentAuthModal';
 import { AccessDeniedView } from './components/AccessDeniedView';
 import { SubjectsView } from './components/SubjectsView';
+import { SyllabusComparison } from './components/SyllabusComparison';
 import { NotesView } from './components/NotesView';
 import { PrivacyPolicyView } from './components/PrivacyPolicyView';
 import { TermsOfServiceView } from './components/TermsOfServiceView';
@@ -56,6 +57,7 @@ import {
   updateBrowserUrl,
   viewToCanonicalPath,
 } from './lib/routeGuards';
+import { NavigationContext, buildNavContextString, matchesClassGrade } from './utils/navigationContext';
 
 import { ToastProvider, useToast } from './components/ui/Toast';
 import { SEOHead } from './components/SEOHead';
@@ -167,12 +169,16 @@ export default function App() {
       const isAuthenticated = Boolean(currentUser);
 
       const route = resolveRoute(targetPath);
-
+      console.log('[TALEEMGURU-ROUTING] RESOLVED ROUTE:', route);
+      
       // If initial auth session is still hydrating from Supabase, defer blocking protected views
       const initializing = userOverride?.isInitializing !== undefined ? userOverride.isInitializing : isAuthLoadingRef.current;
       if (initializing && route.isProtected) {
         return;
       }
+      
+      console.log('[TALEEMGURU-ROUTING] ACTIVE VIEW:', route.view);
+      console.log('[TALEEMGURU-ROUTING] ACTIVE FILTER:', route.subFilter);
 
       const authResult = evaluateAccess(targetPath, currentUser, isAuthenticated);
 
@@ -212,11 +218,15 @@ export default function App() {
   );
 
   const handleNavigateWithFilter = (view: ViewMode, subFilter?: string, adminTab?: string) => {
+    setComparisonContext(null);
     const canonical = viewToCanonicalPath(view, subFilter, adminTab);
     updateBrowserUrl(canonical);
     checkAndApplyRoute(canonical);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Comparison Navigation Context State
+  const [comparisonContext, setComparisonContext] = useState<NavigationContext | null>(null);
 
   // URL Change / Browser Popstate & Hashchange Listener
   useEffect(() => {
@@ -244,9 +254,15 @@ export default function App() {
   const [mcqBank, setMcqBank] = useState<MCQ[]>(() => {
     try {
       const saved = localStorage.getItem('taleem_guru_mcqs');
-      return saved ? JSON.parse(saved) : MCQS_DATABASE;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+      return [];
     } catch (e) {
-      return MCQS_DATABASE;
+      return [];
     }
   });
 
@@ -284,9 +300,9 @@ export default function App() {
   const [historyResults, setHistoryResults] = useState<TestResult[]>(() => {
     try {
       const saved = localStorage.getItem('taleem_guru_results');
-      return saved ? JSON.parse(saved) : SAMPLE_PAST_RESULTS;
+      return saved ? JSON.parse(saved) : [];
     } catch (e) {
-      return SAMPLE_PAST_RESULTS;
+      return [];
     }
   });
 
@@ -304,7 +320,7 @@ export default function App() {
         // If server verification says Admin, role is Admin.
         // Authoritative role resolution from backend database:
         const authoritativeRole: 'Admin' | 'Student' = serverAuth.isAdmin ? 'Admin' : 'Student';
-        const isAuthAdmin = serverAuth.isAdmin || normalizedAuthEmail === 'admin@taleemguru.pk';
+        const isAuthAdmin = serverAuth.isAdmin;
         const rawResolvedName = (
           (serverAuth.serverUser?.name && serverAuth.serverUser.name !== 'avatar-1' ? serverAuth.serverUser.name : null) ||
           (cloudProfile?.name && cloudProfile.name !== 'avatar-1' ? cloudProfile.name : null) ||
@@ -337,8 +353,8 @@ export default function App() {
             targetExam: 'MDCAT / BISE Board Exam',
             classLevel: 'Class 10 (Matric Pt 2)',
             board: 'BISE Lahore',
-            points: isAuthAdmin ? 9999 : 100,
-            streakDays: 1,
+            points: isAuthAdmin ? 9999 : 0,
+            streakDays: 0,
             testsTaken: 0,
             savedQuestionIds: [],
             wrongQuestionIds: [],
@@ -520,8 +536,8 @@ export default function App() {
         if (dbNotes.status === 'fulfilled' && Array.isArray(dbNotes.value) && dbNotes.value.length > 0) {
           setAllStudyNotes(dbNotes.value);
         }
-      } catch (err) {
-        console.warn('Notice: Background database content sync error:', err);
+      } catch (err: any) {
+        console.error('Background database content sync error:', err.message, err);
       }
     };
 
@@ -762,29 +778,36 @@ export default function App() {
 
   // Handle Start Class Test
   const handleStartClassTest = (className: string, subjectName: string) => {
-    const filtered = mcqBank.filter(
-      (m) =>
-        m.subject.toLowerCase().includes(subjectName.toLowerCase()) ||
-        m.classLevel.toLowerCase().includes(className.toLowerCase())
-    );
-    const questions = filtered.length >= 5 ? filtered.slice(0, 10) : mcqBank.slice(0, 10);
-
-    const test: TestConfig = {
-      id: `class-test-${Date.now()}`,
-      title: `${className} ${subjectName} Practice Test`,
-      description: `Class and syllabus curriculum revision assessment for ${className}`,
-      category: 'Classroom',
-      subject: subjectName,
-      classLevel: className,
-      durationMinutes: 15,
-      totalQuestions: questions.length,
-      totalMarks: questions.length,
-      testType: 'Chapter Test',
-      negativeMarking: false,
-      passPercentage: 50,
-      questions,
+    const testList = allTests && allTests.length > 0 ? allTests : POPULAR_TESTS;
+    const normalizeClassStr = (val: string): string => (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const matchesClassLevel = (itemClass: string, targetClass: string): boolean => {
+      if (!targetClass || targetClass === 'All') return true;
+      const normTarget = normalizeClassStr(targetClass);
+      const normItem = normalizeClassStr(itemClass);
+      return normItem.includes(normTarget) || normTarget.includes(normItem);
     };
-    handleStartTest(test);
+
+    // Find a test that matches both subject and class
+    let test = testList.find(t => 
+      t.subject.toLowerCase() === subjectName.toLowerCase() && 
+      matchesClassLevel(t.classLevel || '', className)
+    );
+
+    // Fallback: match by subject if class-level test not explicitly constrained
+    if (!test) {
+      test = testList.find(t => t.subject.toLowerCase() === subjectName.toLowerCase());
+    }
+    
+    if (test) {
+      handleStartTest(test);
+    } else {
+      console.log('No test available for:', subjectName, className);
+      showToast({
+        type: 'info',
+        title: 'No practice test available',
+        message: `No practice test available for ${subjectName} in ${className} yet.`
+      });
+    }
   };
 
   // Handle Start Board Test
@@ -885,7 +908,7 @@ export default function App() {
     }
   };
 
-  // Admin MCQ Management
+  // Admin & Staff MCQ Management
   const handleAddMCQ = async (newMCQ: MCQ) => {
     const dup = checkDuplicateMCQ(
       newMCQ.question,
@@ -904,11 +927,31 @@ export default function App() {
       });
       return;
     }
-    setMcqBank((prev) => [newMCQ, ...prev]);
     try {
       const res = await createMCQApi(newMCQ);
-      if (res.success && res.mcq) {
-        setMcqBank((prev) => prev.map((m) => (m.id === newMCQ.id ? res.mcq : m)));
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Submitted for Approval (202)',
+            message: 'Your MCQ creation has been submitted for Admin approval. It is listed in "My Submissions" and will go live upon approval.',
+            duration: 6000,
+          });
+        } else {
+          const publishedMCQ = res.mcq || newMCQ;
+          setMcqBank((prev) => [publishedMCQ, ...prev]);
+          showToast({
+            type: 'success',
+            title: 'MCQ Published Live',
+            message: 'MCQ was successfully created and published directly.',
+          });
+        }
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Failed to create MCQ',
+          message: res.error || 'Server error occurred',
+        });
       }
     } catch (e) {
       console.warn('Notice: Background MCQ create sync error:', e);
@@ -916,29 +959,75 @@ export default function App() {
   };
 
   const handleUpdateMCQ = async (updatedMCQ: MCQ) => {
-    setMcqBank((prev) => prev.map((m) => (m.id === updatedMCQ.id ? updatedMCQ : m)));
     try {
-      await updateMCQApi(updatedMCQ.id, updatedMCQ);
+      const res = await updateMCQApi(updatedMCQ.id, updatedMCQ);
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Changes Submitted for Approval',
+            message: 'Your MCQ modifications have been submitted for Admin approval and recorded in "My Submissions". Live content remains unchanged until approved.',
+            duration: 6000,
+          });
+        } else {
+          setMcqBank((prev) => prev.map((m) => (m.id === updatedMCQ.id ? (res.mcq || updatedMCQ) : m)));
+          showToast({
+            type: 'success',
+            title: 'MCQ Updated',
+            message: 'Changes published live immediately.',
+          });
+        }
+      }
     } catch (e) {
       console.warn('Notice: Background MCQ update sync error:', e);
     }
   };
 
   const handleDeleteMCQ = async (id: string) => {
-    setMcqBank((prev) => prev.filter((m) => m.id !== id));
     try {
-      await deleteMCQApi(id);
+      const res = await deleteMCQApi(id);
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Deletion Submitted for Approval',
+            message: 'Your deletion request has been submitted for Admin approval and recorded in "My Submissions". Content remains active until approved.',
+            duration: 6000,
+          });
+        } else {
+          setMcqBank((prev) => prev.filter((m) => m.id !== id));
+          showToast({
+            type: 'success',
+            title: 'MCQ Deleted',
+            message: 'Question removed from live bank.',
+          });
+        }
+      }
     } catch (e) {
       console.warn('Notice: Background MCQ delete sync error:', e);
     }
   };
 
   const handleCreateTest = async (newTest: TestConfig) => {
-    setAllTests((prev) => [newTest, ...prev]);
     try {
       const res = await createTestApi(newTest);
-      if (res.success && res.test) {
-        setAllTests((prev) => prev.map((t) => (t.id === newTest.id ? res.test : t)));
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Assessment Submitted for Approval',
+            message: 'Your test configuration has been submitted for Admin approval and recorded in "My Submissions".',
+            duration: 6000,
+          });
+        } else {
+          const publishedTest = res.test || newTest;
+          setAllTests((prev) => [publishedTest, ...prev]);
+          showToast({
+            type: 'success',
+            title: 'Test Published Live',
+            message: 'Assessment is now live for students.',
+          });
+        }
       }
     } catch (e) {
       console.warn('Notice: Background test create sync error:', e);
@@ -946,18 +1035,40 @@ export default function App() {
   };
 
   const handleUpdateTest = async (updatedTest: TestConfig) => {
-    setAllTests((prev) => prev.map((t) => (t.id === updatedTest.id ? updatedTest : t)));
     try {
-      await updateTestApi(updatedTest.id, updatedTest);
+      const res = await updateTestApi(updatedTest.id, updatedTest);
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Changes Submitted for Approval',
+            message: 'Assessment updates have been submitted for Admin approval.',
+            duration: 6000,
+          });
+        } else {
+          setAllTests((prev) => prev.map((t) => (t.id === updatedTest.id ? (res.test || updatedTest) : t)));
+        }
+      }
     } catch (e) {
       console.warn('Notice: Background test update sync error:', e);
     }
   };
 
   const handleDeleteTest = async (id: string) => {
-    setAllTests((prev) => prev.filter((t) => t.id !== id));
     try {
-      await deleteTestApi(id);
+      const res = await deleteTestApi(id);
+      if (res.success) {
+        if (res.status === 'PENDING') {
+          showToast({
+            type: 'info',
+            title: 'Deletion Submitted for Approval',
+            message: 'Test deletion request has been submitted for Admin approval.',
+            duration: 6000,
+          });
+        } else {
+          setAllTests((prev) => prev.filter((t) => t.id !== id));
+        }
+      }
     } catch (e) {
       console.warn('Notice: Background test delete sync error:', e);
     }
@@ -1038,6 +1149,7 @@ export default function App() {
                 onOpenSearch={() => setIsSearchOpen(true)}
                 allTests={allTests}
                 historyResults={historyResults}
+                allMCQs={mcqBank}
               />
             )}
 
@@ -1063,6 +1175,7 @@ export default function App() {
                 allMCQs={mcqBank}
                 studentName={currentStudentName}
                 initialSubject={activeSubFilter || 'All'}
+                comparisonContext={comparisonContext}
               />
             )}
 
@@ -1077,6 +1190,7 @@ export default function App() {
                 initialSubject={activeSubFilter || 'All'}
                 subFilter={activeSubFilter}
                 onNavigate={(view, filter) => handleNavigateWithFilter(view as ViewMode, filter)}
+                comparisonContext={comparisonContext}
               />
             )}
 
@@ -1090,6 +1204,7 @@ export default function App() {
                 onSolveOnline={handleSolvePastPaper}
                 onNavigateMCQBank={(boardName) => handleNavigateWithFilter('mcqs', boardName)}
                 onNavigatePastPapers={(boardName) => handleNavigateWithFilter('past-papers', boardName)}
+                onNavigateSyllabus={(boardName) => handleNavigateWithFilter('syllabus', boardName)}
                 allMCQs={mcqBank}
                 studentName={currentStudentName}
                 initialProvince={activeSubFilter || 'All'}
@@ -1100,41 +1215,154 @@ export default function App() {
             {currentView === 'classes' && (
               <ClassesView
                 onStartClassTest={handleStartClassTest}
-                onNavigateMCQBank={(className) => handleNavigateWithFilter('mcqs', className)}
-                onNavigatePastPapers={(className) => handleNavigateWithFilter('past-papers', className)}
-                onNavigateNotes={(className) => handleNavigateWithFilter('notes', className)}
+                onNavigateMCQBank={(className) => handleNavigateWithFilter('mcqs', buildNavContextString('All', className))}
+                onNavigatePastPapers={(className) => handleNavigateWithFilter('past-papers', buildNavContextString('All', className))}
+                onNavigateNotes={(className) => handleNavigateWithFilter('notes', buildNavContextString('All', className))}
                 allMCQs={mcqBank}
+                allTests={allTests}
                 studentName={currentStudentName}
+                initialClass={activeSubFilter}
               />
             )}
 
             {currentView === 'subjects' && (
               <SubjectsView
-                onStartSubjectTest={(subjectName) => {
-                  const filtered = mcqBank.filter(
-                    (m) => m.subject.toLowerCase() === subjectName.toLowerCase()
+                onStartSubjectTest={(subjectName, className) => {
+                  const test = allTests.find(t => 
+                    t.subject.toLowerCase() === subjectName.toLowerCase() && 
+                    matchesClassGrade(t.classLevel || '', className)
                   );
-                  const questions = filtered.length >= 5 ? filtered.slice(0, 10) : mcqBank.slice(0, 10);
-                  handleStartTest({
-                    id: `subj-test-${Date.now()}`,
-                    title: `${subjectName} Assessment Test`,
-                    description: `Chapter and topic comprehensive evaluation for ${subjectName}`,
-                    category: 'Subject Assessment',
-                    subject: subjectName,
-                    durationMinutes: 15,
-                    totalQuestions: questions.length,
-                    totalMarks: questions.length,
-                    testType: 'Chapter Test',
-                    negativeMarking: false,
-                    passPercentage: 50,
-                    questions,
+                  
+                  if (test) {
+                    handleStartTest(test);
+                  } else {
+                    const subjectMCQs = mcqBank.filter(m =>
+                      m.subject.toLowerCase() === subjectName.toLowerCase() &&
+                      matchesClassGrade(m.classLevel || '', className)
+                    );
+                    if (subjectMCQs.length > 0) {
+                      handleStartTest({
+                        id: `subj-test-${subjectName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}`,
+                        title: `${className !== 'All' ? className + ' ' : ''}${subjectName} Practice Test`,
+                        description: `Official practice test for ${subjectName}`,
+                        category: 'Practice Test',
+                        testType: 'Subject Test',
+                        subject: subjectName,
+                        classLevel: className !== 'All' ? className : undefined,
+                        durationMinutes: Math.max(10, Math.ceil(subjectMCQs.length * 1.5)),
+                        totalQuestions: Math.min(20, subjectMCQs.length),
+                        totalMarks: Math.min(20, subjectMCQs.length),
+                        negativeMarking: false,
+                        passPercentage: 50,
+                        questions: subjectMCQs.slice(0, 20),
+                      });
+                    } else {
+                      showToast({
+                        type: 'info',
+                        title: 'No practice test available',
+                        message: `No practice test available for ${subjectName} in ${className} yet.`
+                      });
+                    }
+                  }
+                }}
+                onStartChapterTest={(subjectName, className, chapterName) => {
+                  const normChapterStr = (str: string) =>
+                    (str || '')
+                      .trim()
+                      .toLowerCase()
+                      .replace(/&/g, 'and')
+                      .replace(/^(chapter|ch|unit)\s*\d*[:\.-]?\s*/i, '')
+                      .replace(/[^a-z0-9]/g, '');
+
+                  const matchesChapterStr = (c1?: string, c2?: string): boolean => {
+                    if (!c1 || !c2) return false;
+                    const n1 = normChapterStr(c1);
+                    const n2 = normChapterStr(c2);
+                    if (!n1 || !n2) return false;
+                    return n1 === n2 || n1.includes(n2) || n2.includes(n1);
+                  };
+
+                  // 1. Check allTests for exact chapter match or title match
+                  const testMatch = allTests.find(t => 
+                    t.subject.toLowerCase() === subjectName.toLowerCase() &&
+                    matchesClassGrade(t.classLevel || '', className) &&
+                    ((t.chapter && matchesChapterStr(t.chapter, chapterName)) ||
+                     matchesChapterStr(t.title, chapterName))
+                  );
+
+                  if (testMatch) {
+                    handleStartTest({
+                      ...testMatch,
+                      subject: subjectName,
+                      chapter: chapterName,
+                      classLevel: className !== 'All' ? className : testMatch.classLevel,
+                    });
+                    return;
+                  }
+
+                  // 2. Check mcqBank for real MCQs belonging to this chapter
+                  const chapterMCQs = mcqBank.filter(m =>
+                    m.subject.toLowerCase() === subjectName.toLowerCase() &&
+                    matchesClassGrade(m.classLevel || '', className) &&
+                    m.chapter && matchesChapterStr(m.chapter, chapterName)
+                  );
+
+                  if (chapterMCQs.length > 0) {
+                    handleStartTest({
+                      id: `chap-test-${subjectName.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${chapterName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+                      title: `${className !== 'All' ? className + ' ' : ''}${subjectName} - Chapter: ${chapterName} Test`,
+                      description: `Official chapter practice test for ${chapterName} (${subjectName})`,
+                      category: 'Practice Test',
+                      testType: 'Chapter Test',
+                      subject: subjectName,
+                      chapter: chapterName,
+                      classLevel: className !== 'All' ? className : undefined,
+                      durationMinutes: Math.max(10, Math.ceil(chapterMCQs.length * 1.5)),
+                      totalQuestions: chapterMCQs.length,
+                      totalMarks: chapterMCQs.length,
+                      negativeMarking: false,
+                      passPercentage: 50,
+                      questions: chapterMCQs,
+                    });
+                    return;
+                  }
+
+                  // 3. No test exists for this chapter
+                  showToast({
+                    type: 'info',
+                    title: 'No practice test available',
+                    message: 'No practice test available for this chapter.',
                   });
                 }}
-                onNavigateMCQBank={(subjectName) => handleNavigateWithFilter('mcqs', subjectName)}
-                onNavigatePastPapers={(subjectName) => handleNavigateWithFilter('past-papers', subjectName)}
-                onNavigateNotes={(subjectName) => handleNavigateWithFilter('notes', subjectName)}
+                isTestAvailable={(subjectName, className) => 
+                  allTests.some(t => 
+                    t.subject.toLowerCase() === subjectName.toLowerCase() && 
+                    matchesClassGrade(t.classLevel || '', className)
+                  ) ||
+                  mcqBank.some(m =>
+                    m.subject.toLowerCase() === subjectName.toLowerCase() &&
+                    matchesClassGrade(m.classLevel || '', className)
+                  )
+                }
+                onNavigateMCQBank={(subjectName, className) => {
+                  const filter = buildNavContextString(subjectName, className);
+                  handleNavigateWithFilter('mcqs', filter);
+                }}
+                onNavigatePastPapers={(subjectName, className) => {
+                  const filter = buildNavContextString(subjectName, className);
+                  handleNavigateWithFilter('past-papers', filter);
+                }}
+                onNavigateNotes={(subjectName, className) => {
+                  const filter = buildNavContextString(subjectName, className);
+                  handleNavigateWithFilter('notes', filter);
+                }}
                 allMCQs={mcqBank}
+                allTests={allTests}
+                allPastPapers={allPastPapers}
+                allNotes={allStudyNotes}
                 studentName={currentStudentName}
+                initialSubject={activeSubFilter}
+                comparisonContext={comparisonContext}
               />
             )}
 
@@ -1144,24 +1372,99 @@ export default function App() {
                 onSelectNote={(n) => {}}
                 studentName={currentStudentName}
                 initialSubject={activeSubFilter || 'All'}
+                subFilter={activeSubFilter}
+                comparisonContext={comparisonContext}
               />
             )}
 
+            {currentView === 'syllabus' && (
+              <SyllabusComparison
+                initialBoard={activeSubFilter}
+                onNavigateSubject={(ctx) => {
+                  setComparisonContext(ctx);
+                  setCurrentView('subjects');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onNavigateMCQBank={(ctx) => {
+                  setComparisonContext(ctx);
+                  setCurrentView('mcqs');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onNavigatePastPapers={(ctx) => {
+                  setComparisonContext(ctx);
+                  setCurrentView('past-papers');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onNavigateNotes={(ctx) => {
+                  setComparisonContext(ctx);
+                  setCurrentView('notes');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                onNavigateBoards={() => handleNavigateWithFilter('boards')}
+              />
+            )}
+            
             {currentView === 'entry-tests' && (
               <EntryTestsView
                 onStartEntryTest={(testId) => {
-                  const qPool = mcqBank.filter((m) => m.exam === 'MDCAT' || m.subject === 'Biology' || m.subject === 'Physics');
+                  const normId = (testId || '').toLowerCase();
+                  let qPool = mcqBank;
+                  let defaultCategory = 'Entry Test';
+                  let defaultSubject = 'Entry Test Core';
+                  let defaultMarks = 15;
+                  let isNegative = true;
+                  let testTitle = `Official Mock: ${testId.toUpperCase()}`;
+
+                  if (normId.includes('mdcat') || normId.includes('nums')) {
+                    qPool = mcqBank.filter((m) => m.exam === 'MDCAT' || m.subject === 'Biology' || m.subject === 'Chemistry' || m.subject === 'Physics');
+                    defaultCategory = 'Medical Entry Test';
+                    defaultSubject = 'Biology & Natural Sciences';
+                    testTitle = normId.includes('nums') ? 'NUMS Official Medical Mock' : 'MDCAT High-Yield Mock Series';
+                    isNegative = true;
+                  } else if (normId.includes('ecat') || normId.includes('nust') || normId.includes('giki') || normId.includes('fast') || normId.includes('pieas')) {
+                    qPool = mcqBank.filter((m) => m.exam === 'ECAT' || m.subject === 'Mathematics' || m.subject === 'Physics' || m.subject === 'Computer Science');
+                    defaultCategory = 'Engineering Entry Test';
+                    defaultSubject = 'Mathematics & Physical Sciences';
+                    testTitle = 'ECAT / Engineering College Admission Test Drill';
+                    isNegative = true;
+                  } else if (normId.includes('css')) {
+                    qPool = mcqBank.filter((m) => m.exam === 'CSS' || m.subject === 'Pakistan Studies' || m.subject === 'Current Affairs' || m.subject === 'General Knowledge' || m.subject === 'English');
+                    defaultCategory = 'Civil Services & CSS';
+                    defaultSubject = 'Pakistan Affairs & General Ability';
+                    testTitle = 'CSS MPT Screening Exam Mock';
+                    isNegative = false;
+                  } else if (normId.includes('pms')) {
+                    qPool = mcqBank.filter((m) => m.exam === 'PMS' || m.subject === 'Pakistan Studies' || m.subject === 'Current Affairs' || m.subject === 'General Knowledge' || m.subject === 'Urdu');
+                    defaultCategory = 'Civil Services & PMS';
+                    defaultSubject = 'General Knowledge & Provincial Studies';
+                    testTitle = 'PMS Screening Exam Practice Test';
+                    isNegative = false;
+                  } else if (normId.includes('army') || normId.includes('navy') || normId.includes('airforce') || normId.includes('paf') || normId.includes('forces')) {
+                    qPool = mcqBank.filter((m) => m.subject === 'IQ & Intelligence' || m.subject === 'Physics' || m.subject === 'Mathematics' || m.subject === 'General Knowledge');
+                    defaultCategory = 'Armed Forces Test';
+                    defaultSubject = 'Verbal & Non-Verbal Intelligence';
+                    testTitle = normId.includes('navy') ? 'Pakistan Navy Initial Test' : normId.includes('airforce') || normId.includes('paf') ? 'PAF Initial E-Testing Simulation' : 'Pakistan Army Initial Test (PMA Long Course)';
+                    isNegative = false;
+                  }
+
+                  const matchedTest = ENTRY_TESTS_DATA.find((t) => t.id === testId);
+                  if (matchedTest) {
+                    testTitle = matchedTest.name;
+                    defaultCategory = matchedTest.type;
+                    defaultMarks = matchedTest.totalMarks || 15;
+                  }
+
                   handleStartTest({
                     id: `entry-mock-${testId}`,
-                    title: `Official Mock: ${testId.toUpperCase()}`,
-                    description: 'Full syllabus mock paper with negative marking',
-                    category: 'Entry Test',
-                    subject: 'MDCAT & ECAT Core',
+                    title: testTitle,
+                    description: matchedTest?.description || 'Full syllabus mock examination with timer and score calculation',
+                    category: defaultCategory,
+                    subject: defaultSubject,
                     durationMinutes: 30,
-                    totalQuestions: 15,
-                    totalMarks: 15,
+                    totalQuestions: Math.min(15, qPool.length >= 10 ? qPool.length : 15),
+                    totalMarks: defaultMarks,
                     testType: 'Entry Test',
-                    negativeMarking: true,
+                    negativeMarking: isNegative,
                     passPercentage: 60,
                     questions: qPool.length >= 10 ? qPool.slice(0, 15) : mcqBank.slice(0, 15),
                   });
@@ -1169,6 +1472,11 @@ export default function App() {
                 allMCQs={mcqBank}
                 studentName={currentStudentName}
                 initialCategory={activeSubFilter || 'All'}
+                onCategoryChange={(cat) => {
+                  const canonical = cat === 'All' ? '/entry-tests' : `/entry-tests?category=${cat.toLowerCase().replace(/ /g, '-')}`;
+                  updateBrowserUrl(canonical, true);
+                  setActiveSubFilter(cat === 'All' ? undefined : cat);
+                }}
               />
             )}
 
@@ -1473,7 +1781,7 @@ export default function App() {
               roles: effectiveRoles,
               status: 'Active',
               testsCompleted: 0,
-              points: isUserAdmin ? 9999 : (updated.points || 100),
+              points: isUserAdmin ? 9999 : (updated.points || 0),
               joinedDate: new Date().toLocaleDateString('en-GB'),
             };
             setAdminUser(currentAdmin);

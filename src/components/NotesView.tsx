@@ -16,6 +16,13 @@ import {
 } from 'lucide-react';
 import { StudyNote } from '../types';
 import { documentBrandingService } from '../services/documentBrandingService';
+import {
+  NavigationContext,
+  parseNavContext,
+  matchesClassGrade,
+  normalizeClassLevel,
+  normalizeSubjectName,
+} from '../utils/navigationContext';
 
 interface NotesViewProps {
   notes: StudyNote[];
@@ -23,6 +30,8 @@ interface NotesViewProps {
   studentName: string;
   initialSubject?: string;
   initialClass?: string;
+  subFilter?: string;
+  comparisonContext?: NavigationContext | null;
 }
 
 export const NotesView: React.FC<NotesViewProps> = ({
@@ -31,9 +40,34 @@ export const NotesView: React.FC<NotesViewProps> = ({
   studentName,
   initialSubject = 'All',
   initialClass = 'All',
+  subFilter,
+  comparisonContext,
 }) => {
-  const [selectedSubject, setSelectedSubject] = useState<string>(initialSubject);
-  const [selectedClass, setSelectedClass] = useState<string>(initialClass);
+  const ctx = parseNavContext(subFilter || initialSubject);
+  const [selectedSubject, setSelectedSubject] = useState<string>(
+    comparisonContext?.subject || (ctx.subject !== 'All' ? ctx.subject : initialSubject?.startsWith('{') ? 'All' : initialSubject)
+  );
+  const [selectedClass, setSelectedClass] = useState<string>(
+    comparisonContext?.classLevel
+      ? normalizeClassLevel(comparisonContext.classLevel)
+      : (ctx.classLevel !== 'All' ? normalizeClassLevel(ctx.classLevel) : (initialClass !== 'All' ? normalizeClassLevel(initialClass) : 'All'))
+  );
+  const [selectedBoard, setSelectedBoard] = useState<string>(
+    comparisonContext?.board || (ctx.board !== 'All' ? ctx.board : 'All')
+  );
+
+  React.useEffect(() => {
+    if (comparisonContext) {
+      if (comparisonContext.subject && comparisonContext.subject !== 'All') setSelectedSubject(normalizeSubjectName(comparisonContext.subject));
+      if (comparisonContext.classLevel && comparisonContext.classLevel !== 'All') setSelectedClass(normalizeClassLevel(comparisonContext.classLevel));
+      if (comparisonContext.board && comparisonContext.board !== 'All') setSelectedBoard(comparisonContext.board);
+    } else {
+      const c = parseNavContext(subFilter || initialSubject);
+      setSelectedSubject(c.subject || 'All');
+      setSelectedClass(c.classLevel ? normalizeClassLevel(c.classLevel) : 'All');
+      setSelectedBoard(c.board || 'All');
+    }
+  }, [comparisonContext, subFilter, initialSubject]);
   const [selectedType, setSelectedType] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [downloadSuccessId, setDownloadSuccessId] = useState<string | null>(null);
@@ -55,15 +89,25 @@ export const NotesView: React.FC<NotesViewProps> = ({
   const noteTypes = ['All', 'Chapter Summary', 'Formula Sheet', 'Short Questions', 'Solved Numerical'];
 
   const filteredNotes = notes.filter((n) => {
-    const matchesSub = selectedSubject === 'All' || n.subject.toLowerCase() === selectedSubject.toLowerCase();
-    const matchesCls = selectedClass === 'All' || n.classLevel.toLowerCase().includes(selectedClass.toLowerCase());
+    if (!n) return false;
+    const nSub = (n.subject || '').toLowerCase();
+    const nBrd = (n.board || '').toLowerCase();
+    const nTitle = (n.title || '').toLowerCase();
+    const nChap = (n.chapter || '').toLowerCase();
+    const selSub = (selectedSubject || 'All');
+    const selCls = (selectedClass || 'All');
+    const selBrd = (selectedBoard || 'All');
+
+    const matchesSub = selSub === 'All' || nSub === selSub.toLowerCase();
+    const matchesCls = selCls === 'All' || (n.classLevel && matchesClassGrade(n.classLevel, selCls));
+    const matchesBoard = selBrd === 'All' || (!n.board || nBrd.includes(selBrd.toLowerCase()) || selBrd.toLowerCase().includes(nBrd));
     const matchesType = selectedType === 'All' || n.type === selectedType;
     const matchesSearch =
       !searchQuery ||
-      n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.chapter.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesSub && matchesCls && matchesType && matchesSearch;
+      nTitle.includes(searchQuery.toLowerCase()) ||
+      nSub.includes(searchQuery.toLowerCase()) ||
+      nChap.includes(searchQuery.toLowerCase());
+    return matchesSub && matchesCls && matchesBoard && matchesType && matchesSearch;
   });
 
   const handleDownloadPDF = async (note: StudyNote) => {
@@ -114,8 +158,8 @@ export const NotesView: React.FC<NotesViewProps> = ({
             <button
               key={sub}
               onClick={() => setSelectedSubject(sub)}
-              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all ${
-                selectedSubject === sub
+              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap transition-all cursor-pointer ${
+                selectedSubject.toLowerCase() === sub.toLowerCase()
                   ? 'bg-purple-600 text-white shadow-xs'
                   : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
               }`}
@@ -129,19 +173,24 @@ export const NotesView: React.FC<NotesViewProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
           <div className="flex items-center gap-1.5 overflow-x-auto">
             <span className="text-slate-400 text-[11px] font-bold uppercase mr-1">Class:</span>
-            {classes.map((cls) => (
-              <button
-                key={cls}
-                onClick={() => setSelectedClass(cls)}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  selectedClass === cls
-                    ? 'bg-blue-600 text-white font-bold'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                {cls}
-              </button>
-            ))}
+            {classes.map((cls) => {
+              const isSelected = cls === 'All'
+                ? (!selectedClass || selectedClass === 'All')
+                : (selectedClass !== 'All' && matchesClassGrade(cls, selectedClass));
+              return (
+                <button
+                  key={cls}
+                  onClick={() => setSelectedClass(cls)}
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white font-bold'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  {cls}
+                </button>
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -150,7 +199,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
               <button
                 key={type}
                 onClick={() => setSelectedType(type)}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   selectedType === type
                     ? 'bg-emerald-600 text-white font-bold'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
@@ -164,7 +213,30 @@ export const NotesView: React.FC<NotesViewProps> = ({
       </div>
 
       {/* Notes Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+      {filteredNotes.length === 0 ? (
+        <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-300 dark:border-slate-800 space-y-4 col-span-full">
+          <FileText className="w-12 h-12 text-slate-400 mx-auto" />
+          <h3 className="text-base font-black text-slate-900 dark:text-white">
+            No content available for this Class and Subject
+          </h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+            No study notes found matching {selectedClass !== 'All' ? selectedClass : ''} {selectedSubject !== 'All' ? selectedSubject : ''}. You can reset filters to browse all academic study material.
+          </p>
+          <button
+            onClick={() => {
+              setSelectedSubject('All');
+              setSelectedClass('All');
+              setSelectedBoard('All');
+              setSelectedType('All');
+              setSearchQuery('');
+            }}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs cursor-pointer transition-colors"
+          >
+            <span>Reset All Filters</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {filteredNotes.map((note) => (
           <div
             key={note.id}
@@ -239,6 +311,7 @@ export const NotesView: React.FC<NotesViewProps> = ({
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };

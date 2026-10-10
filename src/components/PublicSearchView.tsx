@@ -501,15 +501,35 @@ export const PublicSearchView: React.FC<PublicSearchViewProps> = ({
             <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 px-1">
               <span>
                 {isLoading
-                  ? 'Searching PostgreSQL database...'
+                  ? 'Searching verified database...'
                   : `Found ${searchResponse.total} verified result${searchResponse.total === 1 ? '' : 's'}`}
               </span>
-              {searchResponse.total > 0 && (
+              {!isLoading && searchResponse.total > 0 && (
                 <span>
                   Page {searchResponse.page} of {searchResponse.totalPages}
                 </span>
               )}
             </div>
+
+            {/* Skeleton Loading State */}
+            {isLoading && (
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 animate-pulse space-y-3"
+                  >
+                    <div className="flex gap-2">
+                      <div className="h-5 w-16 bg-slate-200 dark:bg-slate-800 rounded-lg" />
+                      <div className="h-5 w-24 bg-slate-200 dark:bg-slate-800 rounded-lg" />
+                      <div className="h-5 w-20 bg-slate-200 dark:bg-slate-800 rounded-lg" />
+                    </div>
+                    <div className="h-6 w-3/4 bg-slate-200 dark:bg-slate-800 rounded-lg" />
+                    <div className="h-4 w-1/2 bg-slate-100 dark:bg-slate-800/60 rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Empty State */}
             {!isLoading && searchResponse.results.length === 0 && (
@@ -560,7 +580,8 @@ export const PublicSearchView: React.FC<PublicSearchViewProps> = ({
             )}
 
             {/* Results List */}
-            <div className="space-y-3">
+            {!isLoading && searchResponse.results.length > 0 && (
+              <div className="space-y-3">
               {searchResponse.results.map((item) => (
                 <div
                   key={`${item.type}-${item.id}`}
@@ -655,6 +676,7 @@ export const PublicSearchView: React.FC<PublicSearchViewProps> = ({
                 </div>
               ))}
             </div>
+            )}
 
             {/* Pagination Controls */}
             {searchResponse.totalPages > 1 && (

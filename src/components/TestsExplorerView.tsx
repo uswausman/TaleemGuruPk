@@ -53,8 +53,30 @@ export const TestsExplorerView: React.FC<TestsExplorerViewProps> = ({
   const subjects = ['All', 'Physics', 'Chemistry', 'Biology', 'Mathematics', 'Computer Science', 'Pakistan Studies', 'General Knowledge'];
   const classes = ['All', 'Class 9 (Matric Pt 1)', 'Class 10 (Matric Pt 2)', 'Class 11 (FSc Pt 1)', 'Class 12 (FSc Pt 2)', 'MDCAT / Pre-Med', 'ECAT / Pre-Eng', 'CSS / PMS'];
 
+  const matchesTestType = (t: TestConfig, type: string): boolean => {
+    if (type === 'All') return true;
+    const tType = (t.testType || '').trim().toLowerCase();
+    const tTitle = (t.title || '').trim().toLowerCase();
+    const tCat = (t.category || '').trim().toLowerCase();
+    const target = type.trim().toLowerCase();
+
+    if (tType === target || tType.includes(target) || target.includes(tType)) return true;
+
+    if (type === 'Chapter Test') return tType.includes('chapter') || tTitle.includes('chapter') || tCat.includes('chapter');
+    if (type === 'Subject Test') return tType.includes('subject') || tTitle.includes('subject') || tCat.includes('subject');
+    if (type === 'Full Book Test') return tType.includes('full book') || tType.includes('full-book') || tType.includes('fullbook') || tTitle.includes('full book') || tTitle.includes('full-book');
+    if (type === 'Board Test') return tType.includes('board') || tTitle.includes('board') || tCat.includes('board') || tCat.includes('matric') || tCat.includes('inter');
+    if (type === 'Mock Test') return tType.includes('mock') || tTitle.includes('mock') || tCat.includes('mock');
+    if (type === 'Entry Test') return tType.includes('entry') || tTitle.includes('entry') || tCat.includes('entry') || tCat.includes('mdcat') || tCat.includes('ecat');
+    if (type === 'Competitive Exam Test') return tType.includes('competitive') || tType.includes('css') || tType.includes('pms') || tCat.includes('competitive') || tCat.includes('css') || tCat.includes('pms');
+    if (type === 'Daily Test') return tType.includes('daily') || tTitle.includes('daily') || tTitle.includes('quiz') || tCat.includes('daily');
+    if (type === 'Practice Test') return tType.includes('practice') || tTitle.includes('practice') || tTitle.includes('drill') || tCat.includes('practice');
+
+    return false;
+  };
+
   const filteredTests = tests.filter((t) => {
-    const matchesType = selectedType === 'All' || t.testType === selectedType;
+    const matchesType = matchesTestType(t, selectedType);
     const matchesSubject = selectedSubject === 'All' || t.subject === selectedSubject;
     const matchesClass = selectedClass === 'All' || t.classLevel === selectedClass;
     const matchesSearch =
@@ -149,8 +171,8 @@ export const TestsExplorerView: React.FC<TestsExplorerViewProps> = ({
       {/* Tests Grid */}
       {filteredTests.length === 0 ? (
         <EmptyState
-          title="No Tests Found"
-          description="No tests match your current search filters. Try resetting the filters or searching with different keywords."
+          title="No tests available for this test type."
+          description="No tests match your selected test type and filter criteria. Try selecting 'All Test Types' or resetting filters."
           actionLabel="Reset All Filters"
           onAction={() => {
             setSelectedType('All');

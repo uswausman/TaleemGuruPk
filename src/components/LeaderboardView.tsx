@@ -14,6 +14,7 @@ import { fetchLeaderboardApi } from '../lib/api';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { Card } from './ui/Card';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface LeaderboardViewProps {
   currentStudentPoints: number;
@@ -43,6 +44,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
   currentStudentName,
   onStartQuiz,
 }) => {
+  const { siteName } = useSiteSettings();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>('allTime');
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -97,9 +99,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
         institution: u.board ? `${u.board.replace('bise-', '').toUpperCase()}` : 'Enrolled Student',
         avatar: u.avatar || '🎓',
         score: u.points || 0,
-        testsCompleted: u.testsTaken || 1,
-        accuracy: 90,
-        streakDays: u.streakDays || 1,
+        testsCompleted: u.testsTaken || 0,
+        accuracy: u.testsTaken ? Math.min(100, Math.round(((u.points || 0) / (u.testsTaken * 10)) * 100)) : 0,
+        streakDays: u.streakDays || 0,
         badge: 'Merit Scholar',
         category: u.classLevel || 'General',
         isCurrentStudent: false,
@@ -118,9 +120,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
           institution: 'Active Candidate',
           avatar: '🌟',
           score: currentStudentPoints,
-          testsCompleted: 1,
-          accuracy: 92,
-          streakDays: 1,
+          testsCompleted: 0,
+          accuracy: 0,
+          streakDays: 0,
           badge: 'Active Candidate',
           category: 'Your Class',
           isCurrentStudent: true,
@@ -228,7 +230,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({
               No Public Rankings Yet
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              TaleemGuru rankings are strictly based on authentic test results. Complete chapter tests and practice quizzes to earn points and record your academic ranking!
+              {siteName} rankings are strictly based on authentic test results. Complete chapter tests and practice quizzes to earn points and record your academic ranking!
             </p>
           </div>
           {onStartQuiz && (

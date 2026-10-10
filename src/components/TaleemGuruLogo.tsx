@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 export type LogoVariant = 'full' | 'horizontal' | 'compact' | 'icon';
 export type LogoTheme = 'light' | 'dark' | 'auto';
@@ -17,25 +18,26 @@ export const TaleemGuruLogo: React.FC<TaleemGuruLogoProps> = ({
   variant = 'full',
   theme = 'auto',
   className = '',
-  alt = 'Taleem Guru Official Logo',
+  alt,
   loading = 'lazy',
   onClick,
   id,
 }) => {
-  let src = '/assets/taleemguru-logo-original.png';
+  const { logoUrl, logoAlt, siteName } = useSiteSettings();
+
+  let src = logoUrl || '/assets/taleemguru-logo-original.png';
 
   if (variant === 'icon') {
     src = '/favicon.svg';
-  } else {
-    // Master Full Original Logo
-    src = '/assets/taleemguru-logo-original.png';
   }
+
+  const effectiveAlt = alt || logoAlt || `${siteName} Official Logo`;
 
   return (
     <img
       id={id}
       src={src}
-      alt={alt}
+      alt={effectiveAlt}
       loading={loading}
       onClick={onClick}
       className={`object-contain select-none transition-transform duration-200 ${className}`}

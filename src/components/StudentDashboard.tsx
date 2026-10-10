@@ -53,12 +53,11 @@ import { Badge } from './ui/Badge';
 import { Card } from './ui/Card';
 import { EmptyState } from './ui/EmptyState';
 import { WeeklyStudyPlanner } from './WeeklyStudyPlanner';
-import { ExamCountdown } from './ExamCountdown';
 import { PerformanceRadar } from './PerformanceRadar';
 import { AchievementBadges } from './AchievementBadges';
 import { SyllabusComparison } from './SyllabusComparison';
 import { StudyRoadmap } from './StudyRoadmap';
-import { FocusAreasSection } from './FocusAreasSection';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface StudentDashboardProps {
   student: StudentProfile | null;
@@ -91,6 +90,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onOpenAuthModal = () => {},
   onLogout = () => {},
 }) => {
+  const { siteName } = useSiteSettings();
   const [activeTab, setActiveTab] = useState<
     'overview' | 'my-tests' | 'roadmap' | 'tests' | 'analytics' | 'achievements' | 'certificates' | 'wrong' | 'saved'
   >('overview');
@@ -112,6 +112,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   } | null>(null);
   const [dbCertificates, setDbCertificates] = useState<any[]>([]);
   const [performanceData, setPerformanceData] = useState<any>(null);
+  const [dashboardData, setDashboardData] = useState<any>(null);
   const [availableTests, setAvailableTests] = useState<TestConfig[]>([]);
 
   // Test Filters state
@@ -138,7 +139,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
     async function loadAuthoritativeData() {
       try {
-        const [activeRes, perfRes, certRes, testsRes] = await Promise.allSettled([
+        const [dashRes, activeRes, perfRes, certRes, testsRes] = await Promise.allSettled([
+          fetchStudentDashboardApi(),
           fetchStudentActiveExamApi(),
           fetchStudentPerformanceApi(),
           fetchUserCertificatesApi(),
@@ -147,6 +149,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
         if (!isMounted) return;
 
+        if (dashRes.status === 'fulfilled' && dashRes.value?.success) {
+          setDashboardData(dashRes.value);
+        }
         if (activeRes.status === 'fulfilled' && activeRes.value) {
           setActiveExam(activeRes.value);
         }
@@ -184,7 +189,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             </Badge>
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mt-3">
-            Sign In to Access Your Taleem Guru Dashboard
+            Sign In to Access Your {siteName} Dashboard
           </h2>
           <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm max-w-lg mx-auto mt-2 leading-relaxed">
             Create an account or sign in to track your test scores, build your mistake notebook, earn merit points, and climb the Pakistan National Leaderboard.
@@ -229,14 +234,56 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
   // Filter history results for strict student data privacy
   const normalizedStudentEmail = (student.email || '').toLowerCase().trim();
-  const studentResults = historyResults.filter((res) => {
-    if (!res.userEmail && !res.userId) return true;
+  const localStudentResults = historyResults.filter((res) => {
+    if (!res.userEmail && !res.userId) return false;
     const resEmail = (res.userEmail || '').toLowerCase().trim();
     return (
       (normalizedStudentEmail && resEmail === normalizedStudentEmail) ||
       (student.uid && res.userId === student.uid)
     );
   });
+
+  // Merge server-authoritative attempts if present
+  const studentResults = React.useMemo(() => {
+    const combined = [...localStudentResults];
+    const existingIds = new Set(combined.map((r) => r.id || (r as any).resultId));
+
+    if (dashboardData?.recentAttempts && Array.isArray(dashboardData.recentAttempts)) {
+      dashboardData.recentAttempts.forEach((r: any) => {
+        const rId = r.resultId || r.id;
+        if (rId && !existingIds.has(rId)) {
+          existingIds.add(rId);
+          combined.push({
+            id: rId,
+            testId: r.testId,
+            testTitle: r.testTitle,
+            testType: r.testType,
+            subject: r.subject,
+            category: r.category,
+            totalQuestions: r.totalQuestions,
+            answeredCount: r.answeredCount,
+            correctCount: r.correctCount,
+            wrongCount: r.wrongCount,
+            skippedCount: r.skippedCount,
+            marksObtained: r.marksObtained,
+            totalMarks: r.totalMarks,
+            percentage: r.percentage,
+            grade: r.grade,
+            timeUsedSeconds: r.timeUsedSeconds || 0,
+            totalDurationSeconds: r.totalDurationSeconds || 0,
+            percentileRank: r.percentileRank || 0,
+            timestamp: r.createdAt ? new Date(r.createdAt).toLocaleString('en-GB') : '',
+            userId: student.uid,
+            userEmail: student.email,
+            answers: [],
+            questions: [],
+          });
+        }
+      });
+    }
+
+    return combined;
+  }, [localStudentResults, dashboardData?.recentAttempts, student.uid, student.email]);
 
   const savedMCQs = allMCQs.filter((m) => (student.savedQuestionIds || []).includes(m.id));
   const wrongMCQs = allMCQs.filter((m) => (student.wrongQuestionIds || []).includes(m.id));
@@ -307,9 +354,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       id: 'streak-master',
       title: 'Daily Streak Warrior',
       description: 'Maintain a 3-day active study streak.',
-      unlocked: (student.streakDays || 1) >= 3,
+      unlocked: (student.streakDays || 0) >= 3,
       icon: '🔥',
-      progress: Math.min(100, ((student.streakDays || 1) / 3) * 100),
+      progress: Math.min(100, ((student.streakDays || 0) / 3) * 100),
     },
     {
       id: 'century-club',
@@ -474,7 +521,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </span>
               <span className="text-xs text-amber-300 font-semibold flex items-center gap-1 bg-amber-500/20 px-2.5 py-0.5 rounded-full border border-amber-400/30">
                 <Flame className="w-3.5 h-3.5 fill-amber-400" />
-                {student.streakDays || 1} Day Streak
+                {student.streakDays || 0} Day Streak
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
@@ -561,7 +608,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 px-4 py-2.5 rounded-2xl text-center">
             <div className="flex items-center justify-center gap-1.5 text-amber-700 dark:text-amber-300 font-black text-xl">
               <Award className="w-5 h-5" />
-              <span>{student.points.toLocaleString()}</span>
+              <span>{(student.points || 0).toLocaleString()}</span>
             </div>
             <span className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-wider">
               Merit Points
@@ -631,7 +678,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             Average Accuracy
           </span>
           <div className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-cyan-400 mt-1.5">
-            {totalQuizzesAttempted > 0 ? `${accuracyPercentage}%` : '—'}
+            {totalQuizzesAttempted > 0 ? `${accuracyPercentage}%` : '0%'}
           </div>
           <span className="text-[11px] text-blue-700 dark:text-cyan-300 font-semibold">
             {totalQuizzesAttempted > 0 ? 'Live database score' : 'Take a test to calculate'}
@@ -702,7 +749,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           </div>
 
           <WeeklyStudyPlanner goals={weeklyGoals} onToggleGoal={handleToggleGoal} />
-          <ExamCountdown />
 
           {/* Subject Progress from Real Database Records */}
           <Card className="p-6 sm:p-8 space-y-4">
@@ -756,7 +802,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             ) : (
               <div className="py-6 text-center text-xs text-slate-500 dark:text-slate-400">
-                Start your first test to see your performance breakdown by subject.
+                No tests attempted yet. Start practicing to build your progress.
               </div>
             )}
           </Card>
@@ -853,8 +899,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
             {studentResults.length === 0 && (
               <EmptyState
-                title="Start your first test to see your performance."
-                description="Click 'Start Quiz' or 'Available Tests' to take your first test and begin recording your achievements."
+                title="No tests attempted yet"
+                description="Start practicing to build your progress."
               />
             )}
           </div>
@@ -1137,8 +1183,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             ))
           ) : (
             <EmptyState
-              title="Start your first test to see your performance."
-              description="Launch an online test from the Available Tests tab to start tracking your performance and building your progress history."
+              title="No tests attempted yet"
+              description="Start practicing to build your progress."
             />
           )}
         </div>
@@ -1252,7 +1298,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
             ) : (
               <div className="py-12 text-center text-xs text-slate-500 dark:text-slate-400">
-                Not enough data yet. Complete tests to generate performance analytics.
+                No tests attempted yet. Start practicing to build your progress.
               </div>
             )}
           </Card>
@@ -1329,7 +1375,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <div className="col-span-full">
                 <EmptyState
                   title="No Certificates Earned Yet"
-                  description="Pass any assessment with 50%+ score to earn your verifiable TaleemGuru Merit Certificate."
+                  description={`Pass any assessment with 50%+ score to earn your verifiable ${siteName} Merit Certificate.`}
                 />
               </div>
             )}

@@ -33,6 +33,7 @@ import {
 import { AdminConfirmDialog } from './AdminConfirmDialog';
 import { documentBrandingService } from '../../services/documentBrandingService';
 import { AdminDocumentLibraryTab } from './AdminDocumentLibraryTab';
+import { useSiteSettings } from '../../context/SiteSettingsContext';
 
 interface AdminContentTabsProps {
   type: 'notes' | 'past-papers' | 'documents';
@@ -57,6 +58,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
   onUpdatePastPaper = (_paper: PastPaper) => {},
   onDeletePastPaper = (_id: string) => {},
 }) => {
+  const { siteName } = useSiteSettings();
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [boardFilter, setBoardFilter] = useState('All');
@@ -674,7 +676,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2.5">
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Upload PDF Document (Automatic TaleemGuru Branding)
+                      Upload PDF Document (Automatic {siteName} Branding)
                     </label>
                     <input
                       type="file"
@@ -721,7 +723,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
                 <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-900 dark:text-emerald-300 text-xs flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                   <div>
-                    <span className="font-bold">Permanent TaleemGuru Branding Active:</span> All student and public downloads of this study note are automatically protected and stamped with official branding (<span className="font-mono">© TaleemGuru.pk | Downloaded from TaleemGuru.pk</span>) and verified document metadata.
+                    <span className="font-bold">Permanent {siteName} Branding Active:</span> All student and public downloads of this study note are automatically protected and stamped with official branding (<span className="font-mono">© {siteName} | Downloaded from {siteName}</span>) and verified document metadata.
                   </div>
                 </div>
 
@@ -1166,22 +1168,24 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
 
       {/* Add / Edit Past Paper Modal */}
       {isPaperModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 relative max-h-[92vh] overflow-y-auto space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl relative flex flex-col max-h-[90vh] my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-teal-600" />
                 {editingPaper ? 'Edit Past Paper Record' : 'Upload Past Paper Record'}
               </h3>
               <button
+                type="button"
                 onClick={() => setIsPaperModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSavePaper} className="space-y-4 text-xs">
+            <form onSubmit={handleSavePaper} className="flex-1 flex flex-col min-h-0 mt-4 text-xs">
+              <div className="flex-1 overflow-y-auto pr-1.5 space-y-4 min-h-0">
               {/* Title */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -1353,7 +1357,7 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
               <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-2.5">
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Upload Past Paper PDF (Automatic TaleemGuru Branding)
+                    Upload Past Paper PDF (Automatic {siteName} Branding)
                   </label>
                   <input
                     type="file"
@@ -1400,12 +1404,13 @@ export const AdminContentTabs: React.FC<AdminContentTabsProps> = ({
               <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-emerald-900 dark:text-emerald-300 text-xs flex items-start gap-2.5">
                 <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
                 <div>
-                  <span className="font-bold">Permanent TaleemGuru Branding Active:</span> All student and public downloads of this past paper are automatically protected and stamped with official branding (<span className="font-mono">© TaleemGuru.pk | Downloaded from TaleemGuru.pk</span>).
+                  <span className="font-bold">Permanent {siteName} Branding Active:</span> All student and public downloads of this past paper are automatically protected and stamped with official branding (<span className="font-mono">© {siteName} | Downloaded from {siteName}</span>).
                 </div>
               </div>
+              </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+              {/* Pinned Action Footer */}
+              <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900">
                 <button
                   type="button"
                   onClick={() => setIsPaperModalOpen(false)}

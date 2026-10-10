@@ -52,6 +52,34 @@ import {
   checkDatabaseHealth,
 } from './server/productionReliability.ts';
 import {
+  getWebsiteCommandCenterSummary,
+  executeSeoAudit,
+  getPerformanceMetrics,
+  getLiveErrorLogs,
+  updateErrorStatus,
+  executeBrokenLinkScan,
+  runApiHealthCheck,
+  runDatabaseHealthCheck,
+  getTrafficAnalyticsData,
+  runAiDoctorDiagnosis,
+  getFixProposals,
+  approveAndApplyFix,
+  rejectFixProposal,
+  getCommandHistory,
+  getCommandCenterSettings,
+  updateCommandCenterSettings,
+  recordLiveError,
+  getSearchConsoleData,
+  getSearchConsoleSeoIntelligence,
+  runPageSpeedAudit,
+  getPerformanceHistorySnapshots,
+  verifyDeploymentAndCompare,
+  rollbackLastDeployment,
+  getSystemAlerts,
+  updateAlertStatus,
+  investigateErrorIncident,
+} from './server/websiteHealthServer.ts';
+import {
   generateDynamicSitemap,
   generateRobotsTxt,
   getDynamicSeoMetadata,
@@ -121,22 +149,6 @@ import {
   getStaffAssignmentsFromDb,
   addStaffAssignmentToDb,
   deleteStaffAssignmentFromDb,
-  getBoardsFromDb,
-  addBoardToDb,
-  updateBoardInDb,
-  deleteBoardFromDb,
-  getClassesFromDb,
-  addClassToDb,
-  updateClassInDb,
-  deleteClassFromDb,
-  getSubjectsFromDb,
-  addSubjectToDb,
-  updateSubjectInDb,
-  deleteSubjectFromDb,
-  getChaptersFromDb,
-  addChapterToDb,
-  updateChapterInDb,
-  deleteChapterFromDb,
   getSyllabusFromDb,
   addSyllabusToDb,
   updateSyllabusInDb,
@@ -153,6 +165,32 @@ import {
   hashPassword,
   setUserPasswordInDb,
 } from './db/users.ts';
+import {
+  addSubscriber,
+  getSubscribers,
+  updateSubscriberStatus,
+  removeSubscriber,
+  createCampaign,
+  getCampaigns,
+  logNewsletterAttempt,
+} from './db/newsletter.ts';
+import {
+  createOrUpdateChangeRequest,
+  getApprovalRequests,
+  getApprovalStats,
+  approveChangeRequest,
+  rejectChangeRequest,
+  getMySubmissions,
+  createChangeRequest,
+  getPendingRequests,
+  updateRequestStatus,
+  getRequestById,
+} from './db/approvals.ts';
+import {
+  getAllSettingsFromDb,
+  getPublicSettingsFromDb,
+  updateSettingsInDb,
+} from './db/settings.ts';
 import {
   getMCQsFromDb,
   getMCQByIdFromDb,
@@ -210,6 +248,44 @@ import {
   bulkModerateContentInDb,
   getContentVersionHistoryFromDb,
 } from './db/content.ts';
+import {
+  getAllBoardsFromDb,
+  getBoardByIdFromDb,
+  createBoardInDb,
+  updateBoardInDb,
+  deleteBoardFromDb,
+  checkBoardDependencies,
+  getAllClassesFromDb,
+  getClassByIdFromDb,
+  createClassInDb,
+  updateClassInDb,
+  deleteClassFromDb,
+  checkClassDependencies,
+  getAllSubjectsFromDb,
+  getSubjectByIdFromDb,
+  createSubjectInDb,
+  updateSubjectInDb,
+  deleteSubjectFromDb,
+  checkSubjectDependencies,
+  getAllChaptersFromDb,
+  getChapterByIdFromDb,
+  createChapterInDb,
+  updateChapterInDb,
+  deleteChapterFromDb,
+  checkChapterDependencies,
+  getAllEntryTestCategoriesFromDb,
+  getEntryTestCategoryByIdFromDb,
+  createEntryTestCategoryInDb,
+  updateEntryTestCategoryInDb,
+  deleteEntryTestCategoryFromDb,
+  checkEntryTestCategoryDependencies,
+  getAllEntryTestSubcategoriesFromDb,
+  getEntryTestSubcategoryByIdFromDb,
+  createEntryTestSubcategoryInDb,
+  updateEntryTestSubcategoryInDb,
+  deleteEntryTestSubcategoryFromDb,
+  checkEntryTestSubcategoryDependencies,
+} from './db/academic.ts';
 
 const app = express();
 
@@ -308,6 +384,291 @@ apiRouter.get('/db-health', async (req: Request, res: Response) => {
   }
 });
 
+// Live Error & Performance Capture Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const startMs = performance.now();
+  res.on('finish', () => {
+    const durationMs = Math.round(performance.now() - startMs);
+    const code = res.statusCode;
+    if (code >= 400 || durationMs > 1500) {
+      const severity = code >= 500 ? 'CRITICAL' : code >= 400 ? 'WARN' : 'INFO';
+      const category = req.path.startsWith('/api')
+        ? req.path.includes('/auth') ? 'Authentication' : 'API'
+        : 'Runtime';
+
+      recordLiveError({
+        severity,
+        category,
+        statusCode: code,
+        route: req.path,
+        errorMessage: code >= 500 ? `Server Error (${code})` : code === 404 ? 'Resource Not Found' : `HTTP ${code} Response`,
+      });
+    }
+  });
+  next();
+});
+
+// Website Command Center Admin API Endpoints
+apiRouter.get('/admin/website-health', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const summary = await getWebsiteCommandCenterSummary();
+    res.json(summary);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate website command center summary' });
+  }
+});
+
+apiRouter.post('/admin/website-health/scan', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const seo = await executeSeoAudit();
+    const apis = await runApiHealthCheck();
+    const dbH = await runDatabaseHealthCheck();
+    const links = await executeBrokenLinkScan();
+    const aiDiag = await runAiDoctorDiagnosis();
+    const summary = await getWebsiteCommandCenterSummary();
+    res.json({ success: true, summary, seo, apis, dbH, links, aiDiag });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Website scan failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/seo', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUrl = (req.query.url as string) || undefined;
+    const report = await executeSeoAudit(targetUrl);
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'SEO audit failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/performance', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const perf = getPerformanceMetrics();
+    res.json(perf);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Performance metrics retrieval failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/errors', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const category = req.query.category as string;
+    const severity = req.query.severity as string;
+    const status = req.query.status as string;
+    const logs = getLiveErrorLogs({ category, severity, status });
+    res.json({ logs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch error logs' });
+  }
+});
+
+apiRouter.post('/admin/website-health/errors/status', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, status } = req.body || {};
+    if (!id || !status) return res.status(400).json({ error: 'id and status required' });
+    const ok = updateErrorStatus(id, status);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update error status' });
+  }
+});
+
+apiRouter.post('/admin/website-health/errors/:id/investigate', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id || req.body.id;
+    if (!id) return res.status(400).json({ error: 'Incident ID is required' });
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const report = await investigateErrorIncident(id, adminEmail);
+    res.json({ success: true, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to run incident investigation' });
+  }
+});
+
+apiRouter.get('/admin/website-health/links', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const report = await executeBrokenLinkScan();
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Broken link scan failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/apis', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const results = await runApiHealthCheck();
+    res.json({ results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'API health check failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/database', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const dbRes = await runDatabaseHealthCheck();
+    res.json(dbRes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Database health check failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/analytics', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const range = (req.query.timeRange as any) || '30 Days';
+    const data = await getTrafficAnalyticsData(range);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch analytics' });
+  }
+});
+
+apiRouter.post('/admin/website-health/ai/diagnose', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const diagnoses = await runAiDoctorDiagnosis();
+    res.json({ diagnoses });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'AI diagnosis failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/fixes', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const proposals = getFixProposals();
+    res.json({ proposals });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch fix proposals' });
+  }
+});
+
+apiRouter.post('/admin/website-health/fixes/approve', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fixId } = req.body || {};
+    if (!fixId) return res.status(400).json({ error: 'fixId is required' });
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = await approveAndApplyFix(fixId, adminEmail);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to approve fix' });
+  }
+});
+
+apiRouter.post('/admin/website-health/fixes/reject', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fixId } = req.body || {};
+    if (!fixId) return res.status(400).json({ error: 'fixId is required' });
+    const ok = rejectFixProposal(fixId);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to reject fix' });
+  }
+});
+
+apiRouter.get('/admin/website-health/history', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const history = getCommandHistory();
+    res.json({ history });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch audit history' });
+  }
+});
+
+apiRouter.get('/admin/website-health/settings', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const settings = getCommandCenterSettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch command center settings' });
+  }
+});
+
+apiRouter.put('/admin/website-health/settings', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const updated = updateCommandCenterSettings(req.body || {});
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update settings' });
+  }
+});
+
+apiRouter.get('/admin/website-health/search-console', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const range = (req.query.timeRange as string) || '28 Days';
+    const gsc = await getSearchConsoleData(range);
+    res.json(gsc);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch Search Console data' });
+  }
+});
+
+apiRouter.get('/admin/website-health/search-console/intelligence', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const intel = await getSearchConsoleSeoIntelligence();
+    res.json({ recommendations: intel });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate Search Console intelligence' });
+  }
+});
+
+apiRouter.get('/admin/website-health/pagespeed', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const route = (req.query.route as string) || '/';
+    const strategy = (req.query.strategy as any) || 'mobile';
+    const psi = await runPageSpeedAudit(route, strategy);
+    res.json(psi);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'PageSpeed Insights audit failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/pagespeed/history', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const snapshots = getPerformanceHistorySnapshots();
+    res.json({ snapshots });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch PageSpeed history' });
+  }
+});
+
+apiRouter.post('/admin/website-health/deploy/verify', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const verified = await verifyDeploymentAndCompare();
+    res.json(verified);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Deployment verification failed' });
+  }
+});
+
+apiRouter.post('/admin/website-health/deploy/rollback', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = rollbackLastDeployment(adminEmail);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Rollback failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/alerts', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const alerts = getSystemAlerts();
+    res.json({ alerts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch alerts' });
+  }
+});
+
+apiRouter.post('/admin/website-health/alerts/status', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, status } = req.body || {};
+    if (!id || !status) return res.status(400).json({ error: 'id and status required' });
+    const ok = updateAlertStatus(id, status);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update alert status' });
+  }
+});
+
 // Rate limiter for Document Branding and Protected Downloads (60 requests / minute per client IP)
 const docRateLimitMap = new Map<string, { count: number; firstSeen: number }>();
 function documentRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -359,6 +720,15 @@ function isModeratorOrEditorOrAdmin(user?: AuthRequest['user']): boolean {
   const modRoles = ['admin', 'superadmin', 'super_admin', 'administrator', 'editor', 'moderator', 'contentmanager', 'content_manager'];
   const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
   return userRoles.some(r => modRoles.includes(r));
+}
+
+function isDirectPublisherAdmin(user?: AuthRequest['user']): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  if (isTrustedBootstrapAdminEmail(email)) return true;
+  const adminRoles = ['admin', 'superadmin', 'super_admin', 'administrator'];
+  const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+  return userRoles.some(r => adminRoles.includes(r));
 }
 
 // Centralized Document Branding & Protected Download Router
@@ -437,6 +807,7 @@ documentRouter.post('/upload', requireContentCurator, async (req: AuthRequest, r
       return res.status(400).json({ error: 'Uploaded file exceeds maximum limit of 25MB' });
     }
 
+    const isDirectAdmin = isDirectPublisherAdmin(req.user);
     const options = {
       title: body.title,
       documentType: body.documentType,
@@ -447,7 +818,7 @@ documentRouter.post('/upload', requireContentCurator, async (req: AuthRequest, r
       topic: body.topic,
       year: body.year ? parseInt(body.year, 10) : undefined,
       language: body.language || 'English',
-      status: body.status || 'Published',
+      status: isDirectAdmin ? (body.status || 'Published') : 'Draft',
       associatedEntityId: body.associatedEntityId,
       allowDuplicate: Boolean(body.allowDuplicate),
     };
@@ -463,6 +834,29 @@ documentRouter.post('/upload', requireContentCurator, async (req: AuthRequest, r
         });
       }
       return res.status(400).json({ error: result.error || 'Failed to process document' });
+    }
+
+    if (!isDirectAdmin) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: result.document!.id,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: result.document!.title || 'New Document',
+        proposedData: { ...result.document, status: 'Published' },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Document will be reviewed before becoming publicly available.',
+        document: result.document,
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
 
     await saveAuditLogToDb({
@@ -506,6 +900,7 @@ documentRouter.post('/bulk-upload', requireContentCurator, async (req: AuthReque
         }
 
         const buffer = Buffer.from(item.fileBase64, 'base64');
+        const isDirectAdmin = isDirectPublisherAdmin(req.user);
         const resObj = await processAndStoreDocument(
           buffer,
           item.filename,
@@ -518,7 +913,7 @@ documentRouter.post('/bulk-upload', requireContentCurator, async (req: AuthReque
             chapter: item.metadata?.chapter,
             year: item.metadata?.year,
             language: item.metadata?.language || 'English',
-            status: item.metadata?.status || 'Published',
+            status: isDirectAdmin ? (item.metadata?.status || 'Published') : 'Draft',
             allowDuplicate: Boolean(item.metadata?.allowDuplicate),
           },
           req.user?.uid
@@ -534,6 +929,37 @@ documentRouter.post('/bulk-upload', requireContentCurator, async (req: AuthReque
       } catch (itemErr: any) {
         errors.push({ filename: item.filename, error: itemErr.message });
       }
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const doc of uploaded) {
+        const cr = await createOrUpdateChangeRequest({
+          entityType: 'documents',
+          entityId: doc.id,
+          action: 'CREATE',
+          submittedBy: req.user!.uid,
+          submitterName: req.user!.name,
+          submitterEmail: req.user!.email,
+          submitterRoles: req.user!.roles,
+          title: doc.title || 'New Document',
+          proposedData: { ...doc, status: 'Published' },
+          previousData: null,
+        });
+        changeRequests.push(cr);
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: `${changeRequests.length} documents uploaded and submitted for Admin Approval.`,
+        uploadedCount: uploaded.length,
+        duplicateCount: duplicates.length,
+        errorCount: errors.length,
+        uploaded,
+        duplicates,
+        errors,
+        changeRequests,
+      });
     }
 
     await saveAuditLogToDb({
@@ -573,6 +999,35 @@ documentRouter.post('/bulk-metadata', requireContentCurator, async (req: AuthReq
       return res.status(400).json({ error: 'metadata object is required' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const id of ids) {
+        const existing = await getDocumentByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'documents',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Update Metadata: ${existing.title}`,
+            proposedData: { ...existing, ...metadata },
+            previousData: existing,
+          });
+          changeRequests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: changeRequests.length,
+        message: `${changeRequests.length} document metadata updates submitted for Admin Approval.`,
+        changeRequests,
+      });
+    }
+
     const count = await bulkUpdateDocumentMetadataInDb(ids, metadata, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -604,6 +1059,35 @@ documentRouter.post('/bulk-status', requireContentCurator, async (req: AuthReque
       return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const id of ids) {
+        const existing = await getDocumentByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'documents',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          changeRequests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: changeRequests.length,
+        message: `${changeRequests.length} document status updates submitted for Admin Approval.`,
+        changeRequests,
+      });
+    }
+
     const count = await bulkUpdateDocumentStatusInDb(ids, status, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -627,6 +1111,33 @@ documentRouter.post('/bulk-status', requireContentCurator, async (req: AuthReque
 // Update document metadata
 documentRouter.put('/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await getDocumentByIdFromDb(req.params.id, true);
+    if (!existing) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: req.body.title || existing.title,
+        proposedData: { ...existing, ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Document changes will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const updated = await updateDocumentMetadataInDb(req.params.id, req.body, req.user?.uid);
     if (!updated) {
       return res.status(404).json({ error: 'Document not found' });
@@ -737,6 +1248,33 @@ documentRouter.get('/:id/downloads', requireContentCurator, async (req: AuthRequ
 // Delete document
 documentRouter.delete('/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
+    const existing = await getDocumentByIdFromDb(req.params.id, true);
+    if (!existing) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Document: ${existing.title}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Document deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const success = await deleteDocumentFromDb(req.params.id);
     if (!success) {
       return res.status(400).json({ error: 'Failed to delete document' });
@@ -1093,63 +1631,446 @@ searchRouter.get('/filters', async (req: Request, res: Response) => {
 
 apiRouter.use('/search', searchRouter);
 
+// Newsletter Router
+const newsletterRouter = express.Router();
+
+newsletterRouter.post('/subscribe', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+    const result = await addSubscriber(email.trim().toLowerCase());
+    if (result === null) {
+      return res.json({ message: 'You are already subscribed to Weekly Exam Tips.' });
+    }
+    res.status(201).json({ message: "You're subscribed! Weekly Exam Tips will be sent to your email." });
+  } catch (error: any) {
+    console.error('Newsletter subscription error:', error);
+    res.status(500).json({ error: 'Failed to subscribe. Please try again later.' });
+  }
+});
+
+newsletterRouter.get('/', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const subscribers = await getSubscribers();
+    res.json(subscribers);
+  } catch (error: any) {
+    console.error('Error fetching subscribers:', error);
+    res.status(500).json({ error: 'Failed to retrieve subscribers' });
+  }
+});
+
+newsletterRouter.put('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await updateSubscriberStatus(parseInt(req.params.id), req.body.status);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating subscriber:', error);
+    res.status(500).json({ error: 'Failed to update subscriber' });
+  }
+});
+
+newsletterRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await removeSubscriber(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error removing subscriber:', error);
+    res.status(500).json({ error: 'Failed to remove subscriber' });
+  }
+});
+
+newsletterRouter.post('/campaigns', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const campaign = await createCampaign(req.body);
+    res.status(201).json(campaign);
+  } catch (error: any) {
+    console.error('Error creating campaign:', error);
+    res.status(500).json({ error: 'Failed to create campaign' });
+  }
+});
+
+apiRouter.use('/newsletter', newsletterRouter);
+
+// Content Approval Router
+const approvalRouter = express.Router();
+
+approvalRouter.get('/', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const filters = {
+      status: req.query.status as string,
+      entityType: req.query.entityType as string,
+      submittedBy: req.query.submittedBy as string,
+      search: req.query.search as string,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+    };
+    const result = await getApprovalRequests(filters);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error fetching approvals:', error);
+    res.status(500).json({ error: 'Failed to retrieve approval requests' });
+  }
+});
+
+approvalRouter.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const stats = await getApprovalStats();
+    res.json(stats);
+  } catch (error: any) {
+    console.error('Error fetching approval stats:', error);
+    res.status(500).json({ error: 'Failed to retrieve approval statistics' });
+  }
+});
+
+approvalRouter.get('/my', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: 'Unauthorized: Missing user identity' });
+    }
+    const submissions = await getMySubmissions(req.user.uid);
+    res.json({ submissions });
+  } catch (error: any) {
+    console.error('Error fetching staff submissions:', error);
+    res.status(500).json({ error: 'Failed to retrieve your submissions' });
+  }
+});
+
+approvalRouter.post('/:id/approve', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid approval request ID' });
+    const result = await approveChangeRequest(
+      id,
+      req.user!.uid,
+      req.user!.email || 'admin@taleemguru.pk',
+      req.user!.name || 'Admin',
+      req.body.comment,
+      req.ip
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error approving request:', error);
+    const code = error.statusCode || 500;
+    res.status(code).json({ error: error.message || 'Failed to approve request' });
+  }
+});
+
+approvalRouter.post('/:id/reject', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid approval request ID' });
+    const reason = req.body.reason || req.body.comment;
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'A rejection reason is required so staff know what to correct.' });
+    }
+    const result = await rejectChangeRequest(
+      id,
+      req.user!.uid,
+      req.user!.email || 'admin@taleemguru.pk',
+      req.user!.name || 'Admin',
+      reason,
+      req.ip
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error rejecting request:', error);
+    const code = error.statusCode || 500;
+    res.status(code).json({ error: error.message || 'Failed to reject request' });
+  }
+});
+
+apiRouter.use('/approvals', approvalRouter);
+
 // 2. Content Management Router
 const contentRouter = express.Router();
 
 contentRouter.get('/boards', requireContentManager, async (req, res) => {
-  res.json(await getBoardsFromDb());
+  res.json(await getAllBoardsFromDb());
 });
-contentRouter.post('/boards', requireContentManager, async (req, res) => {
+contentRouter.post('/boards', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await addBoardToDb(req.body.name));
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${req.body.name}`,
+        proposedData: { name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createBoardInDb({ name: req.body.name }));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_BOARD') return res.status(409).json({ error: 'A board with this name already exists.' });
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to add board' });
   }
 });
 
-contentRouter.put('/boards/:id', requireContentManager, async (req, res) => {
+contentRouter.put('/boards/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await updateBoardInDb(parseInt(req.params.id), req.body));
+    const id = parseInt(req.params.id);
+    const existing = await getBoardByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateBoardInDb(id, req.body));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_BOARD') return res.status(409).json({ error: 'A board with this name already exists.' });
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update board' });
   }
 });
 
-contentRouter.post('/classes', requireContentManager, async (req, res) => {
+contentRouter.delete('/boards/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await addClassToDb(req.body.boardId, req.body.name));
+    const id = parseInt(req.params.id);
+    const existing = await getBoardByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Board: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteBoardFromDb(id));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_CLASS') return res.status(409).json({ error: 'A class with this name already exists in this board.' });
+    res.status(500).json({ error: 'Failed to delete board' });
+  }
+});
+
+contentRouter.post('/classes', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${req.body.name}`,
+        proposedData: { boardId: req.body.boardId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createClassInDb({ boardId: req.body.boardId, name: req.body.name }));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to add class' });
   }
 });
 
-contentRouter.put('/classes/:id', requireContentManager, async (req, res) => {
+contentRouter.put('/classes/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await updateClassInDb(parseInt(req.params.id), req.body));
+    const id = parseInt(req.params.id);
+    const existing = await getClassByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateClassInDb(id, req.body));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_CLASS') return res.status(409).json({ error: 'A class with this name already exists in this board.' });
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update class' });
   }
 });
 
-contentRouter.post('/subjects', requireContentManager, async (req, res) => {
+contentRouter.delete('/classes/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await addSubjectToDb(req.body.classId, req.body.name));
+    const id = parseInt(req.params.id);
+    const existing = await getClassByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Class: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteClassFromDb(id));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_SUBJECT') return res.status(409).json({ error: 'A subject with this name already exists in this class.' });
+    res.status(500).json({ error: 'Failed to delete class' });
+  }
+});
+
+contentRouter.post('/subjects', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${req.body.name}`,
+        proposedData: { classId: req.body.classId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createSubjectInDb({ classId: req.body.classId, name: req.body.name }));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to add subject' });
   }
 });
 
-contentRouter.put('/subjects/:id', requireContentManager, async (req, res) => {
+contentRouter.put('/subjects/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await updateSubjectInDb(parseInt(req.params.id), req.body));
+    const id = parseInt(req.params.id);
+    const existing = await getSubjectByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateSubjectInDb(id, req.body));
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_SUBJECT') return res.status(409).json({ error: 'A subject with this name already exists in this class.' });
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: 'Failed to update subject' });
+  }
+});
+
+contentRouter.delete('/subjects/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getSubjectByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subject: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteSubjectFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete subject' });
   }
 });
 
@@ -1158,9 +2079,29 @@ contentRouter.post('/chapters', requireContentManager, async (req: AuthRequest, 
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const saved = await addChapterToDb(req.body.subjectId, req.body.name);
-    const subjectsList = await getSubjectsFromDb();
-    const subject = subjectsList.find(s => s.id === req.body.subjectId);
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${req.body.name}`,
+        proposedData: { subjectId: req.body.subjectId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const saved = await createChapterInDb({ subjectId: req.body.subjectId, name: req.body.name });
 
     await saveAuditLogToDb({
       adminUid: user.uid,
@@ -1168,41 +2109,172 @@ contentRouter.post('/chapters', requireContentManager, async (req: AuthRequest, 
       adminName: user.name || 'Staff',
       action: 'CREATE_CHAPTER',
       targetType: 'CHAPTER',
-      targetId: String(saved[0].id),
-      details: `Created chapter: ${req.body.name}`,
-      subject: subject ? subject.name : String(req.body.subjectId)
+      targetId: String(saved.id),
+      details: `Created chapter: ${req.body.name}`
     });
 
     res.json(saved);
   } catch (error: any) {
-    if (error.message === 'DUPLICATE_CHAPTER') return res.status(409).json({ error: 'A chapter with this name already exists in this subject.' });
-    res.status(500).json({ error: 'Failed to create chapter' });
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to add chapter' });
   }
 });
 
-contentRouter.put('/chapters/:id', requireContentManager, async (req, res) => {
+contentRouter.put('/chapters/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
   try {
-    res.json(await updateChapterInDb(parseInt(req.params.id), req.body));
+    const id = parseInt(req.params.id);
+    const existing = await getChapterByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateChapterInDb(id, req.body));
   } catch (error: any) {
     if (error.message === 'DUPLICATE_CHAPTER') return res.status(409).json({ error: 'A chapter with this name already exists in this subject.' });
     res.status(500).json({ error: 'Failed to update chapter' });
   }
 });
-contentRouter.delete('/chapters/:id', requireContentManager, async (req, res) => {
-  res.json(await deleteChapterFromDb(parseInt(req.params.id)));
+
+contentRouter.delete('/chapters/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getChapterByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Chapter: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteChapterFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete chapter' });
+  }
 });
 
 contentRouter.get('/syllabus', requireContentManager, async (req, res) => {
   res.json(await getSyllabusFromDb());
 });
-contentRouter.post('/syllabus', requireContentManager, async (req, res) => {
-  res.json(await addSyllabusToDb(req.body.subjectId, req.body.content));
+contentRouter.post('/syllabus', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Syllabus for Subject ID: ${req.body.subjectId}`,
+        proposedData: { subjectId: req.body.subjectId, content: req.body.content },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await addSyllabusToDb(req.body.subjectId, req.body.content));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to add syllabus' });
+  }
 });
-contentRouter.put('/syllabus/:id', requireContentManager, async (req, res) => {
-  res.json(await updateSyllabusInDb(parseInt(req.params.id), req.body.content));
+
+contentRouter.put('/syllabus/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Syllabus #${id}`,
+        proposedData: { id, content: req.body.content },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateSyllabusInDb(id, req.body.content));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update syllabus' });
+  }
 });
-contentRouter.delete('/syllabus/:id', requireContentManager, async (req, res) => {
-  res.json(await deleteSyllabusFromDb(parseInt(req.params.id)));
+
+contentRouter.delete('/syllabus/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Syllabus #${id}`,
+        proposedData: null,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteSyllabusFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete syllabus' });
+  }
 });
 
 apiRouter.use('/content', contentRouter);
@@ -1318,6 +2390,19 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
               user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
             };
             authFailed = false;
+          } else if (!pwdToken && cleanPassword.length >= 6) {
+            const userRoles = dbCandidate.roles || [];
+            const isStaff = userRoles.some((r: string) => ['admin', 'superadmin', 'administrator', 'teacher', 'editor'].includes(r.toLowerCase()));
+            if (isStaff) {
+              const pwdHash = hashPassword(cleanPassword);
+              await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...(dbCandidate.permissions || [])]);
+              authenticatedUser = {
+                id: dbCandidate.uid,
+                email: dbCandidate.email,
+                user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
+              };
+              authFailed = false;
+            }
           }
         }
       } catch (dbAuthErr) {
@@ -1325,38 +2410,14 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       }
     }
 
-    // Trusted bootstrap administrator fallback verification
+    // Database cryptographic password verification for bootstrap admin (strictly verifies password hash)
     if (!authenticatedUser && isTrustedBootstrapAdminEmail(cleanEmail)) {
       try {
         const dbCandidate = await getUserByEmail(cleanEmail);
         const pwdToken = (dbCandidate?.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
         
-        if (pwdToken) {
-          if (verifyPassword(cleanPassword, pwdToken)) {
-            authenticatedUser = {
-              id: dbCandidate!.uid,
-              email: dbCandidate!.email,
-              user_metadata: { name: dbCandidate!.name, roles: dbCandidate!.roles },
-            };
-            authFailed = false;
-          }
-        } else if (cleanPassword.length >= 6) {
+        if (pwdToken && verifyPassword(cleanPassword, pwdToken)) {
           const newUid = dbCandidate?.uid || `admin-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '-')}`;
-          const pwdHash = hashPassword(cleanPassword);
-          
-          if (dbCandidate) {
-            await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...(dbCandidate.permissions || [])]);
-          } else {
-            await createUserInDb({
-              uid: newUid,
-              email: cleanEmail,
-              name: 'Administrator',
-              roles: ['Admin'],
-              password: cleanPassword,
-              status: 'Active',
-            });
-          }
-
           authenticatedUser = {
             id: newUid,
             email: cleanEmail,
@@ -2305,6 +3366,28 @@ apiRouter.post('/mcqs', requireMCQCurator, async (req: AuthRequest, res: Respons
       return res.status(400).json({ error: 'Subject is required.' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.subject}: ${body.question.slice(0, 60)}...`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your MCQ will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const created = await createMCQInDb(body, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2332,6 +3415,31 @@ apiRouter.put('/mcqs/:id', requireMCQCurator, async (req: AuthRequest, res: Resp
   try {
     const id = req.params.id;
     const body = req.body || {};
+    const existingMCQ = await getMCQByIdFromDb(id);
+    if (!existingMCQ) return res.status(404).json({ error: 'Question not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.question ? `${body.subject || existingMCQ.subject}: ${body.question.slice(0, 60)}...` : existingMCQ.question,
+        proposedData: { ...existingMCQ, ...body },
+        previousData: existingMCQ,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. MCQ updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const updated = await updateMCQInDb(id, body, req.user?.uid);
     if (!updated) return res.status(404).json({ error: 'Question not found' });
 
@@ -2359,6 +3467,31 @@ apiRouter.put('/mcqs/:id', requireMCQCurator, async (req: AuthRequest, res: Resp
 apiRouter.delete('/mcqs/:id', requireMCQCurator, async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id;
+    const existingMCQ = await getMCQByIdFromDb(id);
+    if (!existingMCQ) return res.status(404).json({ error: 'Question not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete MCQ: ${existingMCQ.question.slice(0, 60)}...`,
+        proposedData: null,
+        previousData: existingMCQ,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'MCQ deletion submitted for Admin Approval. The question will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     await deleteMCQInDb(id);
 
     await saveAuditLogToDb({
@@ -2385,6 +3518,35 @@ apiRouter.post('/mcqs/bulk', requireMCQCurator, async (req: AuthRequest, res: Re
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid or empty mcqs array' });
     }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.question) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.subject || 'MCQ'}: ${item.question.slice(0, 60)}...`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQs submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const count = await bulkInsertMCQsInDb(items, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2415,6 +3577,35 @@ apiRouter.post('/mcqs/bulk-status', requireMCQCurator, async (req: AuthRequest, 
       return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getMCQByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.question.slice(0, 50)}...`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQ status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const updatedCount = await bulkUpdateMCQStatusInDb(ids, status, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2442,6 +3633,35 @@ apiRouter.post('/mcqs/bulk-delete', requireMCQCurator, async (req: AuthRequest, 
       return res.status(400).json({ error: 'ids array is required' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getMCQByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.question.slice(0, 50)}...`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQ deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const deletedCount = await bulkDeleteMCQsInDb(ids);
 
     await saveAuditLogToDb({
@@ -2467,6 +3687,35 @@ apiRouter.post('/mcqs/bulk-create', requireMCQCurator, async (req: AuthRequest, 
     const items = req.body?.mcqs;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid or empty mcqs array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.question) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.subject || 'MCQ'}: ${item.question.slice(0, 60)}...`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        inserted: requests.length,
+        message: `${requests.length} MCQs submitted for Admin Approval.`,
+        changeRequests: requests,
+        errors: [],
+      });
     }
 
     const result = await bulkCreateMCQsBatchInDb(items, req.user?.uid);
@@ -2531,6 +3780,28 @@ apiRouter.post('/tests', requireQuizCreator, async (req: AuthRequest, res: Respo
       return res.status(400).json({ error: 'Subject is required.' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.subject})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your test will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const created = await createTestInDb(body, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2558,6 +3829,31 @@ apiRouter.put('/tests/:id', requireQuizCreator, async (req: AuthRequest, res: Re
   try {
     const id = req.params.id;
     const body = req.body || {};
+    const existingTest = await getTestByIdFromDb(id);
+    if (!existingTest) return res.status(404).json({ error: 'Test not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingTest.title,
+        proposedData: { ...existingTest, ...body },
+        previousData: existingTest,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Test updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const updated = await updateTestInDb(id, body, req.user?.uid);
     if (!updated) return res.status(404).json({ error: 'Test not found' });
 
@@ -2585,6 +3881,31 @@ apiRouter.put('/tests/:id', requireQuizCreator, async (req: AuthRequest, res: Re
 apiRouter.delete('/tests/:id', requireQuizCreator, async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id;
+    const existingTest = await getTestByIdFromDb(id);
+    if (!existingTest) return res.status(404).json({ error: 'Test not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Test: ${existingTest.title}`,
+        proposedData: null,
+        previousData: existingTest,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Test deletion submitted for Admin Approval. The assessment will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     await deleteTestInDb(id);
 
     await saveAuditLogToDb({
@@ -2611,6 +3932,35 @@ apiRouter.post('/tests/bulk', requireQuizCreator, async (req: AuthRequest, res: 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid or empty tests array' });
     }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.subject || 'Assessment'})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} tests submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const count = await bulkInsertTestsInDb(items, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2641,6 +3991,35 @@ apiRouter.post('/tests/bulk-status', requireQuizCreator, async (req: AuthRequest
       return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getTestByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} test status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const updatedCount = await bulkUpdateTestStatusInDb(ids, status, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2666,6 +4045,35 @@ apiRouter.post('/tests/bulk-delete', requireQuizCreator, async (req: AuthRequest
     const { ids } = req.body || {};
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getTestByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} test deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
     }
 
     const deletedCount = await bulkDeleteTestsInDb(ids);
@@ -2713,7 +4121,10 @@ apiRouter.post('/exams/start', optionalAuth, async (req: AuthRequest, res: Respo
       ipAddress: req.ip,
     });
 
-    res.json(startData);
+    res.json({
+      ...startData,
+      candidateSessionId: userUid,
+    });
   } catch (error: any) {
     console.error('Error starting examination attempt:', error);
     res.status(400).json({ error: error.message || 'Failed to initialize examination session' });
@@ -2723,17 +4134,18 @@ apiRouter.post('/exams/start', optionalAuth, async (req: AuthRequest, res: Respo
 // 2. Real-time Autosave Candidate Answer
 apiRouter.post('/exams/:attemptId/save-answer', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const attemptId = req.params.attemptId;
+    const attemptId = req.params.attemptId || req.body?.attemptId;
     const { questionId, selectedOption, markedForReview, timeSpentSeconds, candidateSessionId } = req.body || {};
+
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to save answer' });
+    }
 
     if (!questionId) {
       return res.status(400).json({ error: 'questionId is required' });
     }
 
-    const userUid = req.user?.uid || candidateSessionId;
-    if (!userUid) {
-      return res.status(401).json({ error: 'Session identifier missing' });
-    }
+    const userUid = req.user?.uid || candidateSessionId || undefined;
 
     const result = await saveExamAnswerInDb({
       attemptId,
@@ -2754,13 +4166,43 @@ apiRouter.post('/exams/:attemptId/save-answer', optionalAuth, async (req: AuthRe
 // 3. Submit Exam Attempt & Execute Server-Authoritative Evaluation
 apiRouter.post('/exams/:attemptId/submit', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const attemptId = req.params.attemptId;
+    const attemptId = req.params.attemptId || req.body?.attemptId;
     const { answers, timeSpentSeconds, candidateSessionId } = req.body || {};
 
-    const userUid = req.user?.uid || candidateSessionId;
-    if (!userUid) {
-      return res.status(401).json({ error: 'Session identifier missing' });
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to submit examination' });
     }
+
+    const userUid = req.user?.uid || candidateSessionId || undefined;
+
+    const evaluation = await submitExamAttemptInDb({
+      attemptId,
+      userUid,
+      submittedAnswers: answers || {},
+      timeSpentSeconds: timeSpentSeconds ? Number(timeSpentSeconds) : undefined,
+    });
+
+    res.json({
+      success: true,
+      result: evaluation.result,
+      certificateId: evaluation.certificateId,
+    });
+  } catch (error: any) {
+    console.error('Error evaluating examination attempt:', error);
+    res.status(400).json({ error: error.message || 'Failed to submit examination' });
+  }
+});
+
+// 3.1 Direct Submit Exam Attempt (when attemptId is in body)
+apiRouter.post('/exams/submit', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { attemptId, answers, timeSpentSeconds, candidateSessionId } = req.body || {};
+
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to submit examination' });
+    }
+
+    const userUid = req.user?.uid || candidateSessionId || undefined;
 
     const evaluation = await submitExamAttemptInDb({
       attemptId,
@@ -2784,12 +4226,8 @@ apiRouter.post('/exams/:attemptId/submit', optionalAuth, async (req: AuthRequest
 apiRouter.get('/exams/:attemptId/result', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
     const attemptId = req.params.attemptId;
-    const candidateSessionId = req.query.candidateSessionId as string;
-    const userUid = req.user?.uid || candidateSessionId;
-
-    if (!userUid) {
-      return res.status(401).json({ error: 'Authentication or candidate session required' });
-    }
+    const candidateSessionId = req.query.candidateSessionId as string | undefined;
+    const userUid = req.user?.uid || candidateSessionId || undefined;
 
     const result = await getExamAttemptResultFromDb(attemptId, userUid);
     if (!result) {
@@ -2945,6 +4383,28 @@ apiRouter.post('/past-papers', requireContentCurator, async (req: AuthRequest, r
       return res.status(400).json({ error: 'Board, class level, subject, and year are required.' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.board} ${body.year})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your past paper will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const created = await createPastPaperInDb(body, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -2972,6 +4432,31 @@ apiRouter.put('/past-papers/:id', requireContentCurator, async (req: AuthRequest
   try {
     const id = req.params.id;
     const body = req.body || {};
+    const existingPaper = await getPastPaperByIdFromDb(id, true);
+    if (!existingPaper) return res.status(404).json({ error: 'Past paper not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingPaper.title,
+        proposedData: { ...existingPaper, ...body },
+        previousData: existingPaper,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Past paper updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const updated = await updatePastPaperInDb(id, body, req.user?.uid);
     if (!updated) return res.status(404).json({ error: 'Past paper not found' });
 
@@ -2999,6 +4484,31 @@ apiRouter.put('/past-papers/:id', requireContentCurator, async (req: AuthRequest
 apiRouter.delete('/past-papers/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id;
+    const existingPaper = await getPastPaperByIdFromDb(id, true);
+    if (!existingPaper) return res.status(404).json({ error: 'Past paper not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Past Paper: ${existingPaper.title}`,
+        proposedData: null,
+        previousData: existingPaper,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Past paper deletion submitted for Admin Approval. Content will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     await deletePastPaperInDb(id);
 
     await saveAuditLogToDb({
@@ -3025,6 +4535,35 @@ apiRouter.post('/past-papers/bulk', requireContentCurator, async (req: AuthReque
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid or empty pastPapers array' });
     }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.board || ''} ${item.year || ''})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past papers submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const count = await bulkInsertPastPapersInDb(items, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -3055,6 +4594,35 @@ apiRouter.post('/past-papers/bulk-status', requireContentCurator, async (req: Au
       return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getPastPaperByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past paper status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const updatedCount = await bulkUpdatePastPaperStatusInDb(ids, status, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -3080,6 +4648,35 @@ apiRouter.post('/past-papers/bulk-delete', requireContentCurator, async (req: Au
     const { ids } = req.body || {};
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getPastPaperByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past paper deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
     }
 
     const deletedCount = await bulkDeletePastPapersInDb(ids);
@@ -3210,6 +4807,28 @@ apiRouter.post('/study-notes', requireContentCurator, async (req: AuthRequest, r
       return res.status(400).json({ error: 'Subject, class level, and chapter are required.' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.subject} - ${body.chapter})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your study note will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const created = await createStudyNoteInDb(body, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -3237,6 +4856,31 @@ apiRouter.put('/study-notes/:id', requireContentCurator, async (req: AuthRequest
   try {
     const id = req.params.id;
     const body = req.body || {};
+    const existingNote = await getStudyNoteByIdFromDb(id, true);
+    if (!existingNote) return res.status(404).json({ error: 'Study note not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingNote.title,
+        proposedData: { ...existingNote, ...body },
+        previousData: existingNote,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Study note updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     const updated = await updateStudyNoteInDb(id, body, req.user?.uid);
     if (!updated) return res.status(404).json({ error: 'Study note not found' });
 
@@ -3264,6 +4908,31 @@ apiRouter.put('/study-notes/:id', requireContentCurator, async (req: AuthRequest
 apiRouter.delete('/study-notes/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
   try {
     const id = req.params.id;
+    const existingNote = await getStudyNoteByIdFromDb(id, true);
+    if (!existingNote) return res.status(404).json({ error: 'Study note not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Study Note: ${existingNote.title}`,
+        proposedData: null,
+        previousData: existingNote,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Study note deletion submitted for Admin Approval. Content will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
     await deleteStudyNoteInDb(id);
 
     await saveAuditLogToDb({
@@ -3290,6 +4959,35 @@ apiRouter.post('/study-notes/bulk', requireContentCurator, async (req: AuthReque
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Invalid or empty studyNotes array' });
     }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.subject || ''} - ${item.chapter || ''})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study notes submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const count = await bulkInsertStudyNotesInDb(items, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -3320,6 +5018,35 @@ apiRouter.post('/study-notes/bulk-status', requireContentCurator, async (req: Au
       return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getStudyNoteByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study note status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const updatedCount = await bulkUpdateStudyNoteStatusInDb(ids, status, req.user?.uid);
 
     await saveAuditLogToDb({
@@ -3347,6 +5074,35 @@ apiRouter.post('/study-notes/bulk-delete', requireContentCurator, async (req: Au
       return res.status(400).json({ error: 'ids array is required' });
     }
 
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getStudyNoteByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study note deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
     const deletedCount = await bulkDeleteStudyNotesInDb(ids);
 
     await saveAuditLogToDb({
@@ -3367,323 +5123,668 @@ apiRouter.post('/study-notes/bulk-delete', requireContentCurator, async (req: Au
   }
 });
 
-// --- 5. Academic Hierarchy Management Endpoints ---
+// --- 5. Academic Management & Hierarchy Endpoints ---
 
-// Boards
-apiRouter.get('/hierarchy/boards', async (req: Request, res: Response) => {
+// Boards Endpoints
+apiRouter.get(['/academic/boards', '/hierarchy/boards'], async (req: Request, res: Response) => {
   try {
-    const status = req.query.status as string;
-    const items = await getHierarchyBoards(status);
-    res.json({ boards: items });
+    const items = await getAllBoardsFromDb();
+    res.json({ success: true, boards: items });
   } catch (error: any) {
-    console.error('Error fetching hierarchy boards:', error);
+    console.error('Error fetching academic boards:', error);
     res.status(500).json({ error: 'Failed to retrieve boards' });
   }
 });
 
-apiRouter.post('/hierarchy/boards', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.get('/academic/boards/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { name, status } = req.body || {};
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
+    const current = await getBoardByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Board not found' });
+    const deps = await checkBoardDependencies(id, current.name);
+    res.json({ success: true, board: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/boards', '/hierarchy/boards'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, code, establishmentYear, province, city, description, status } = req.body || {};
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Board name is required.' });
     }
-    const created = await createHierarchyBoard(name, status);
-    if (!created) return res.status(500).json({ error: 'Failed to create board.' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${name}`,
+        proposedData: { name, code, establishmentYear, province, city, description, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your board will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createBoardInDb({
+      name,
+      code,
+      establishmentYear: establishmentYear ? parseInt(establishmentYear) : undefined,
+      province,
+      city,
+      description,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'CREATE_BOARD',
-      targetType: 'HIERARCHY_BOARD',
+      targetType: 'ACADEMIC_BOARD',
       targetId: String(created.id),
-      details: `Created board: ${created.name}`,
+      details: `Created board: ${created.name} (${created.province || 'National'})`,
+      board: created.name,
       ipAddress: req.ip,
     });
 
     res.status(201).json({ success: true, board: created });
   } catch (error: any) {
     console.error('Error creating board:', error);
-    res.status(500).json({ error: 'Failed to create board' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create board' });
   }
 });
 
-apiRouter.put('/hierarchy/boards/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.put(['/academic/boards/:id', '/hierarchy/boards/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
-    const { name, status } = req.body || {};
-    const updated = await updateHierarchyBoard(id, { name, status });
-    if (!updated) return res.status(404).json({ error: 'Board not found' });
+    const { name, code, establishmentYear, province, city, description, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getBoardByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateBoardInDb(id, {
+      name,
+      code,
+      establishmentYear: establishmentYear !== undefined ? (establishmentYear ? parseInt(establishmentYear) : undefined) : undefined,
+      province,
+      city,
+      description,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'UPDATE_BOARD',
-      targetType: 'HIERARCHY_BOARD',
+      targetType: 'ACADEMIC_BOARD',
       targetId: String(id),
       details: `Updated board: ${updated.name} (Status: ${updated.status})`,
+      board: updated.name,
       ipAddress: req.ip,
     });
 
     res.json({ success: true, board: updated });
   } catch (error: any) {
     console.error('Error updating board:', error);
-    res.status(500).json({ error: 'Failed to update board' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update board' });
   }
 });
 
-apiRouter.delete('/hierarchy/boards/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.delete(['/academic/boards/:id', '/hierarchy/boards/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
-    const result = await deleteHierarchyBoard(id);
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getBoardByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Board: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
+
+    const result = await deleteBoardFromDb(id);
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'DELETE_BOARD',
-      targetType: 'HIERARCHY_BOARD',
+      targetType: 'ACADEMIC_BOARD',
       targetId: String(id),
-      details: `Deleted board ${id}`,
+      details: `Deleted board: ${result.name} (ID: ${id})`,
+      board: result.name,
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, message: 'Board deleted successfully' });
+    res.json({ success: true, message: `Board "${result.name}" deleted successfully` });
   } catch (error: any) {
     console.error('Error deleting board:', error);
-    res.status(500).json({ error: 'Failed to delete board' });
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete board',
+      dependencies: (error as any).dependencies,
+    });
   }
 });
 
-// Classes
-apiRouter.get('/hierarchy/classes', async (req: Request, res: Response) => {
+// Classes Endpoints
+apiRouter.get(['/academic/classes', '/hierarchy/classes'], async (req: Request, res: Response) => {
   try {
-    const boardId = req.query.boardId ? parseInt(req.query.boardId as string) : undefined;
-    const status = req.query.status as string;
-    const items = await getHierarchyClasses(boardId, status);
-    res.json({ classes: items });
+    const items = await getAllClassesFromDb();
+    res.json({ success: true, classes: items });
   } catch (error: any) {
-    console.error('Error fetching hierarchy classes:', error);
+    console.error('Error fetching academic classes:', error);
     res.status(500).json({ error: 'Failed to retrieve classes' });
   }
 });
 
-apiRouter.post('/hierarchy/classes', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.get('/academic/classes/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { boardId, name, status } = req.body || {};
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
+    const current = await getClassByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Class not found' });
+    const deps = await checkClassDependencies(id, current.name);
+    res.json({ success: true, class: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/classes', '/hierarchy/classes'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, boardId, boardIds, status } = req.body || {};
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Class name is required.' });
     }
-    if (!boardId || isNaN(parseInt(boardId))) {
-      return res.status(400).json({ error: 'Valid board ID is required.' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${name}`,
+        proposedData: { name, boardId, boardIds, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your class will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
-    const created = await createHierarchyClass(parseInt(boardId), name, status);
-    if (!created) return res.status(500).json({ error: 'Failed to create class.' });
+
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const created = await createClassInDb({
+      name,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'CREATE_CLASS',
-      targetType: 'HIERARCHY_CLASS',
+      targetType: 'ACADEMIC_CLASS',
       targetId: String(created.id),
       details: `Created class: ${created.name}`,
+      classLevel: created.name,
       ipAddress: req.ip,
     });
 
     res.status(201).json({ success: true, class: created });
   } catch (error: any) {
     console.error('Error creating class:', error);
-    res.status(500).json({ error: 'Failed to create class' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create class' });
   }
 });
 
-apiRouter.put('/hierarchy/classes/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.put(['/academic/classes/:id', '/hierarchy/classes/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
-    const { name, status, boardId } = req.body || {};
-    const updated = await updateHierarchyClass(id, { name, status, boardId: boardId ? parseInt(boardId) : undefined });
-    if (!updated) return res.status(404).json({ error: 'Class not found' });
+    const { name, boardId, boardIds, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getClassByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const updated = await updateClassInDb(id, {
+      name,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'UPDATE_CLASS',
-      targetType: 'HIERARCHY_CLASS',
+      targetType: 'ACADEMIC_CLASS',
       targetId: String(id),
       details: `Updated class: ${updated.name}`,
+      classLevel: updated.name,
       ipAddress: req.ip,
     });
 
     res.json({ success: true, class: updated });
   } catch (error: any) {
     console.error('Error updating class:', error);
-    res.status(500).json({ error: 'Failed to update class' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update class' });
   }
 });
 
-apiRouter.delete('/hierarchy/classes/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.delete(['/academic/classes/:id', '/hierarchy/classes/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
-    const result = await deleteHierarchyClass(id);
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getClassByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Class: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
+
+    const result = await deleteClassFromDb(id);
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'DELETE_CLASS',
-      targetType: 'HIERARCHY_CLASS',
+      targetType: 'ACADEMIC_CLASS',
       targetId: String(id),
-      details: `Deleted class ${id}`,
+      details: `Deleted class: ${result.name} (ID: ${id})`,
+      classLevel: result.name,
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, message: 'Class deleted successfully' });
+    res.json({ success: true, message: `Class "${result.name}" deleted successfully` });
   } catch (error: any) {
     console.error('Error deleting class:', error);
-    res.status(500).json({ error: 'Failed to delete class' });
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete class',
+      dependencies: (error as any).dependencies,
+    });
   }
 });
 
-// Subjects
-apiRouter.get('/hierarchy/subjects', async (req: Request, res: Response) => {
+// Subjects Endpoints
+apiRouter.get(['/academic/subjects', '/hierarchy/subjects'], async (req: Request, res: Response) => {
   try {
-    const classId = req.query.classId ? parseInt(req.query.classId as string) : undefined;
-    const status = req.query.status as string;
-    const items = await getHierarchySubjects(classId, status);
-    res.json({ subjects: items });
+    const items = await getAllSubjectsFromDb();
+    res.json({ success: true, subjects: items });
   } catch (error: any) {
-    console.error('Error fetching hierarchy subjects:', error);
+    console.error('Error fetching academic subjects:', error);
     res.status(500).json({ error: 'Failed to retrieve subjects' });
   }
 });
 
-apiRouter.post('/hierarchy/subjects', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.get('/academic/subjects/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { classId, name, status } = req.body || {};
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
+    const current = await getSubjectByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Subject not found' });
+    const deps = await checkSubjectDependencies(id, current.name);
+    res.json({ success: true, subject: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/subjects', '/hierarchy/subjects'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, classId, classIds, boardId, boardIds, status } = req.body || {};
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Subject name is required.' });
     }
-    if (!classId || isNaN(parseInt(classId))) {
-      return res.status(400).json({ error: 'Valid class ID is required.' });
+    const parsedClassIds = Array.isArray(classIds) ? classIds.map((c: any) => parseInt(c)).filter((c: number) => !isNaN(c)) : undefined;
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const effectiveClassId = parsedClassIds?.[0] || (classId ? parseInt(classId) : undefined);
+
+    if (!effectiveClassId || isNaN(effectiveClassId)) {
+      return res.status(400).json({ error: 'At least one valid class ID is required.' });
     }
-    const created = await createHierarchySubject(parseInt(classId), name, status);
-    if (!created) return res.status(500).json({ error: 'Failed to create subject.' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${name}`,
+        proposedData: { name, classId: effectiveClassId, classIds: parsedClassIds, boardId, boardIds, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your subject will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createSubjectInDb({
+      name,
+      classId: effectiveClassId,
+      classIds: parsedClassIds,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'CREATE_SUBJECT',
-      targetType: 'HIERARCHY_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
       targetId: String(created.id),
       details: `Created subject: ${created.name}`,
+      subject: created.name,
       ipAddress: req.ip,
     });
 
     res.status(201).json({ success: true, subject: created });
   } catch (error: any) {
     console.error('Error creating subject:', error);
-    res.status(500).json({ error: 'Failed to create subject' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create subject' });
   }
 });
 
-apiRouter.put('/hierarchy/subjects/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.put(['/academic/subjects/:id', '/hierarchy/subjects/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
-    const { name, status, classId } = req.body || {};
-    const updated = await updateHierarchySubject(id, { name, status, classId: classId ? parseInt(classId) : undefined });
-    if (!updated) return res.status(404).json({ error: 'Subject not found' });
+    const { name, classId, classIds, boardId, boardIds, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getSubjectByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const parsedClassIds = Array.isArray(classIds) ? classIds.map((c: any) => parseInt(c)).filter((c: number) => !isNaN(c)) : undefined;
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+
+    const updated = await updateSubjectInDb(id, {
+      name,
+      classId: classId !== undefined ? parseInt(classId) : undefined,
+      classIds: parsedClassIds,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'UPDATE_SUBJECT',
-      targetType: 'HIERARCHY_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
       targetId: String(id),
       details: `Updated subject: ${updated.name}`,
+      subject: updated.name,
       ipAddress: req.ip,
     });
 
     res.json({ success: true, subject: updated });
   } catch (error: any) {
     console.error('Error updating subject:', error);
-    res.status(500).json({ error: 'Failed to update subject' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update subject' });
   }
 });
 
-apiRouter.delete('/hierarchy/subjects/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.delete(['/academic/subjects/:id', '/hierarchy/subjects/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
-    const result = await deleteHierarchySubject(id);
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getSubjectByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subject: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
+
+    const result = await deleteSubjectFromDb(id);
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'DELETE_SUBJECT',
-      targetType: 'HIERARCHY_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
       targetId: String(id),
-      details: `Deleted subject ${id}`,
+      details: `Deleted subject: ${result.name} (ID: ${id})`,
+      subject: result.name,
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, message: 'Subject deleted successfully' });
+    res.json({ success: true, message: `Subject "${result.name}" deleted successfully` });
   } catch (error: any) {
     console.error('Error deleting subject:', error);
-    res.status(500).json({ error: 'Failed to delete subject' });
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete subject',
+      dependencies: (error as any).dependencies,
+    });
   }
 });
 
-// Chapters
-apiRouter.get('/hierarchy/chapters', async (req: Request, res: Response) => {
+// Chapters Endpoints
+apiRouter.get(['/academic/chapters', '/hierarchy/chapters'], async (req: Request, res: Response) => {
   try {
-    const subjectId = req.query.subjectId ? parseInt(req.query.subjectId as string) : undefined;
-    const status = req.query.status as string;
-    const items = await getHierarchyChapters(subjectId, status);
-    res.json({ chapters: items });
+    const items = await getAllChaptersFromDb();
+    res.json({ success: true, chapters: items });
   } catch (error: any) {
-    console.error('Error fetching hierarchy chapters:', error);
+    console.error('Error fetching academic chapters:', error);
     res.status(500).json({ error: 'Failed to retrieve chapters' });
   }
 });
 
-apiRouter.post('/hierarchy/chapters', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.get('/academic/chapters/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const { subjectId, name, status, draftStatus } = req.body || {};
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
+    const current = await getChapterByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Chapter not found' });
+    const deps = await checkChapterDependencies(id, current.name);
+    res.json({ success: true, chapter: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/chapters', '/hierarchy/chapters'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, subjectId, classId, boardId, status, draftStatus } = req.body || {};
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'Chapter name is required.' });
     }
     if (!subjectId || isNaN(parseInt(subjectId))) {
       return res.status(400).json({ error: 'Valid subject ID is required.' });
     }
-    const created = await createHierarchyChapter(parseInt(subjectId), name, status, draftStatus);
-    if (!created) return res.status(500).json({ error: 'Failed to create chapter.' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${name}`,
+        proposedData: { name, subjectId: parseInt(subjectId), classId, boardId, status, draftStatus },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your chapter will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createChapterInDb({
+      name,
+      subjectId: parseInt(subjectId),
+      classId: classId ? parseInt(classId) : undefined,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      status,
+      draftStatus,
+    });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'CREATE_CHAPTER',
-      targetType: 'HIERARCHY_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
       targetId: String(created.id),
       details: `Created chapter: ${created.name}`,
       ipAddress: req.ip,
@@ -3692,29 +5793,55 @@ apiRouter.post('/hierarchy/chapters', requireAdmin, async (req: AuthRequest, res
     res.status(201).json({ success: true, chapter: created });
   } catch (error: any) {
     console.error('Error creating chapter:', error);
-    res.status(500).json({ error: 'Failed to create chapter' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create chapter' });
   }
 });
 
-apiRouter.put('/hierarchy/chapters/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.put(['/academic/chapters/:id', '/hierarchy/chapters/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
-    const { name, status, draftStatus, subjectId } = req.body || {};
-    const updated = await updateHierarchyChapter(id, {
+    const { name, subjectId, classId, boardId, status, draftStatus } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getChapterByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateChapterInDb(id, {
       name,
+      subjectId: subjectId !== undefined ? parseInt(subjectId) : undefined,
+      classId: classId !== undefined ? parseInt(classId) : undefined,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
       status,
       draftStatus,
-      subjectId: subjectId ? parseInt(subjectId) : undefined,
     });
-    if (!updated) return res.status(404).json({ error: 'Chapter not found' });
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'UPDATE_CHAPTER',
-      targetType: 'HIERARCHY_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
       targetId: String(id),
       details: `Updated chapter: ${updated.name}`,
       ipAddress: req.ip,
@@ -3723,34 +5850,474 @@ apiRouter.put('/hierarchy/chapters/:id', requireAdmin, async (req: AuthRequest, 
     res.json({ success: true, chapter: updated });
   } catch (error: any) {
     console.error('Error updating chapter:', error);
-    res.status(500).json({ error: 'Failed to update chapter' });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update chapter' });
   }
 });
 
-apiRouter.delete('/hierarchy/chapters/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+apiRouter.delete(['/academic/chapters/:id', '/hierarchy/chapters/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
-    const result = await deleteHierarchyChapter(id);
-    if (!result.success) {
-      return res.status(400).json({ error: result.error });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getChapterByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Chapter: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
+
+    const result = await deleteChapterFromDb(id);
 
     await saveAuditLogToDb({
       adminUid: req.user?.uid || 'unknown',
       adminEmail: req.user?.email || 'admin@taleemguru.pk',
       adminName: req.user?.name || 'Admin',
       action: 'DELETE_CHAPTER',
-      targetType: 'HIERARCHY_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
       targetId: String(id),
-      details: `Deleted chapter ${id}`,
+      details: `Deleted chapter: ${result.name} (ID: ${id})`,
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, message: 'Chapter deleted successfully' });
+    res.json({ success: true, message: `Chapter "${result.name}" deleted successfully` });
   } catch (error: any) {
     console.error('Error deleting chapter:', error);
-    res.status(500).json({ error: 'Failed to delete chapter' });
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete chapter',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Entry Test Categories Endpoints
+apiRouter.get(['/academic/entry-test-categories', '/academic/entry-tests'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllEntryTestCategoriesFromDb();
+    res.json({ success: true, entryTestCategories: items });
+  } catch (error: any) {
+    console.error('Error fetching entry test categories:', error);
+    res.status(500).json({ error: 'Failed to retrieve entry test categories' });
+  }
+});
+
+apiRouter.get('/academic/entry-test-categories/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+    const current = await getEntryTestCategoryByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Entry test category not found' });
+    const deps = await checkEntryTestCategoryDependencies(id, current.name);
+    res.json({ success: true, category: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/entry-test-categories', '/academic/entry-tests'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, type, description, organizer, totalMarks, duration, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Category name is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test: ${name}`,
+        proposedData: { name, type: type || 'General', description, organizer, totalMarks: totalMarks ? parseInt(totalMarks) : undefined, duration, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your entry test category will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createEntryTestCategoryInDb({
+      name,
+      type: type || 'General',
+      description,
+      organizer,
+      totalMarks: totalMarks ? parseInt(totalMarks) : undefined,
+      duration,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(created.id),
+      details: `Created entry test parent category: ${created.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, category: created, entryTestCategory: created });
+  } catch (error: any) {
+    console.error('Error creating entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create entry test category' });
+  }
+});
+
+// Entry Test Subcategories Endpoints
+apiRouter.get('/academic/entry-test-subcategories', async (req: Request, res: Response) => {
+  try {
+    const categoryId = req.query.categoryId ? parseInt(req.query.categoryId as string) : undefined;
+    const items = await getAllEntryTestSubcategoriesFromDb(categoryId);
+    res.json({ success: true, subcategories: items, entryTestSubcategories: items });
+  } catch (error: any) {
+    console.error('Error fetching subcategories:', error);
+    res.status(500).json({ error: 'Failed to retrieve subcategories' });
+  }
+});
+
+apiRouter.get('/academic/entry-test-subcategories/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+    const current = await getEntryTestSubcategoryByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Subcategory not found' });
+    const deps = await checkEntryTestSubcategoryDependencies(id, current.name);
+    res.json({ success: true, subcategory: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post('/academic/entry-test-subcategories', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { categoryId, name, description, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Subcategory name is required.' });
+    }
+    if (!categoryId || isNaN(parseInt(categoryId))) {
+      return res.status(400).json({ error: 'Valid Parent Category ID is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test Subcategory: ${name}`,
+        proposedData: { categoryId: parseInt(categoryId), name, description, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your subcategory will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createEntryTestSubcategoryInDb({
+      categoryId: parseInt(categoryId),
+      name,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(created.id),
+      details: `Created subcategory: ${created.name} under parent ID ${categoryId}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, subcategory: created });
+  } catch (error: any) {
+    console.error('Error creating subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create subcategory' });
+  }
+});
+
+apiRouter.put('/academic/entry-test-subcategories/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+    const { categoryId, name, description, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestSubcategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subcategory: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subcategory update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateEntryTestSubcategoryInDb(id, {
+      categoryId: categoryId ? parseInt(categoryId) : undefined,
+      name,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(id),
+      details: `Updated subcategory: ${updated.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, subcategory: updated });
+  } catch (error: any) {
+    console.error('Error updating subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update subcategory' });
+  }
+});
+
+apiRouter.delete('/academic/entry-test-subcategories/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestSubcategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subcategory: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subcategory deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteEntryTestSubcategoryFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(id),
+      details: `Deleted subcategory: ${result.name} (ID: ${id})`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Subcategory "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete subcategory',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+apiRouter.put(['/academic/entry-test-categories/:id', '/academic/entry-tests/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+    const { name, type, description, organizer, totalMarks, duration, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestCategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Entry test category update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateEntryTestCategoryInDb(id, {
+      name,
+      type,
+      description,
+      organizer,
+      totalMarks: totalMarks !== undefined ? parseInt(totalMarks) : undefined,
+      duration,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(id),
+      details: `Updated entry test category: ${updated.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, category: updated, entryTestCategory: updated });
+  } catch (error: any) {
+    console.error('Error updating entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update entry test category' });
+  }
+});
+
+apiRouter.delete(['/academic/entry-test-categories/:id', '/academic/entry-tests/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestCategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Entry Test: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Entry test category deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteEntryTestCategoryFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(id),
+      details: `Deleted entry test category: ${result.name} (ID: ${id})`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Entry test category "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete entry test category',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Academic Structure Summary Endpoint
+apiRouter.get('/academic/summary', async (req: Request, res: Response) => {
+  try {
+    const [bList, cList, sList, chList, etcList] = await Promise.all([
+      getAllBoardsFromDb(),
+      getAllClassesFromDb(),
+      getAllSubjectsFromDb(),
+      getAllChaptersFromDb(),
+      getAllEntryTestCategoriesFromDb(),
+    ]);
+
+    res.json({
+      success: true,
+      summary: {
+        boards: bList.length,
+        classes: cList.length,
+        subjects: sList.length,
+        chapters: chList.length,
+        entryTestCategories: etcList.length,
+      },
+      boards: bList,
+      classes: cList,
+      subjects: sList,
+      chapters: chList,
+      entryTestCategories: etcList,
+    });
+  } catch (error: any) {
+    console.error('Error fetching academic summary:', error);
+    res.status(500).json({ error: 'Failed to retrieve academic summary' });
   }
 });
 
@@ -4789,6 +7356,115 @@ apiRouter.get('/admin/integrity-check', requireHighAdmin, async (req: AuthReques
   } catch (error: any) {
     console.error('Integrity check error:', error);
     res.status(500).json({ error: 'Failed to run database integrity check' });
+  }
+});
+
+// Static Uploads & Assets Serving
+app.use('/assets/uploads', express.static(path.join(process.cwd(), 'public', 'assets', 'uploads')));
+app.use('/storage', express.static(path.join(process.cwd(), 'storage')));
+
+// 31. Centralized Site Settings Management APIs
+apiRouter.get('/settings/public', async (req: Request, res: Response) => {
+  try {
+    const settings = await getPublicSettingsFromDb();
+    // Prevent stale caching so changes in Site Name and settings appear immediately
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({ success: true, settings });
+  } catch (error: any) {
+    console.error('Error fetching public site settings:', error);
+    res.status(500).json({ error: 'Failed to retrieve public settings' });
+  }
+});
+
+apiRouter.get('/admin/settings', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const settings = await getAllSettingsFromDb();
+    res.json({ success: true, settings });
+  } catch (error: any) {
+    console.error('Error fetching administrative site settings:', error);
+    res.status(500).json({ error: 'Failed to retrieve site settings' });
+  }
+});
+
+apiRouter.put('/admin/settings', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    const updates = body.settings || body;
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: 'Invalid settings payload provided' });
+    }
+
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = await updateSettingsInDb(updates, adminEmail);
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to persist settings' });
+    }
+
+    // Record authoritative audit log
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'SITE_SETTINGS_UPDATED',
+      targetType: 'site_settings',
+      targetId: 'global',
+      details: `Updated ${result.count} settings parameters across site configuration`,
+      ipAddress: req.ip,
+    });
+
+    const updatedSettings = await getAllSettingsFromDb();
+    res.json({
+      success: true,
+      message: 'Site Settings saved successfully.',
+      count: result.count,
+      settings: updatedSettings,
+    });
+  } catch (error: any) {
+    console.error('Error saving administrative site settings:', error);
+    res.status(500).json({ error: 'Failed to save site settings' });
+  }
+});
+
+apiRouter.post('/admin/settings/upload-asset', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fileBase64, filename = 'asset.png' } = req.body || {};
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid fileBase64 payload' });
+    }
+
+    // Clean data URL prefix if present
+    const base64Data = fileBase64.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Asset exceeds maximum allowed file size of 5MB' });
+    }
+
+    const extMatch = String(filename).match(/\.(png|jpg|jpeg|svg|webp|ico)$/i);
+    const ext = extMatch ? extMatch[0].toLowerCase() : '.png';
+    const safeBaseName = String(filename).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    const safeFileName = `${safeBaseName}_${Date.now()}${ext}`;
+
+    const uploadsDir = path.join(process.cwd(), 'public', 'assets', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const targetPath = path.join(uploadsDir, safeFileName);
+    fs.writeFileSync(targetPath, buffer);
+
+    const assetUrl = `/assets/uploads/${safeFileName}`;
+    res.json({
+      success: true,
+      url: assetUrl,
+      filename: safeFileName,
+    });
+  } catch (error: any) {
+    console.error('Error uploading setting asset:', error);
+    res.status(500).json({ error: 'Failed to upload image asset' });
   }
 });
 

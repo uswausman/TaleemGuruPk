@@ -11,18 +11,25 @@ import { AdminQuizzesTab } from './admin/AdminQuizzesTab';
 import { AdminStudentsTab } from './admin/AdminStudentsTab';
 import { AdminStaffTab } from './admin/AdminStaffTab';
 import { AdminAcademicTabs } from './admin/AdminAcademicTabs';
+import { AdminNewsletterTab } from './admin/AdminNewsletterTab';
 import { AdminContentTabs } from './admin/AdminContentTabs';
 import { AdminResultsAndReportsTabs } from './admin/AdminResultsAndReportsTabs';
 import { AdminReportsTab } from './admin/AdminReportsTab';
 import { AdminAuditLogsTab } from './admin/AdminAuditLogsTab';
+import { AdminWebsiteCommandCenterTab } from './admin/AdminWebsiteCommandCenterTab';
 import { AdminCertificatesTab } from './AdminCertificatesTab';
 import { AdminSettingsTab } from './admin/AdminSettingsTab';
+import { AdminApprovalsTab } from './admin/AdminApprovalsTab';
+import { StaffSubmissionsTab } from './admin/StaffSubmissionsTab';
 import { BulkImportSection } from './BulkImportSection';
 import { exportMCQsToWatermarkedPDF } from '../utils/watermark';
 import {
   fetchAdminUsersApi,
   fetchAdminTestResultsApi,
   recordAdminAuditLogApi,
+  fetchAcademicSummaryApi,
+  fetchApprovalStatsApi,
+  fetchMySubmissionsApi,
 } from '../lib/api';
 import { useToast } from './ui/Toast';
 import { checkDuplicateMCQ, checkDuplicateTest } from '../utils/duplicateDetector';
@@ -59,11 +66,14 @@ export interface RoleDashboardPermission {
 export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardPermission> = {
   Admin: {
     allowedTabs: [
-      'dashboard', 'staff', 'students', 'boards', 'classes', 'subjects', 'chapters',
+      'dashboard', 'website-command-center', 'approvals', 'my-submissions', 'academic-management', 'staff', 'students', 'boards', 'classes', 'subjects', 'chapters', 'entry-tests',
       'questions', 'question-bank', 'quizzes', 'notes', 'past-papers', 'documents', 'results',
       'leaderboard', 'certificates', 'reports', 'audit-logs', 'settings', 'bulk-import'
     ],
     accessibleTools: [
+      'Website Command Center',
+      'Content Approvals & Governance',
+      'Academic Management',
       'MCQ Management',
       'Question Bank Management',
       'Quiz Creator',
@@ -85,11 +95,14 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
   },
   SuperAdmin: {
     allowedTabs: [
-      'dashboard', 'staff', 'students', 'boards', 'classes', 'subjects', 'chapters',
+      'dashboard', 'website-command-center', 'approvals', 'my-submissions', 'academic-management', 'staff', 'students', 'boards', 'classes', 'subjects', 'chapters', 'entry-tests',
       'questions', 'question-bank', 'quizzes', 'notes', 'past-papers', 'documents', 'results',
       'leaderboard', 'certificates', 'reports', 'audit-logs', 'settings', 'bulk-import'
     ],
     accessibleTools: [
+      'Website Command Center',
+      'Content Approvals & Governance',
+      'Academic Management',
       'MCQ Management',
       'Question Bank Management',
       'Quiz Creator',
@@ -112,6 +125,8 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
   Editor: {
     allowedTabs: [
       'dashboard',
+      'my-submissions',
+      'academic-management',
       'questions',
       'question-bank',
       'notes',
@@ -121,9 +136,12 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
       'classes',
       'subjects',
       'chapters',
+      'entry-tests',
       'reports',
     ],
     accessibleTools: [
+      'My Content Submissions',
+      'Academic Management',
       'MCQ Management',
       'Question Bank Management',
       'Curriculum Management',
@@ -166,6 +184,7 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
   Teacher: {
     allowedTabs: [
       'dashboard',
+      'my-submissions',
       'quizzes',
       'questions',
       'question-bank',
@@ -178,6 +197,7 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
       'reports',
     ],
     accessibleTools: [
+      'My Content Submissions',
       'MCQ Management',
       'Question Bank Management',
       'Quiz Creator',
@@ -196,10 +216,13 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
   ContentManager: {
     allowedTabs: [
       'dashboard',
+      'my-submissions',
+      'academic-management',
       'boards',
       'classes',
       'subjects',
       'chapters',
+      'entry-tests',
       'questions',
       'question-bank',
       'quizzes',
@@ -210,6 +233,8 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
       'bulk-import',
     ],
     accessibleTools: [
+      'My Content Submissions',
+      'Academic Management',
       'MCQ Management',
       'Question Bank Management',
       'Curriculum Management',
@@ -229,6 +254,7 @@ export const DASHBOARD_ROLE_PERMISSION_MAPPING: Record<StaffRole, RoleDashboardP
   Staff: {
     allowedTabs: [
       'dashboard',
+      'my-submissions',
       'students',
       'questions',
       'question-bank',
@@ -382,13 +408,14 @@ export const filterDashboardByRole = (roles: StaffRole[] = []): FilterDashboardB
   const accessibleTools: string[] = Array.from(aggregatedToolsSet);
 
   const isTabVisible = (tabId: AdminTabType): boolean => {
-    if (tabId === 'questions' || tabId === 'question-bank') {
+    const norm = (tabId as string) === 'site-settings' ? 'settings' : tabId;
+    if (norm === 'questions' || norm === 'question-bank') {
       return canCurateMCQs;
     }
-    if (tabId === 'audit-logs') {
+    if (norm === 'audit-logs') {
       return canViewAuditLogs;
     }
-    return tabs.includes(tabId);
+    return tabs.includes(norm) || tabs.includes(tabId);
   };
 
   const isToolAccessible = (toolName: string): boolean => {
@@ -397,12 +424,14 @@ export const filterDashboardByRole = (roles: StaffRole[] = []): FilterDashboardB
 
   const allPossibleTabs: AdminTabType[] = [
     'dashboard',
+    'academic-management',
     'staff',
     'students',
     'boards',
     'classes',
     'subjects',
     'chapters',
+    'entry-tests',
     'questions',
     'question-bank',
     'quizzes',
@@ -511,7 +540,18 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
   onNavigateTab,
   initialTab = 'dashboard',
 }) => {
-  const [activeTab, setActiveTab] = useState<AdminTabType>(initialTab || 'dashboard');
+  const normalizeTabName = (tab: any): AdminTabType => {
+    if (tab === 'site-settings') return 'settings';
+    return tab || 'dashboard';
+  };
+
+  const [activeTab, setActiveTab] = useState<AdminTabType>(normalizeTabName(initialTab));
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(normalizeTabName(initialTab));
+    }
+  }, [initialTab]);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const { showToast } = useToast();
 
@@ -546,10 +586,39 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
   // State for registered students & users loaded authoritatively from database (No mock users)
   const [studentsList, setStudentsList] = useState<AdminUser[]>([]);
   const [submissionsList, setSubmissionsList] = useState<TestResult[]>(propHistoryResults);
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState<number>(0);
+  const [mySubmissionsCount, setMySubmissionsCount] = useState<number>(0);
+  const [academicCounts, setAcademicCounts] = useState({
+    boards: 25,
+    classes: 6,
+    subjects: 12,
+    chapters: 31,
+    entryTests: 10,
+  });
 
-  // Authoritatively load registered users & test submissions from Cloud SQL backend
+  const loadApprovalCounts = () => {
+    fetchApprovalStatsApi()
+      .then((stats) => {
+        if (stats && typeof stats.pending === 'number') {
+          setPendingApprovalsCount(stats.pending);
+        }
+      })
+      .catch(() => {});
+
+    fetchMySubmissionsApi()
+      .then((subs) => {
+        if (Array.isArray(subs)) {
+          const pendingCount = subs.filter((s) => s.status === 'PENDING').length;
+          setMySubmissionsCount(pendingCount);
+        }
+      })
+      .catch(() => {});
+  };
+
+  // Authoritatively load registered users, test submissions & academic counts from Cloud SQL backend
   const loadDatabaseUsersAndResults = () => {
     if (!adminUser) return;
+    loadApprovalCounts();
     fetchAdminUsersApi()
       .then((dbUsers) => {
         if (Array.isArray(dbUsers)) {
@@ -604,6 +673,22 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
       })
       .catch((err) => {
         console.warn('Notice: Unable to load database test submissions:', err);
+      });
+
+    fetchAcademicSummaryApi()
+      .then((res) => {
+        if (res.success && res.summary) {
+          setAcademicCounts({
+            boards: res.summary.boards || 0,
+            classes: res.summary.classes || 0,
+            subjects: res.summary.subjects || 0,
+            chapters: res.summary.chapters || 0,
+            entryTests: res.summary.entryTestCategories || 0,
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('Notice: Unable to load academic summary:', err);
       });
   };
 
@@ -882,15 +967,18 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
   const counts = {
     staff: staffMembersCount,
     students: studentsList.length,
-    boards: 30,
-    classes: 6,
-    subjects: 12,
-    chapters: 54,
+    boards: academicCounts.boards,
+    classes: academicCounts.classes,
+    subjects: academicCounts.subjects,
+    chapters: academicCounts.chapters,
+    entryTests: academicCounts.entryTests,
     questions: questionsList.length,
     quizzes: quizzesList.length,
     notes: studyNotesList.length,
     pastPapers: pastPapersList.length,
     results: submissionsList.length,
+    approvals: pendingApprovalsCount,
+    mySubmissions: mySubmissionsCount,
     leaderboard: 50,
     reports: 0,
   };
@@ -1050,36 +1138,50 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
             />
           )}
 
+          {activeTab === 'academic-management' && (
+            <AdminAcademicTabs
+              initialSection="boards"
+              canEdit={tools.canManageCurriculum}
+            />
+          )}
+
           {activeTab === 'boards' && (
             <AdminAcademicTabs
-              type="boards"
-              allMCQs={questionsList}
-              allTests={quizzesList}
+              initialSection="boards"
+              canEdit={tools.canManageCurriculum}
             />
           )}
 
           {activeTab === 'classes' && (
             <AdminAcademicTabs
-              type="classes"
-              allMCQs={questionsList}
-              allTests={quizzesList}
+              initialSection="classes"
+              canEdit={tools.canManageCurriculum}
             />
           )}
 
           {activeTab === 'subjects' && (
             <AdminAcademicTabs
-              type="subjects"
-              allMCQs={questionsList}
-              allTests={quizzesList}
+              initialSection="subjects"
+              canEdit={tools.canManageCurriculum}
             />
           )}
 
           {activeTab === 'chapters' && (
             <AdminAcademicTabs
-              type="chapters"
-              allMCQs={questionsList}
-              allTests={quizzesList}
+              initialSection="chapters"
+              canEdit={tools.canManageCurriculum}
             />
+          )}
+
+          {activeTab === 'entry-tests' && (
+            <AdminAcademicTabs
+              initialSection="entry-tests"
+              canEdit={tools.canManageCurriculum}
+            />
+          )}
+
+          {activeTab === 'newsletter' && (
+            <AdminNewsletterTab />
           )}
 
           {activeTab === 'notes' && (
@@ -1150,11 +1252,29 @@ export const AdminTeacherPanel: React.FC<AdminTeacherPanelProps> = ({
             />
           )}
 
+          {activeTab === 'approvals' && (
+            <AdminApprovalsTab
+              currentUserId={adminUser.id}
+              onContentPublished={() => {
+                loadDatabaseUsersAndResults();
+                loadApprovalCounts();
+              }}
+            />
+          )}
+
+          {activeTab === 'my-submissions' && (
+            <StaffSubmissionsTab />
+          )}
+
+          {activeTab === 'website-command-center' && (
+            <AdminWebsiteCommandCenterTab />
+          )}
+
           {activeTab === 'audit-logs' && (
             <AdminAuditLogsTab />
           )}
 
-          {activeTab === 'settings' && (
+          {(activeTab === 'settings' || (activeTab as string) === 'site-settings') && (
             <AdminSettingsTab
               allMCQs={questionsList}
               allTests={quizzesList}

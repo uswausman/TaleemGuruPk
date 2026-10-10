@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Award, AlertTriangle, CheckCircle, Search, ShieldCheck, Download, ExternalLink, Calendar, BookOpen, User, Percent, Sparkles, Loader2 } from 'lucide-react';
 import { exportCertificateToPDF } from '../utils/watermark';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 export const CertificateVerificationView: React.FC = () => {
+  const { siteName, logoUrl, logoAlt, tagline } = useSiteSettings();
   const [cert, setCert] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +40,7 @@ export const CertificateVerificationView: React.FC = () => {
       if (data.verified) {
         setCert(data);
       } else {
-        setError(data.error || 'Certificate record not found in TaleemGuru registry.');
+        setError(data.error || `Certificate record not found in ${siteName} registry.`);
       }
     } catch (err) {
       setError('Failed to connect to verification registry. Please check your connection.');
@@ -73,8 +75,8 @@ export const CertificateVerificationView: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 shadow-xl border border-slate-200 dark:border-slate-800 text-center space-y-4">
           <div className="flex justify-center mb-2">
             <img
-              src="/assets/taleemguru-logo-original.png"
-              alt="TaleemGuru Logo"
+              src={logoUrl || "/assets/taleemguru-logo-original.png"}
+              alt={logoAlt || `${siteName} Logo`}
               className="h-16 sm:h-20 w-auto object-contain"
               onError={(e) => {
                 // Fallback text logo if image unavailable
@@ -84,13 +86,13 @@ export const CertificateVerificationView: React.FC = () => {
           </div>
           <div>
             <span className="text-xs font-extrabold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
-              TaleemGuru Pakistan
+              {siteName} Pakistan
             </span>
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white mt-1">
               Certificate Verification Registry
             </h1>
             <p className="text-xs sm:text-sm font-semibold text-slate-500 dark:text-slate-400 mt-1">
-              Learn. Practice. Test. Improve.
+              {tagline}
             </p>
           </div>
 
@@ -122,7 +124,7 @@ export const CertificateVerificationView: React.FC = () => {
           <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl shadow-lg border border-slate-200 dark:border-slate-800">
             <Loader2 className="w-10 h-10 animate-spin text-emerald-600 dark:text-emerald-400 mx-auto mb-3" />
             <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-              Verifying record against TaleemGuru authoritative registry...
+              Verifying record against {siteName} authoritative registry...
             </p>
           </div>
         )}
@@ -156,7 +158,7 @@ export const CertificateVerificationView: React.FC = () => {
               <p className="text-xs sm:text-sm font-semibold max-w-md mx-auto">
                 {isRevoked
                   ? 'This certificate was previously issued but has been revoked by administration.'
-                  : 'This merit certificate is authentic and recorded in the TaleemGuru online evaluation database.'}
+                  : `This merit certificate is authentic and recorded in the ${siteName} online evaluation database.`}
               </p>
             </div>
 

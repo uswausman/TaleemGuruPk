@@ -22,6 +22,14 @@ import { PastPaper, MCQ } from '../types';
 import { PAKISTAN_BOARDS, ACADEMIC_CLASSES, ACADEMIC_SUBJECTS } from '../data/educationalHierarchy';
 import { PAST_PAPERS_DATA } from '../data/mockData';
 import { documentBrandingService } from '../services/documentBrandingService';
+import { useSiteSettings } from '../context/SiteSettingsContext';
+import {
+  parseNavContext,
+  NavigationContext,
+  matchesClassGrade,
+  normalizeClassLevel,
+  normalizeSubjectName,
+} from '../utils/navigationContext';
 
 export interface PastPapersViewProps {
   pastPapers?: PastPaper[];
@@ -35,9 +43,11 @@ export interface PastPapersViewProps {
   subFilter?: string;
   allMCQs?: MCQ[];
   onNavigate?: (view: string, filter?: string) => void;
+  comparisonContext?: NavigationContext | null;
 }
 
 export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
+  const { siteName } = useSiteSettings();
   const {
     pastPapers,
     papers,
@@ -48,6 +58,7 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
     initialBoard = 'All',
     initialClass = 'All',
     subFilter,
+    comparisonContext,
   } = props;
 
   // Safe past papers source
@@ -59,64 +70,37 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
   }, [pastPapers, papers]);
 
   const [selectedProvince, setSelectedProvince] = useState<string>('All');
-  const [selectedBoard, setSelectedBoard] = useState<string>(initialBoard);
-  const [selectedClass, setSelectedClass] = useState<string>(initialClass);
-  const [selectedSubject, setSelectedSubject] = useState<string>(initialSubject);
+  const ctx = parseNavContext(subFilter || initialSubject);
+  const [selectedBoard, setSelectedBoard] = useState<string>(
+    comparisonContext?.board || (ctx.board !== 'All' ? ctx.board : initialBoard)
+  );
+  const [selectedClass, setSelectedClass] = useState<string>(
+    comparisonContext?.classLevel
+      ? normalizeClassLevel(comparisonContext.classLevel)
+      : (ctx.classLevel !== 'All' ? normalizeClassLevel(ctx.classLevel) : (initialClass !== 'All' ? normalizeClassLevel(initialClass) : 'All'))
+  );
+  const [selectedSubject, setSelectedSubject] = useState<string>(
+    comparisonContext?.subject || (ctx.subject !== 'All' ? ctx.subject : initialSubject?.startsWith('{') ? 'All' : initialSubject)
+  );
   const [selectedYear, setSelectedYear] = useState<string>('All');
   const [selectedType, setSelectedType] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Synchronize incoming subFilter / initialSubject
+  // Synchronize incoming comparisonContext / subFilter / initialSubject
   useEffect(() => {
-    const raw = (subFilter || initialSubject || '').trim();
-    if (!raw || raw.toLowerCase() === 'all') return;
-
-    const lower = raw.toLowerCase();
-
-    // Check if it's a province
-    const provs = ['punjab', 'federal', 'sindh', 'kpk', 'balochistan', 'ajk'];
-    const matchedProv = provs.find((p) => p === lower);
-    if (matchedProv) {
-      const formatted = matchedProv.toUpperCase() === 'KPK' ? 'KPK' :
-                        matchedProv.toUpperCase() === 'AJK' ? 'AJK' :
-                        matchedProv.charAt(0).toUpperCase() + matchedProv.slice(1);
-      setSelectedProvince(formatted);
-      return;
+    if (comparisonContext) {
+      if (comparisonContext.subject && comparisonContext.subject !== 'All') setSelectedSubject(normalizeSubjectName(comparisonContext.subject));
+      if (comparisonContext.classLevel && comparisonContext.classLevel !== 'All') setSelectedClass(normalizeClassLevel(comparisonContext.classLevel));
+      if (comparisonContext.board && comparisonContext.board !== 'All') setSelectedBoard(comparisonContext.board);
+    } else {
+      const c = parseNavContext(subFilter || initialSubject);
+      setSelectedSubject(c.subject || 'All');
+      setSelectedClass(c.classLevel ? normalizeClassLevel(c.classLevel) : 'All');
+      setSelectedBoard(c.board || 'All');
     }
-
-    // Check if it matches an academic subject
-    const matchedSubj = ACADEMIC_SUBJECTS.find(
-      (s) => s.name.toLowerCase() === lower || s.id.toLowerCase() === lower
-    );
-    if (matchedSubj) {
-      setSelectedSubject(matchedSubj.name);
-      return;
-    }
-
-    // Check if it matches a class
-    const matchedClass = ACADEMIC_CLASSES.find(
-      (c) => c.name.toLowerCase() === lower || c.id.toLowerCase() === lower
-    );
-    if (matchedClass) {
-      setSelectedClass(matchedClass.name);
-      return;
-    }
-
-    // Check if it matches a board
-    const matchedBoard = PAKISTAN_BOARDS.find(
-      (b) => b.name.toLowerCase().includes(lower) || b.id.toLowerCase().includes(lower) || (b.code && b.code.toLowerCase() === lower)
-    );
-    if (matchedBoard) {
-      setSelectedBoard(matchedBoard.name);
-      setSelectedProvince(matchedBoard.province);
-      return;
-    }
-
-    // Otherwise use as search query
-    setSearchQuery(raw);
-  }, [subFilter, initialSubject]);
+  }, [comparisonContext, subFilter, initialSubject]);
 
   // Preview Modal
   const [previewPaper, setPreviewPaper] = useState<PastPaper | null>(null);
@@ -149,7 +133,7 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
 
       const matchesClass =
         selectedClass === 'All' ||
-        (p.classLevel && p.classLevel.toLowerCase().includes(selectedClass.toLowerCase()));
+        (p.classLevel && matchesClassGrade(p.classLevel, selectedClass));
 
       const matchesSubject =
         selectedSubject === 'All' ||
@@ -278,7 +262,7 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
             <ShieldCheck className="w-4 h-4" /> Board Verified Material
           </div>
           <p className="text-emerald-200 text-[11px] leading-relaxed max-w-xs">
-            Every PDF downloaded is automatically stamped with TaleemGuru official attribution and detailed explanations.
+            Every PDF downloaded is automatically stamped with {siteName} official attribution and detailed explanations.
           </p>
         </div>
       </div>
@@ -345,7 +329,11 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
               Class Grade
             </label>
             <select
-              value={selectedClass}
+              value={
+                !selectedClass || selectedClass === 'All'
+                  ? 'All'
+                  : (ACADEMIC_CLASSES.find((c) => matchesClassGrade(c.name, selectedClass))?.name || normalizeClassLevel(selectedClass))
+              }
               onChange={(e) => setSelectedClass(e.target.value)}
               className="w-full p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
             >
@@ -364,7 +352,7 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
               Subject
             </label>
             <select
-              value={selectedSubject}
+              value={ACADEMIC_SUBJECTS.find(s => s.name.toLowerCase() === selectedSubject.toLowerCase())?.name || (selectedSubject === 'All' ? 'All' : selectedSubject)}
               onChange={(e) => setSelectedSubject(e.target.value)}
               className="w-full p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 font-semibold text-slate-700 dark:text-slate-200 cursor-pointer"
             >
@@ -443,10 +431,10 @@ export const PastPapersView: React.FC<PastPapersViewProps> = (props) => {
           <FileText className="w-12 h-12 text-slate-400 mx-auto" />
           <div className="space-y-1">
             <h3 className="text-base font-black text-slate-900 dark:text-white">
-              No past papers available yet
+              No content available for this Class and Subject
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-              No past papers matched your selected filters or search keyword. You can reset filters to browse the complete national archive.
+              No past papers matched {selectedClass !== 'All' ? selectedClass : ''} {selectedSubject !== 'All' ? selectedSubject : ''} in the national archive. You can reset filters to browse the complete archive.
             </p>
           </div>
           <button

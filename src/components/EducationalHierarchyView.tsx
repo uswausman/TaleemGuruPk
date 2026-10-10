@@ -23,6 +23,12 @@ import {
   X,
 } from 'lucide-react';
 import {
+  fetchAcademicBoardsApi,
+  fetchAcademicClassesApi,
+  fetchAcademicSubjectsApi,
+  fetchAcademicChaptersApi,
+} from '../lib/api';
+import {
   PAKISTAN_BOARDS,
   ACADEMIC_CLASSES,
   ACADEMIC_SUBJECTS,
@@ -63,6 +69,29 @@ export const EducationalHierarchyView: React.FC<EducationalHierarchyViewProps> =
 }) => {
   // Step selections
   const [selectedProvince, setSelectedProvince] = useState<string>('All');
+
+  // DB State
+  const [dbBoards, setDbBoards] = useState<any[]>([]);
+  const [dbClasses, setDbClasses] = useState<any[]>([]);
+  const [dbSubjects, setDbSubjects] = useState<any[]>([]);
+  const [dbChapters, setDbChapters] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    Promise.all([
+      fetchAcademicBoardsApi(),
+      fetchAcademicClassesApi(),
+      fetchAcademicSubjectsApi(),
+      fetchAcademicChaptersApi(),
+    ]).then(([bRes, cRes, sRes, chRes]) => {
+      if (bRes.success && Array.isArray(bRes.data)) setDbBoards(bRes.data);
+      if (cRes.success && Array.isArray(cRes.data)) setDbClasses(cRes.data);
+      if (sRes.success && Array.isArray(sRes.data)) setDbSubjects(sRes.data);
+      if (chRes.success && Array.isArray(chRes.data)) setDbChapters(chRes.data);
+    }).catch((err) => {
+      console.warn('Could not load academic DB data in EducationalHierarchyView:', err);
+    });
+  }, []);
+
   const [selectedBoardId, setSelectedBoardId] = useState<string>(() => {
     const found = PAKISTAN_BOARDS.find((b) => b.name.toLowerCase() === activeBoard.toLowerCase());
     return found ? found.id : 'bise-lahore';
@@ -80,19 +109,86 @@ export const EducationalHierarchyView: React.FC<EducationalHierarchyViewProps> =
 
   // Resolved Current Objects
   const currentBoard = useMemo(() => {
+    if (dbBoards.length > 0) {
+      const match = dbBoards.find((b) => String(b.id) === selectedBoardId || b.name.toLowerCase().includes(activeBoard.toLowerCase()));
+      if (match) {
+        return {
+          id: String(match.id),
+          name: match.name,
+          code: match.code || 'BISE',
+          province: match.province || 'Punjab',
+          city: match.city || match.name,
+          established: match.establishmentYear ? String(match.establishmentYear) : '1975',
+          description: match.description || `${match.name} Education Board`,
+          totalPastPapers: 120,
+          totalTests: 45,
+          website: 'https://fbise.edu.pk',
+          supportedClasses: ['Class 9', 'Class 10', 'Class 11', 'Class 12'],
+        };
+      }
+    }
     return PAKISTAN_BOARDS.find((b) => b.id === selectedBoardId) || PAKISTAN_BOARDS[0];
-  }, [selectedBoardId]);
+  }, [dbBoards, selectedBoardId, activeBoard]);
 
   const currentClass = useMemo(() => {
+    if (dbClasses.length > 0) {
+      const match = dbClasses.find((c) => String(c.id) === selectedClassId || c.name.toLowerCase().includes(selectedClassId.replace('class-', '').toLowerCase()));
+      if (match) {
+        const shortCode = match.name.includes('9') ? 'SSC-I' : match.name.includes('10') ? 'SSC-II' : match.name.includes('11') ? 'HSSC-I' : match.name.includes('12') ? 'HSSC-II' : 'GEN';
+        return {
+          id: String(match.id),
+          name: match.name,
+          shortCode,
+          level: 'High School',
+          group: 'Science / Arts',
+          description: `Official Curriculum Portal for ${match.name}`,
+        };
+      }
+    }
     return ACADEMIC_CLASSES.find((c) => c.id === selectedClassId) || ACADEMIC_CLASSES[1];
-  }, [selectedClassId]);
+  }, [dbClasses, selectedClassId]);
 
   const currentSubject = useMemo(() => {
+    if (dbSubjects.length > 0) {
+      const match = dbSubjects.find((s) => String(s.id) === selectedSubjectId || s.name.toLowerCase().includes(selectedSubjectId.toLowerCase()));
+      if (match) {
+        return {
+          id: String(match.id),
+          name: match.name,
+          category: 'Science',
+          icon: '📚',
+          accentColor: 'from-blue-600 to-cyan-500',
+          description: `Official curriculum for ${match.name}`,
+          applicableClasses: ['Class 9', 'Class 10', 'Class 11', 'Class 12'],
+        };
+      }
+    }
     return ACADEMIC_SUBJECTS.find((s) => s.id === selectedSubjectId) || ACADEMIC_SUBJECTS[0];
-  }, [selectedSubjectId]);
+  }, [dbSubjects, selectedSubjectId]);
 
   // Filtered chapters for current class & subject
   const availableChapters = useMemo(() => {
+    if (dbChapters.length > 0) {
+      const dbFiltered = dbChapters.filter(
+        (ch) => String(ch.subjectId) === String(currentSubject.id) || (currentSubject.id && String(ch.subjectId) === selectedSubjectId)
+      );
+      if (dbFiltered.length > 0) {
+        return dbFiltered.map((ch, idx) => ({
+          id: String(ch.id),
+          subjectId: String(ch.subjectId),
+          subjectName: currentSubject.name,
+          classLevel: currentClass.name,
+          chapterNumber: idx + 1,
+          name: ch.name,
+          description: `Syllabus Chapter ${idx + 1} for ${currentSubject.name}`,
+          topics: [
+            { id: `top-${ch.id}-1`, chapterId: String(ch.id), topicNumber: `${idx + 1}.1`, title: 'Core Concepts & Principles', keyPoints: ['Fundamental Concepts', 'Standard Definitions', 'Board Important Short Questions'] },
+            { id: `top-${ch.id}-2`, chapterId: String(ch.id), topicNumber: `${idx + 1}.2`, title: 'Formulas & Problem Solving', keyPoints: ['Key Formula Applications', 'Solved Numerical Problems'] },
+          ],
+        }));
+      }
+    }
+
     const list = ACADEMIC_CHAPTERS.filter(
       (chap) =>
         chap.subjectId === currentSubject.id &&
@@ -188,9 +284,10 @@ export const EducationalHierarchyView: React.FC<EducationalHierarchyViewProps> =
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-indigo-900/30">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.15),transparent_50%)] pointer-events-none" />
         <div className="max-w-3xl relative z-10">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/10 text-cyan-300 border border-white/10 mb-3">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-white/10 text-cyan-300 border border-white/10 mb-3 backdrop-blur-md">
             <Layers className="w-3.5 h-3.5" /> Structured Educational Hierarchy
           </div>
           <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight">
@@ -202,23 +299,23 @@ export const EducationalHierarchyView: React.FC<EducationalHierarchyViewProps> =
         </div>
 
         {/* Current Active Selection Pill */}
-        <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs">
+        <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs relative z-10">
           <span className="text-slate-400 font-medium">Active Path:</span>
-          <span className="px-2.5 py-1 rounded-lg bg-blue-600/80 font-bold text-white flex items-center gap-1">
+          <span className="px-2.5 py-1 rounded-lg bg-blue-600/80 font-bold text-white flex items-center gap-1 shadow-xs">
             <Landmark className="w-3 h-3" /> {currentBoard.name}
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-          <span className="px-2.5 py-1 rounded-lg bg-indigo-600/80 font-bold text-white flex items-center gap-1">
+          <span className="px-2.5 py-1 rounded-lg bg-indigo-600/80 font-bold text-white flex items-center gap-1 shadow-xs">
             <School className="w-3 h-3" /> {currentClass.name}
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-          <span className="px-2.5 py-1 rounded-lg bg-cyan-600/80 font-bold text-white flex items-center gap-1">
+          <span className="px-2.5 py-1 rounded-lg bg-cyan-600/80 font-bold text-white flex items-center gap-1 shadow-xs">
             <BookOpen className="w-3 h-3" /> {currentSubject.name}
           </span>
           {currentChapter && (
             <>
               <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-              <span className="px-2.5 py-1 rounded-lg bg-emerald-600/80 font-bold text-white">
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-600/80 font-bold text-white shadow-xs">
                 Ch {currentChapter.chapterNumber}: {currentChapter.name}
               </span>
             </>

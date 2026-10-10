@@ -23,14 +23,23 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const showToast = (toast: Omit<ToastItem, 'id'>) => {
-    const id = Math.random().toString(36).substring(2, 9);
-    const newToast: ToastItem = { ...toast, id };
-    setToasts((prev) => [...prev.slice(-3), newToast]); // Keep max 4 toasts
+    // Prevent duplicate active toasts with the exact same title & message
+    setToasts((prev) => {
+      const isDuplicate = prev.some(
+        (t) => t.title === toast.title && t.message === toast.message
+      );
+      if (isDuplicate) return prev;
 
-    const duration = toast.duration || 4000;
-    setTimeout(() => {
-      removeToast(id);
-    }, duration);
+      const id = Math.random().toString(36).substring(2, 9);
+      const newToast: ToastItem = { ...toast, id };
+      
+      const duration = toast.duration || 4000;
+      setTimeout(() => {
+        removeToast(id);
+      }, duration);
+
+      return [...prev.slice(-3), newToast]; // Keep max 4 active toasts
+    });
   };
 
   const removeToast = (id: string) => {

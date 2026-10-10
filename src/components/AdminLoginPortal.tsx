@@ -22,8 +22,10 @@ import {
   formatAuthErrorMessage,
   isUserAdminInCloud,
   getUserProfile,
+  verifyUserRoleWithServer,
 } from '../lib/supabaseService';
 import { getAuthRedirectUrl } from '../lib/config';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 export interface AdminLoginPortalProps {
   onLoginSuccess?: (admin: AdminUser) => void;
@@ -36,6 +38,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
   onLogin,
   onBackToHome,
 }) => {
+  const { siteName, logoUrl, logoAlt } = useSiteSettings();
   const triggerLoginSuccess = onLoginSuccess || onLogin || (() => {});
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -74,96 +77,48 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
     setIsLoading(true);
 
     try {
-      let adminVerified = false;
-      let adminData: AdminUser | null = null;
-      let sessionToken: string | null = null;
-      let supabaseError: any = null;
+      // 1. Authenticate with real Supabase Auth
+      const cred = await loginWithEmail(cleanEmail, password);
+      const user = cred.user;
+      const session = cred.session;
 
-      // 1. Attempt Supabase Auth login
-      try {
-        const cred = await loginWithEmail(cleanEmail, password);
-        const user = cred.user;
-
-        if (user) {
-          if (!user.email_confirmed_at && (user as any).confirmed_at === null) {
-            await logoutUser();
-            setErrorMsg('Please check your email to confirm your account before signing in.');
-            setIsLoading(false);
-            return;
-          }
-
-          const normalizedUserEmail = (user.email || cleanEmail).trim().toLowerCase();
-          const isCloudAdmin = await isUserAdminInCloud(user.uid, normalizedUserEmail, cred.session?.access_token);
-          const userProfile = await getUserProfile(user.uid);
-          const verifiedRoles = (userProfile?.roles || []).map(r => r.toLowerCase().trim());
-          const isAuthorized = isCloudAdmin || verifiedRoles.some(r => ['admin', 'superadmin', 'administrator', 'teacher', 'editor'].includes(r));
-
-          if (isAuthorized) {
-            adminVerified = true;
-            sessionToken = cred.session?.access_token || null;
-            const roleDisplay = verifiedRoles.includes('teacher') ? 'Teacher' : 'Admin';
-            const resolvedRoles: any = Array.isArray(userProfile?.roles) && userProfile.roles.length > 0
-              ? userProfile.roles
-              : (roleDisplay === 'Teacher' ? ['Teacher'] : ['Admin']);
-            adminData = {
-              id: user.uid,
-              name: userProfile?.name || user.displayName || cleanEmail.split('@')[0].toUpperCase() || 'Administrator',
-              email: normalizedUserEmail,
-              roles: resolvedRoles,
-              status: 'Active',
-              testsCompleted: 0,
-              points: 9999,
-              joinedDate: new Date().toLocaleDateString('en-GB'),
-            };
-          }
-        }
-      } catch (err: any) {
-        supabaseError = err;
+      if (!user) {
+        throw new Error('Invalid email or password.');
       }
 
-      // 2. Authoritative backend fallback for bootstrap admins and direct staff access
-      if (!adminVerified) {
-        try {
-          const adminRes = await fetch('/api/admin/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail, password }),
-          });
-
-          if (adminRes.ok) {
-            const data = await adminRes.json();
-            if (data.success && data.user) {
-              adminVerified = true;
-              sessionToken = data.token;
-              const isTeacher = (data.user.roles || []).includes('Teacher') || data.user.role === 'Teacher';
-              const resolvedRoles: any = Array.isArray(data.user.roles) && data.user.roles.length > 0
-                ? data.user.roles
-                : (isTeacher ? ['Teacher'] : ['Admin']);
-              adminData = {
-                id: data.user.uid,
-                name: data.user.name || 'Administrator',
-                email: data.user.email || cleanEmail,
-                role: isTeacher ? 'Teacher' : 'Admin',
-                roles: resolvedRoles,
-                status: 'Active',
-                testsCompleted: 0,
-                points: 9999,
-                joinedDate: new Date().toLocaleDateString('en-GB'),
-              };
-            }
-          } else {
-            const errData = await adminRes.json().catch(() => ({}));
-            throw new Error(errData.error || (supabaseError ? formatAuthErrorMessage(supabaseError) : 'Invalid administrator credentials.'));
-          }
-        } catch (apiErr: any) {
-          throw new Error(apiErr?.message || (supabaseError ? formatAuthErrorMessage(supabaseError) : 'Invalid administrator credentials.'));
-        }
+      if (!user.email_confirmed_at && (user as any).confirmed_at === null) {
+        await logoutUser();
+        setErrorMsg('Please check your email to confirm your account before signing in.');
+        setIsLoading(false);
+        return;
       }
 
-      if (adminVerified && adminData) {
-        if (sessionToken) {
+      const token = session?.access_token;
+      // 2. Authoritative server verification via /api/admin/verify
+      const verifyResult = await verifyUserRoleWithServer(user.uid, user.email, token);
+
+      if (verifyResult.isAdmin) {
+        const userProfile = await getUserProfile(user.uid);
+        const verifiedRoles = (userProfile?.roles || []).map(r => r.toLowerCase().trim());
+        const roleDisplay = verifiedRoles.includes('teacher') ? 'Teacher' : 'Admin';
+        const resolvedRoles: any = Array.isArray(userProfile?.roles) && userProfile.roles.length > 0
+          ? userProfile.roles
+          : (roleDisplay === 'Teacher' ? ['Teacher'] : ['Admin']);
+
+        const adminData: AdminUser = {
+          id: user.uid,
+          name: userProfile?.name || user.displayName || 'Administrator',
+          email: (user.email || cleanEmail).trim().toLowerCase(),
+          roles: resolvedRoles,
+          status: 'Active',
+          testsCompleted: 0,
+          points: 9999,
+          joinedDate: new Date().toLocaleDateString('en-GB'),
+        };
+
+        if (token) {
           try {
-            localStorage.setItem('taleemguru_admin_token', sessionToken);
+            localStorage.setItem('taleemguru_admin_token', token);
           } catch {}
         }
         try {
@@ -172,18 +127,22 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
         setSuccessMsg('Admin authentication verified successfully.');
         setTimeout(() => {
-          triggerLoginSuccess(adminData!);
+          triggerLoginSuccess(adminData);
         }, 600);
       } else {
         await logoutUser().catch(() => {});
-        throw new Error('Access Denied: The account does not possess administrative privileges.');
+        setErrorMsg('Access Denied: You do not have permission to access the Admin Control Panel.');
       }
     } catch (err: any) {
-      console.error('Admin login error:', err);
       try {
         await logoutUser();
       } catch {}
-      setErrorMsg(formatAuthErrorMessage(err));
+      const msg = err?.message || '';
+      if (msg.includes('confirm your account')) {
+        setErrorMsg('Please check your email to confirm your account before signing in.');
+      } else {
+        setErrorMsg('Invalid email or password.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -257,8 +216,8 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
           <div className="flex justify-center mb-3">
             <div className="bg-white/95 rounded-2xl p-3 shadow-xl border border-white/20">
               <img 
-                src="/assets/taleemguru-logo-original.png" 
-                alt="Taleem Guru Official Logo" 
+                src={logoUrl || "/assets/taleemguru-logo-original.png"} 
+                alt={logoAlt || `${siteName} Official Logo`} 
                 className="h-16 sm:h-20 w-auto object-contain"
               />
             </div>
@@ -266,7 +225,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-indigo-500/20 text-cyan-300 border border-indigo-400/20 mb-2">
             <Sparkles className="w-3.5 h-3.5" /> Staff & Admin Security Gate
           </div>
-          <h1 className="text-xl sm:text-2xl font-black text-white">Taleem Guru Administration</h1>
+          <h1 className="text-xl sm:text-2xl font-black text-white">{siteName} Administration</h1>
           <p className="text-xs text-slate-300 mt-1 max-w-sm mx-auto">
             Authorized portal for teachers, paper setters, and board coordinators. Please authenticate to proceed.
           </p>

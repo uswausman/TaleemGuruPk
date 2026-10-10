@@ -636,9 +636,9 @@ export const AdminBoardsClassesTabs: React.FC<AdminBoardsClassesTabsProps> = ({
 
       {/* Create / Edit Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full shadow-2xl p-6 relative">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl relative flex flex-col max-h-[90vh] my-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
                 {modalMode === 'create' ? 'Add' : 'Edit'}{' '}
                 {activeTab === 'boards'
@@ -650,6 +650,7 @@ export const AdminBoardsClassesTabs: React.FC<AdminBoardsClassesTabsProps> = ({
                   : 'Chapter'}
               </h3>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg cursor-pointer"
               >
@@ -657,7 +658,8 @@ export const AdminBoardsClassesTabs: React.FC<AdminBoardsClassesTabsProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveItem} className="space-y-4 mt-4 text-xs">
+            <form onSubmit={handleSaveItem} className="flex-1 flex flex-col min-h-0 mt-4 text-xs">
+              <div className="flex-1 overflow-y-auto pr-1.5 space-y-4">
               {/* Name */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
@@ -741,17 +743,78 @@ export const AdminBoardsClassesTabs: React.FC<AdminBoardsClassesTabsProps> = ({
                 <>
                   <div>
                     <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Associated Board
+                    </label>
+                    <select
+                      value={formBoardId}
+                      onChange={(e) => setFormBoardId(e.target.value ? Number(e.target.value) : '')}
+                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    >
+                      <option value="">-- All Boards --</option>
+                      {boards.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Associated Class
+                    </label>
+                    <select
+                      value={formClassId}
+                      onChange={(e) => {
+                        const newClassId = e.target.value ? Number(e.target.value) : '';
+                        setFormClassId(newClassId);
+                        if (newClassId) {
+                          const matchingSubs = subjects.filter((s) => Number(s.classId) === newClassId);
+                          const curSub = subjects.find((s) => Number(s.id) === Number(formSubjectId));
+                          if (matchingSubs.length > 0) {
+                            const isCurInMatching = matchingSubs.some((s) => Number(s.id) === Number(formSubjectId));
+                            if (!isCurInMatching) {
+                              const sameName = curSub
+                                ? matchingSubs.find((s) => s.name.trim().toLowerCase() === curSub.name.trim().toLowerCase())
+                                : null;
+                              setFormSubjectId(sameName ? sameName.id : matchingSubs[0].id);
+                            }
+                          } else {
+                            setFormSubjectId('');
+                          }
+                        }
+                      }}
+                      className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    >
+                      <option value="">-- All Classes --</option>
+                      {classes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                       Associated Subject
                     </label>
                     <select
                       value={formSubjectId}
-                      onChange={(e) => setFormSubjectId(e.target.value ? Number(e.target.value) : '')}
+                      onChange={(e) => {
+                        const newSubjectId = e.target.value ? Number(e.target.value) : '';
+                        setFormSubjectId(newSubjectId);
+                        if (newSubjectId) {
+                          const sub = subjects.find((s) => Number(s.id) === Number(newSubjectId));
+                          if (sub && sub.classId) setFormClassId(sub.classId);
+                        }
+                      }}
                       className="w-full p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
                     >
                       <option value="">-- Select Subject --</option>
-                      {subjects.map((s) => (
+                      {(formClassId ? subjects.filter((s) => Number(s.classId) === Number(formClassId)) : subjects).map((s) => (
                         <option key={s.id} value={s.id}>
-                          {s.name}
+                          {s.name} ({s.className || 'General'})
                         </option>
                       ))}
                     </select>
@@ -771,8 +834,10 @@ export const AdminBoardsClassesTabs: React.FC<AdminBoardsClassesTabsProps> = ({
                   </div>
                 </>
               )}
+              </div>
 
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+              {/* Pinned Action Buttons Footer */}
+              <div className="flex items-center justify-end gap-2 pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

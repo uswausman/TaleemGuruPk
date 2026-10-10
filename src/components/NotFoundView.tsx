@@ -10,6 +10,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { ViewMode } from '../types';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface NotFoundViewProps {
   onNavigate: (view: ViewMode) => void;
@@ -17,6 +18,7 @@ interface NotFoundViewProps {
 }
 
 export const NotFoundView: React.FC<NotFoundViewProps> = ({ onNavigate, onOpenSearch }) => {
+  const { siteName, tagline } = useSiteSettings();
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-8 animate-in fade-in duration-300">
       {/* 404 Visual Indicator */}
@@ -127,7 +129,7 @@ export const NotFoundView: React.FC<NotFoundViewProps> = ({ onNavigate, onOpenSe
 
       {/* Brand Tagline */}
       <p className="text-xs text-slate-400 dark:text-slate-500 italic">
-        Taleem Guru — Learn. Practice. Test. Improve.
+        {siteName} — {tagline}
       </p>
     </div>
   );

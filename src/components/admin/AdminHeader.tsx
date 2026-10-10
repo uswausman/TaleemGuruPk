@@ -57,12 +57,13 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
   const canViewReports = canViewReportsForRoles(effectiveRoles);
 
   return (
-    <header className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col gap-4">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <header className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col gap-4 relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-blue-500/5 to-transparent pointer-events-none" />
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
         <div className="flex items-center gap-3">
           <button
             onClick={onOpenMobileSidebar}
-            className="lg:hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="lg:hidden p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
             aria-label="Open sidebar"
           >
             <Menu className="w-5 h-5" />
@@ -70,7 +71,8 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+              <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-blue-500" />
                 Control Panel
               </span>
               <span className="text-slate-300 dark:text-slate-700">•</span>
@@ -80,13 +82,13 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
               {activeRoleFilter !== 'All' && (
                 <>
                   <span className="text-slate-300 dark:text-slate-700">•</span>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
                     <Filter className="w-3 h-3" /> View: {activeRoleFilter}
                   </span>
                 </>
               )}
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-0.5">
               {activeTabTitle === 'staff'
                 ? 'Staff & Role Management'
                 : activeTabTitle === 'dashboard'
@@ -112,7 +114,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
             <button
               onClick={() => onQuickAction('add-question')}
               title="Add a new question with MCQ Editor"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs shadow-blue-600/20 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Question</span>
@@ -123,7 +125,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
             <button
               onClick={() => onQuickAction('create-quiz')}
               title="Create a new timed quiz test"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs shadow-indigo-600/20 hover:shadow-md transition-all active:scale-[0.98] cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5" />
               <span>Create Quiz</span>

@@ -11,6 +11,7 @@ import {
   FileText,
 } from 'lucide-react';
 import { ARMED_FORCES_DATA } from '../data/mockData';
+import { fetchAcademicEntryTestSubcategoriesApi } from '../lib/api';
 import { MCQ } from '../types';
 import { exportMCQsToWatermarkedPDF } from '../utils/watermark';
 
@@ -26,6 +27,17 @@ export const ArmedForcesView: React.FC<ArmedForcesViewProps> = ({
   studentName,
 }) => {
   const [selectedForceId, setSelectedForceId] = useState<string>('army-portal');
+  const [dbSubcategories, setDbSubcategories] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    fetchAcademicEntryTestSubcategoriesApi().then((res) => {
+      if (res.success && Array.isArray(res.data)) {
+        setDbSubcategories(res.data);
+      }
+    }).catch((err) => {
+      console.warn('Could not load Armed Forces subcategories from DB:', err);
+    });
+  }, []);
 
   const activeForce = ARMED_FORCES_DATA.find((f) => f.id === selectedForceId) || ARMED_FORCES_DATA[0];
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, AlertTriangle, CheckCircle2, Send } from 'lucide-react';
 import { Button } from './ui/Button';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface ReportIssueModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
   questionId,
   subjectTitle,
 }) => {
+  const { siteName } = useSiteSettings();
   const [category, setCategory] = useState(defaultCategory);
   const [description, setDescription] = useState('');
   const [email, setEmail] = useState('');
@@ -76,7 +78,7 @@ export const ReportIssueModal: React.FC<ReportIssueModalProps> = ({
               Report Received
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-              Thank you for maintaining educational accuracy on TaleemGuru. Our academic review team will verify the content promptly.
+              Thank you for maintaining educational accuracy on {siteName}. Our academic review team will verify the content promptly.
             </p>
           </div>
         ) : (

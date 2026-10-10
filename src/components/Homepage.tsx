@@ -45,20 +45,23 @@ import {
   BellRing,
   ExternalLink,
   Target,
+  School,
+  FileCheck,
 } from 'lucide-react';
 import { TestConfig, MCQ, PastPaper, StudyNote, TestResult } from '../types';
 import {
   POPULAR_TESTS,
   PAST_PAPERS_DATA,
   STUDY_NOTES_DATA,
-  MCQS_DATABASE,
 } from '../data/mockData';
 import { fetchLeaderboardApi, fetchPublicStatsApi } from '../lib/api';
 import { Button } from './ui/Button';
 import { Badge } from './ui/Badge';
 import { Card } from './ui/Card';
 import { SuccessStories } from './SuccessStories';
+import { QuickTools } from './QuickTools';
 import { documentBrandingService } from '../services/documentBrandingService';
+import { useSiteSettings } from '../context/SiteSettingsContext';
 
 interface HomepageProps {
   onStartTest: (config: TestConfig) => void;
@@ -66,6 +69,7 @@ interface HomepageProps {
   onOpenSearch: () => void;
   allTests: TestConfig[];
   historyResults: TestResult[];
+  allMCQs?: MCQ[];
 }
 
 export const Homepage: React.FC<HomepageProps> = ({
@@ -74,7 +78,9 @@ export const Homepage: React.FC<HomepageProps> = ({
   onOpenSearch,
   allTests,
   historyResults,
+  allMCQs = [],
 }) => {
+  const { siteName } = useSiteSettings();
   // Announcement banner dismiss state
   const [showAnnouncement, setShowAnnouncement] = useState(true);
 
@@ -311,7 +317,7 @@ export const Homepage: React.FC<HomepageProps> = ({
   };
 
   // Filtered MCQs for the featured MCQ Bank section
-  const featuredMCQsList = MCQS_DATABASE.filter(
+  const featuredMCQsList = allMCQs.filter(
     (m) => m.subject.toLowerCase() === activeMcqSubject.toLowerCase()
   ).slice(0, 3);
 
@@ -362,7 +368,7 @@ export const Homepage: React.FC<HomepageProps> = ({
         </div>
       )}
 
-      {/* 3. HERO SECTION */}
+      {/* 2. HERO SECTION */}
       <section className="relative overflow-hidden bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 text-white pt-8 pb-16 sm:py-20 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
         {/* Ambient Gradient Glows */}
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-600/15 blur-[120px] pointer-events-none rounded-full" />
@@ -387,7 +393,7 @@ export const Homepage: React.FC<HomepageProps> = ({
 
             {/* Explanatory Value Proposition */}
             <p className="text-xs sm:text-sm md:text-base text-slate-300 max-w-2xl leading-relaxed mx-auto lg:mx-0">
-              Taleem Guru supports Pakistani students with <strong>chapter-wise MCQs</strong>, <strong>timed mock quizzes</strong>, comprehensive <strong>study notes</strong>, <strong>board syllabi</strong>, solved <strong>past papers</strong>, and structured preparation for BISE Boards, MDCAT, ECAT, CSS, and Armed Forces.
+              {siteName} supports Pakistani students with <strong>chapter-wise MCQs</strong>, <strong>timed mock quizzes</strong>, comprehensive <strong>study notes</strong>, <strong>board syllabi</strong>, solved <strong>past papers</strong>, and structured preparation for BISE Boards, MDCAT, ECAT, CSS, and Armed Forces.
             </p>
 
             {/* Value Highlights Chips */}
@@ -429,7 +435,7 @@ export const Homepage: React.FC<HomepageProps> = ({
               </div>
             </div>
 
-            {/* 4. MAIN CTA BUTTONS */}
+            {/* 3. MAIN CTA BUTTONS */}
             <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 pt-3">
               <Button
                 variant="primary"
@@ -569,7 +575,7 @@ export const Homepage: React.FC<HomepageProps> = ({
               )}
             </div>
 
-            {/* Subtle Floating Highlights */}
+            {/* Floating Highlights */}
             <div className="hidden sm:flex absolute -bottom-4 -left-4 bg-slate-900/95 border border-slate-700/80 p-2.5 rounded-2xl shadow-xl items-center gap-3 z-20 backdrop-blur-md">
               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-500 text-slate-950 font-black flex items-center justify-center text-sm shadow-md">
                 🔥
@@ -583,7 +589,10 @@ export const Homepage: React.FC<HomepageProps> = ({
         </div>
       </section>
 
-      {/* 6. BOARDS SECTION */}
+      {/* 4. QUICK STUDY TOOLS */}
+      <QuickTools />
+
+      {/* 5. BOARDS SECTION */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -642,40 +651,40 @@ export const Homepage: React.FC<HomepageProps> = ({
           {filteredBoards.map((b, idx) => (
             <motion.div
               key={idx}
-              whileHover={{ scale: 1.03 }}
+              whileHover={{ scale: 1.02 }}
               transition={{ duration: 0.2 }}
             >
               <Card
                 hoverLift
                 className="p-5 flex flex-col justify-between"
               >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <Badge variant="blue" size="xs">
-                    {b.coverage}
-                  </Badge>
-                  <span className="text-[10px] uppercase font-bold text-slate-400">Class 9–12</span>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <Badge variant="blue" size="xs">
+                      {b.coverage}
+                    </Badge>
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Class 9–12</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{b.name}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{b.desc}</p>
                 </div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">{b.name}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{b.desc}</p>
-              </div>
 
-              <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                <button
-                  onClick={() => onNavigateTab('past-papers')}
-                  className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-cyan-400 cursor-pointer"
-                >
-                  Past Papers (PDF)
-                </button>
-                <Button
-                  variant="primary"
-                  size="xs"
-                  onClick={() => onNavigateTab('tests')}
-                >
-                  Solve Online Test
-                </Button>
-              </div>
-            </Card>
+                <div className="mt-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => onNavigateTab('past-papers')}
+                    className="text-[11px] font-semibold text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-cyan-400 cursor-pointer"
+                  >
+                    Past Papers (PDF)
+                  </button>
+                  <Button
+                    variant="primary"
+                    size="xs"
+                    onClick={() => onNavigateTab('tests')}
+                  >
+                    Solve Online Test
+                  </Button>
+                </div>
+              </Card>
             </motion.div>
           ))}
         </motion.div>
@@ -949,7 +958,7 @@ export const Homepage: React.FC<HomepageProps> = ({
 
         {/* MCQs List */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {featuredMCQsList.map((mcq, mIdx) => {
+          {featuredMCQsList.map((mcq) => {
             const isAnswered = featuredMcqAnswered[mcq.id];
             const userChoice = featuredMcqSelection[mcq.id];
 
@@ -1167,7 +1176,7 @@ export const Homepage: React.FC<HomepageProps> = ({
             Proven Study Methodology
           </Badge>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-            How Taleem Guru Works
+            How {siteName} Works
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
             A four-step cycle engineered to help Pakistani students turn weak areas into top board merit scores.
@@ -1221,7 +1230,7 @@ export const Homepage: React.FC<HomepageProps> = ({
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="text-center max-w-2xl mx-auto space-y-2">
           <Badge variant="emerald" size="sm">
-            Why Students Choose Taleem Guru
+            Why Students Choose {siteName}
           </Badge>
           <h2 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
             Engineered for Academic Excellence
@@ -1278,7 +1287,7 @@ export const Homepage: React.FC<HomepageProps> = ({
             </div>
             <h3 className="text-base font-bold text-slate-900 dark:text-white">Watermarked A4 Printables</h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Export high-resolution PDF question papers, result cards, and formula cheat sheets formatted cleanly with official Taleem Guru academic watermarks for print.
+              Export high-resolution PDF question papers, result cards, and formula cheat sheets formatted cleanly with official {siteName} academic watermarks for print.
             </p>
           </Card>
 
@@ -1391,7 +1400,7 @@ export const Homepage: React.FC<HomepageProps> = ({
             </h2>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Taleem Guru is free, fast, and mobile-friendly. Take a timed mock quiz, download solved past papers, and start tracking your academic progress today.
+              {siteName} is free, fast, and mobile-friendly. Take a timed mock quiz, download solved past papers, and start tracking your academic progress today.
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -1416,6 +1425,8 @@ export const Homepage: React.FC<HomepageProps> = ({
           </div>
         </div>
       </section>
+
+      {/* 17. SUCCESS STORIES */}
       <SuccessStories />
     </div>
   );

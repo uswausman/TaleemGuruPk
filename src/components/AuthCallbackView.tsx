@@ -97,7 +97,7 @@ export const AuthCallbackView: React.FC<AuthCallbackViewProps> = ({
 
         const serverAuth = await verifyUserRoleWithServer(user.id, normalizedEmail, session.access_token);
         const authoritativeRole: 'Admin' | 'Student' = serverAuth.isAdmin ? 'Admin' : 'Student';
-        const isAuthAdmin = serverAuth.isAdmin || normalizedEmail === 'admin@taleemguru.pk';
+        const isAuthAdmin = serverAuth.isAdmin;
 
         // 5. Cloud database profile retrieval or initial sync
         let cloudProfile = await getUserProfile(user.id);

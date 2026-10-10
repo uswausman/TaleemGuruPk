@@ -23,18 +23,28 @@ import {
   X,
   Filter,
   Files,
+  FolderTree,
+  GraduationCap,
+  Mail,
+  Stethoscope,
 } from 'lucide-react';
 import { StaffRole } from '../../types';
+import { useSiteSettings } from '../../context/SiteSettingsContext';
 import { isSectionAllowedForRoles } from '../../utils/staffRolePermissions';
 
 export type AdminSection =
   | 'dashboard'
+  | 'website-command-center'
+  | 'approvals'
+  | 'my-submissions'
+  | 'academic-management'
   | 'staff'
   | 'students'
   | 'boards'
   | 'classes'
   | 'subjects'
   | 'chapters'
+  | 'entry-tests'
   | 'questions'
   | 'question-bank'
   | 'quizzes'
@@ -44,6 +54,7 @@ export type AdminSection =
   | 'results'
   | 'leaderboard'
   | 'certificates'
+  | 'newsletter'
   | 'reports'
   | 'audit-logs'
   | 'settings'
@@ -61,11 +72,14 @@ interface AdminSidebarProps {
     classes: number;
     subjects: number;
     chapters: number;
+    entryTests?: number;
     questions: number;
     quizzes: number;
     notes: number;
     pastPapers: number;
     results: number;
+    approvals?: number;
+    mySubmissions?: number;
   };
   isMobileOpen: boolean;
   onCloseMobile: () => void;
@@ -86,6 +100,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   onRoleFilterChange,
   allowedTabs,
 }) => {
+  const { logoUrl, logoAlt, siteNameSecondaryColor, siteNameParts, tagline } = useSiteSettings();
   const allNavGroups: {
     groupTitle: string;
     items: {
@@ -107,8 +122,32 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       ],
     },
     {
-      groupTitle: 'Academic Structure',
+      groupTitle: 'Approvals & Submissions',
       items: [
+        {
+          id: 'approvals',
+          label: 'Content Approvals',
+          icon: <ShieldCheck className="w-4 h-4 text-indigo-500" />,
+          count: counts.approvals,
+          badge: counts.approvals ? `${counts.approvals} Pending` : undefined,
+        },
+        {
+          id: 'my-submissions',
+          label: 'My Submissions',
+          icon: <FileText className="w-4 h-4 text-blue-500" />,
+          count: counts.mySubmissions,
+        },
+      ],
+    },
+    {
+      groupTitle: 'Academic Management',
+      items: [
+        {
+          id: 'academic-management',
+          label: 'Academic Management',
+          icon: <FolderTree className="w-4 h-4" />,
+          badge: 'Hub',
+        },
         {
           id: 'boards',
           label: 'Boards',
@@ -132,6 +171,12 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           label: 'Chapters',
           icon: <Layers className="w-4 h-4" />,
           count: counts.chapters,
+        },
+        {
+          id: 'entry-tests',
+          label: 'Entry Test Categories',
+          icon: <GraduationCap className="w-4 h-4" />,
+          count: counts.entryTests,
         },
       ],
     },
@@ -203,6 +248,11 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           icon: <ShieldCheck className="w-4 h-4" />,
         },
         {
+          id: 'newsletter',
+          label: 'Newsletter Subscribers',
+          icon: <Mail className="w-4 h-4" />,
+        },
+        {
           id: 'leaderboard',
           label: 'Leaderboard',
           icon: <TrendingUp className="w-4 h-4" />,
@@ -217,6 +267,12 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     {
       groupTitle: 'System & Security',
       items: [
+        {
+          id: 'website-command-center',
+          label: '🩺 Website Command Center',
+          icon: <Stethoscope className="w-4 h-4 text-cyan-500" />,
+          badge: 'Live',
+        },
         {
           id: 'audit-logs',
           label: 'Audit Trail',
@@ -267,20 +323,25 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-cyan-500 flex items-center justify-center shadow-md shadow-blue-500/20 overflow-hidden shrink-0">
               <img 
-                src="/assets/taleemguru-logo-original.png" 
-                alt="Taleem Guru Official Logo" 
+                src={logoUrl || "/assets/taleemguru-logo-original.png"} 
+                alt={logoAlt || "Taleem Guru Official Logo"} 
                 className="w-7 h-7 object-contain" 
               />
             </div>
             <div>
-              <div className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
-                TALEEM <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-500 to-cyan-500 dark:from-blue-400 dark:to-cyan-400">GURU</span>
+              <div className="font-extrabold text-sm tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 uppercase">
+                <span>{siteNameParts.primary}</span>
+                {siteNameParts.secondary && (
+                  <span style={{ color: siteNameSecondaryColor || '#3B82F6' }}>
+                    {siteNameParts.secondary}
+                  </span>
+                )}
                 <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
                   ADMIN
                 </span>
               </div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium tracking-wide">
-                Learn. Practice. Test. Improve.
+                {tagline}
               </div>
             </div>
           </div>
