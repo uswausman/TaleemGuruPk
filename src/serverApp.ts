@@ -6390,6 +6390,17 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
     }
 
     if (!dbUser) {
+      const middlewareRoles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isMiddlewareAdmin = isBootstrap || middlewareRoles.some(r => staffRolesToCheck.includes(r));
+      if (isMiddlewareAdmin) {
+        return res.json({
+          authorized: true,
+          uid,
+          role: middlewareRoles.includes('teacher') ? 'Teacher' : 'Admin',
+          name: req.user?.name || (isBootstrap ? (bootstrapConfig?.name || 'Admin') : 'Administrator'),
+          email: normalizedEmail,
+        });
+      }
       return res.status(403).json({ authorized: false, role: 'Student', error: 'User record not found in system' });
     }
 
