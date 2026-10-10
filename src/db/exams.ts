@@ -217,6 +217,7 @@ export async function startExamAttemptInDb(params: {
   return {
     success: true,
     attemptId,
+    candidateSessionId: userUid,
     test: {
       id: test.id,
       title: test.title,
@@ -249,7 +250,7 @@ export async function startExamAttemptInDb(params: {
 
 export async function saveExamAnswerInDb(params: {
   attemptId: string;
-  userUid: string;
+  userUid?: string;
   questionId: string;
   selectedOption: number | null;
   markedForReview?: boolean;
@@ -271,8 +272,8 @@ export async function saveExamAnswerInDb(params: {
 
   const attempt = rows[0];
 
-  // Verify ownership
-  if (attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
+  // Verify ownership if userUid provided
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
     throw new Error('Unauthorized to modify this exam attempt');
   }
 
@@ -319,7 +320,7 @@ export async function saveExamAnswerInDb(params: {
 
 export async function submitExamAttemptInDb(params: {
   attemptId: string;
-  userUid: string;
+  userUid?: string;
   submittedAnswers?: Record<
     string,
     { selectedOption: number | null; markedForReview?: boolean; timeSpentSeconds?: number }
@@ -343,9 +344,10 @@ export async function submitExamAttemptInDb(params: {
   }
 
   const attempt = rows[0];
+  const effectiveUserUid = userUid || attempt.userUid;
 
-  // Verify ownership (or admin review)
-  if (attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
+  // Verify ownership if userUid provided (or admin review)
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
     throw new Error('Unauthorized: attempt belongs to another student');
   }
 
@@ -403,6 +405,15 @@ export async function submitExamAttemptInDb(params: {
     .where(inArray(mcqs.id, questionOrder.length > 0 ? questionOrder : ['empty']));
 
   const mcqsMap = new Map<string, MCQ>();
+
+  if (test.questions && Array.isArray(test.questions)) {
+    test.questions.forEach((m) => {
+      if (m && m.id) {
+        mcqsMap.set(m.id, m);
+      }
+    });
+  }
+
   junctionMCQs.forEach((m) => {
     mcqsMap.set(m.id, {
       id: m.id,
@@ -440,10 +451,14 @@ export async function submitExamAttemptInDb(params: {
   for (const qId of questionOrder) {
     const mcq = mcqsMap.get(qId);
     const ansRecord = mergedAnswers[qId];
-    const selectedOption =
-      ansRecord?.selectedOption !== undefined && ansRecord?.selectedOption !== null
-        ? Number(ansRecord.selectedOption)
-        : null;
+    let selectedOption: number | null = null;
+    if (ansRecord !== undefined && ansRecord !== null) {
+      if (typeof ansRecord === 'object' && ansRecord.selectedOption !== undefined && ansRecord.selectedOption !== null) {
+        selectedOption = Number(ansRecord.selectedOption);
+      } else if (typeof ansRecord === 'number') {
+        selectedOption = Number(ansRecord);
+      }
+    }
 
     userAnswersList.push({
       questionId: qId,
@@ -452,9 +467,9 @@ export async function submitExamAttemptInDb(params: {
       timeSpentSeconds: Number(ansRecord?.timeSpentSeconds || 0),
     });
 
-    if (selectedOption === null || selectedOption === undefined) {
+    if (selectedOption === null || selectedOption === undefined || isNaN(selectedOption)) {
       skippedCount++;
-    } else if (mcq && selectedOption === mcq.correctAnswer) {
+    } else if (mcq && selectedOption === Number(mcq.correctAnswer)) {
       correctCount++;
     } else {
       wrongCount++;
@@ -505,15 +520,15 @@ export async function submitExamAttemptInDb(params: {
     const existingUser = await db
       .select({ uid: users.uid })
       .from(users)
-      .where(eq(users.uid, userUid))
+      .where(eq(users.uid, effectiveUserUid))
       .limit(1);
 
     if (existingUser.length === 0) {
       await db
         .insert(users)
         .values({
-          uid: userUid,
-          email: attempt.studentEmail || `${userUid}@student.taleemguru.pk`,
+          uid: effectiveUserUid,
+          email: attempt.studentEmail || `${effectiveUserUid}@student.taleemguru.pk`,
           name: attempt.studentName || 'Student Candidate',
           roles: ['Student'],
           createdAt: new Date(),
@@ -530,7 +545,7 @@ export async function submitExamAttemptInDb(params: {
     .insert(testResults)
     .values({
       resultId: attemptId,
-      userUid,
+      userUid: effectiveUserUid,
       testId: test.id,
       testTitle: test.title,
       testType: test.testType,
@@ -575,7 +590,7 @@ export async function submitExamAttemptInDb(params: {
         .insert(certificates)
         .values({
           id: certId,
-          userUid,
+          userUid: effectiveUserUid,
           studentName: attempt.studentName || 'Learner',
           testId: test.id,
           testName: test.title,
@@ -607,7 +622,7 @@ export async function submitExamAttemptInDb(params: {
         testsTaken: sql`${users.testsTaken} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(users.uid, userUid));
+      .where(eq(users.uid, effectiveUserUid));
   } catch (userErr) {
     console.warn('[User Stats] Notice updating user stats:', userErr);
   }
@@ -652,7 +667,7 @@ export async function submitExamAttemptInDb(params: {
 
 export async function getExamAttemptResultFromDb(
   attemptId: string,
-  userUid: string
+  userUid?: string
 ): Promise<TestResult | null> {
   if (!db) return null;
 
@@ -665,8 +680,8 @@ export async function getExamAttemptResultFromDb(
   if (rows.length === 0) return null;
   const attempt = rows[0];
 
-  // Ownership check (unless admin/teacher)
-  if (attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
+  // Ownership check (unless admin/teacher) if userUid provided
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith('admin-')) {
     return null;
   }
 

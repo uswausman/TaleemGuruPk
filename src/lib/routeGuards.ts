@@ -1,4 +1,5 @@
 import { ViewMode, UserRole, RouteAuthResult, StudentProfile, AdminUser } from '../types';
+import { parseNavContext, buildNavContextString, normalizeClassLevel, normalizeSubjectName } from '../utils/navigationContext';
 
 export interface RouteDefinition {
   path: string;
@@ -429,10 +430,26 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Past Papers Management',
   },
+  '/admin/website-command-center': {
+    path: '/admin/website-command-center',
+    view: 'admin-panel',
+    adminTab: 'website-command-center',
+    isProtected: true,
+    allowedRoles: ['admin'],
+    title: 'Website Command Center',
+  },
+  '/admin/command-center': {
+    path: '/admin/command-center',
+    view: 'admin-panel',
+    adminTab: 'website-command-center',
+    isProtected: true,
+    allowedRoles: ['admin'],
+    title: 'Website Command Center',
+  },
   '/admin/settings': {
     path: '/admin/settings',
     view: 'admin-panel',
-    adminTab: 'site-settings',
+    adminTab: 'settings',
     isProtected: true,
     allowedRoles: ['admin'],
     title: 'Platform Settings',
@@ -440,7 +457,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
   '/admin/site-settings': {
     path: '/admin/site-settings',
     view: 'admin-panel',
-    adminTab: 'site-settings',
+    adminTab: 'settings',
     isProtected: true,
     allowedRoles: ['admin'],
     title: 'Platform Settings',
@@ -499,13 +516,37 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
 export function normalizePath(rawPath: string): string {
   if (!rawPath) return '/';
   let clean = rawPath.trim();
-  // Strip leading hash or query params
+  // Strip leading hash
   if (clean.startsWith('#')) {
     clean = clean.substring(1);
   }
+  // Convert query parameters if present (e.g., ?class=10&subject=physics or ?category=css or ?category=armed-forces) into path segments
   const queryIndex = clean.indexOf('?');
   if (queryIndex !== -1) {
+    const queryStr = clean.substring(queryIndex + 1);
     clean = clean.substring(0, queryIndex);
+    try {
+      const searchParams = new URLSearchParams(queryStr);
+      const qClass = searchParams.get('class') || searchParams.get('classLevel') || searchParams.get('grade');
+      const qSubject = searchParams.get('subject');
+      const qCategory = searchParams.get('category') || searchParams.get('tab') || searchParams.get('type') || searchParams.get('exam');
+
+      if (clean === '/entry-tests' && qCategory && qCategory !== 'All' && qCategory !== 'all') {
+        clean = `/entry-tests/${qCategory.toLowerCase().replace(/ /g, '-')}`;
+      } else if (clean === '/competitive-exams' && qCategory && qCategory !== 'All' && qCategory !== 'all') {
+        clean = `/competitive-exams/${qCategory.toLowerCase().replace(/ /g, '-')}`;
+      } else {
+        const normC = qClass && qClass !== 'All' ? normalizeClassLevel(qClass) : null;
+        const normS = qSubject && qSubject !== 'All' ? normalizeSubjectName(qSubject) : null;
+        if (normC && normC !== 'All' && normS && normS !== 'All') {
+          clean = `${clean}/${normC.toLowerCase().replace(/ /g, '-')}/${normS.toLowerCase().replace(/ /g, '-')}`;
+        } else if (normC && normC !== 'All') {
+          clean = `${clean}/${normC.toLowerCase().replace(/ /g, '-')}`;
+        } else if (normS && normS !== 'All') {
+          clean = `${clean}/${normS.toLowerCase().replace(/ /g, '-')}`;
+        }
+      }
+    } catch (e) {}
   }
   // Ensure leading slash
   if (!clean.startsWith('/')) {
@@ -526,19 +567,21 @@ export function resolveRoute(rawPath: string): RouteDefinition {
     return ROUTE_DEFINITIONS[normalized];
   }
 
-  // Check prefix matches for nested admin routes (e.g. /admin/...)
+  // Check prefix matches for nested admin routes
   if (normalized.startsWith('/admin')) {
+    const rawTab = normalized.replace('/admin/', '').replace('/admin', '') || 'dashboard';
+    const adminTab = rawTab === 'site-settings' ? 'settings' : rawTab;
     return {
       path: normalized,
-      view: 'admin-panel',
-      adminTab: normalized.replace('/admin/', '').replace('/admin', '') || 'dashboard',
+      view: 'admin-panel' as ViewMode,
+      adminTab,
       isProtected: true,
       allowedRoles: ['admin'],
       title: 'Admin Console',
     };
   }
 
-  // Dynamic Boards sub-routes (e.g., /boards/punjab, /boards/federal, /boards/sindh, /boards/kpk)
+  // Dynamic Boards sub-routes
   if (normalized.startsWith('/boards/') || normalized.startsWith('/board/')) {
     const rawFilter = normalized.replace(/^\/(boards|board)\//, '').trim();
     const upper = rawFilter.toUpperCase();
@@ -548,7 +591,7 @@ export function resolveRoute(rawPath: string): RouteDefinition {
                       rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1);
     return {
       path: normalized,
-      view: 'boards',
+      view: 'boards' as ViewMode,
       subFilter: subFilter || undefined,
       isProtected: false,
       allowedRoles: ['student', 'admin', 'teacher', 'editor'],
@@ -556,107 +599,162 @@ export function resolveRoute(rawPath: string): RouteDefinition {
     };
   }
 
-  // Dynamic Past Papers sub-routes (e.g., /past-papers/punjab, /past-papers/class-10, /past-papers/physics)
+  // Dynamic Past Papers sub-routes (supports /past-papers/class-10/physics, /past-papers/physics, /past-papers/class-10, JSON payloads)
   if (normalized.startsWith('/past-papers/') || normalized.startsWith('/pastpapers/')) {
-    const rawFilter = normalized.replace(/^\/(past-papers|pastpapers)\//, '').trim();
-    const upper = rawFilter.toUpperCase();
-    const subFilter = upper === 'KPK' ? 'KPK' :
-                      upper === 'AJK' ? 'AJK' :
-                      rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1);
+    const rawFilter = decodeURIComponent(normalized.replace(/^\/(past-papers|pastpapers)\//, '').trim());
+    const parsedCtx = parseNavContext(rawFilter);
+    const subFilter = buildNavContextString(parsedCtx.subject, parsedCtx.classLevel, parsedCtx.board);
+
+    let title = 'Past Papers';
+    if (parsedCtx.classLevel !== 'All' && parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.classLevel} ${parsedCtx.subject} Past Papers`;
+    } else if (parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.subject} Past Papers`;
+    } else if (parsedCtx.classLevel !== 'All') {
+      title = `${parsedCtx.classLevel} Past Papers`;
+    } else if (parsedCtx.board !== 'All') {
+      title = `${parsedCtx.board} Past Papers`;
+    }
+
     return {
       path: normalized,
-      view: 'past-papers',
-      subFilter: subFilter || undefined,
+      view: 'past-papers' as ViewMode,
+      subFilter: subFilter !== 'All' ? subFilter : undefined,
       isProtected: false,
       allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: `${subFilter ? subFilter + ' ' : ''}Past Papers`,
+      title,
     };
   }
 
-  // Dynamic Classes sub-routes (e.g., /classes/class-10)
+  // Dynamic Entry tests sub-routes
+  if (normalized.startsWith('/entry-tests/')) {
+    const rawFilter = decodeURIComponent(normalized.replace('/entry-tests/', '').trim());
+    const cleanLower = rawFilter.toLowerCase().replace(/[-_]/g, ' ');
+    let subFilter = rawFilter;
+    if (cleanLower === 'mdcat' || cleanLower === 'nums' || cleanLower.includes('medical')) subFilter = 'MDCAT';
+    else if (cleanLower === 'ecat' || cleanLower.includes('engineering')) subFilter = 'ECAT';
+    else if (cleanLower === 'css' || cleanLower.includes('civil')) subFilter = 'CSS';
+    else if (cleanLower === 'pms') subFilter = 'PMS';
+    else if (cleanLower === 'armed forces' || cleanLower.includes('armed') || cleanLower.includes('defense') || cleanLower.includes('army') || cleanLower.includes('navy') || cleanLower.includes('paf')) subFilter = 'Armed Forces';
+    else subFilter = rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1);
+
+    return {
+      path: normalized,
+      view: 'entry-tests' as ViewMode,
+      subFilter,
+      isProtected: false,
+      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+      title: `${subFilter} Entry Test Preparation`,
+    };
+  }
+
+  // Dynamic Classes sub-routes
   if (normalized.startsWith('/classes/')) {
     const rawFilter = normalized.replace('/classes/', '').trim();
+    const formattedClass = rawFilter.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase());
     return {
       path: normalized,
-      view: 'classes',
-      subFilter: rawFilter || undefined,
+      view: 'classes' as ViewMode,
+      subFilter: formattedClass,
       isProtected: false,
       allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'Classes & Grades',
+      title: `${formattedClass} Syllabus`,
     };
   }
 
-  // Dynamic Subjects sub-routes (e.g., /subjects/physics)
-  if (normalized.startsWith('/subjects/')) {
-    const rawFilter = normalized.replace('/subjects/', '').trim();
-    return {
-      path: normalized,
-      view: 'subjects',
-      subFilter: rawFilter || undefined,
-      isProtected: false,
-      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'Subject Directory',
-    };
-  }
+  // Dynamic Notes sub-routes (supports /notes/class-10/physics, /notes/physics, /notes/class-10, JSON payloads)
+  if (normalized.startsWith('/notes/') || normalized.startsWith('/study-material/')) {
+    const rawFilter = decodeURIComponent(normalized.replace(/^\/(notes|study-material)\//, '').trim());
+    const parsedCtx = parseNavContext(rawFilter);
+    const subFilter = buildNavContextString(parsedCtx.subject, parsedCtx.classLevel, parsedCtx.board);
 
-  // Dynamic MCQs sub-routes (e.g., /mcqs/physics)
-  if (normalized.startsWith('/mcqs/')) {
-    const rawFilter = normalized.replace('/mcqs/', '').trim();
-    return {
-      path: normalized,
-      view: 'mcqs',
-      subFilter: rawFilter || undefined,
-      isProtected: false,
-      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'MCQ Bank',
-    };
-  }
-
-  // Dynamic Notes sub-routes (e.g., /notes/physics)
-  if (normalized.startsWith('/notes/')) {
-    const rawFilter = normalized.replace('/notes/', '').trim();
-    return {
-      path: normalized,
-      view: 'notes',
-      subFilter: rawFilter || undefined,
-      isProtected: false,
-      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'Study Notes',
-    };
-  }
-  
-  if (normalized.startsWith('/verify')) {
-    return {
-      path: normalized,
-      view: 'verify-certificate',
-      isProtected: false,
-      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'Verify Certificate',
-    };
-  }
-
-  if (normalized.startsWith('/search')) {
-    let queryParam = '';
-    if (rawPath.includes('?')) {
-      const sp = new URLSearchParams(rawPath.split('?')[1]);
-      queryParam = sp.get('q') || '';
-    } else if (normalized.startsWith('/search/')) {
-      queryParam = decodeURIComponent(normalized.replace('/search/', '').trim());
+    let title = 'Study Notes';
+    if (parsedCtx.classLevel !== 'All' && parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.classLevel} ${parsedCtx.subject} Study Notes`;
+    } else if (parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.subject} Study Notes`;
+    } else if (parsedCtx.classLevel !== 'All') {
+      title = `${parsedCtx.classLevel} Study Notes`;
     }
+
     return {
       path: normalized,
-      view: 'search',
-      subFilter: queryParam || undefined,
+      view: 'notes' as ViewMode,
+      subFilter: subFilter !== 'All' ? subFilter : undefined,
       isProtected: false,
       allowedRoles: ['student', 'admin', 'teacher', 'editor'],
-      title: 'Search Educational Content',
+      title,
     };
   }
 
-  // Fallback to 404 Not Found for unknown paths (prevents indexing missing paths)
+  // Dynamic MCQs sub-routes
+  if (normalized.startsWith('/mcqs/')) {
+    const rawFilter = decodeURIComponent(normalized.replace('/mcqs/', '').trim());
+    const parsedCtx = parseNavContext(rawFilter);
+    const subFilter = buildNavContextString(parsedCtx.subject, parsedCtx.classLevel, parsedCtx.board);
+
+    let title = 'MCQ Bank';
+    if (parsedCtx.classLevel !== 'All' && parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.classLevel} ${parsedCtx.subject} MCQs`;
+    } else if (parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.subject} MCQs`;
+    } else if (parsedCtx.classLevel !== 'All') {
+      title = `${parsedCtx.classLevel} MCQs`;
+    }
+
+    return {
+      path: normalized,
+      view: 'mcqs' as ViewMode,
+      subFilter: subFilter !== 'All' ? subFilter : undefined,
+      isProtected: false,
+      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+      title,
+    };
+  }
+
+  // Dynamic Subjects sub-routes
+  if (normalized.startsWith('/subjects/')) {
+    const rawFilter = decodeURIComponent(normalized.replace('/subjects/', '').trim());
+    const parsedCtx = parseNavContext(rawFilter);
+    const subFilter = buildNavContextString(parsedCtx.subject, parsedCtx.classLevel, parsedCtx.board);
+
+    let title = 'Subjects Directory';
+    if (parsedCtx.classLevel !== 'All' && parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.classLevel} ${parsedCtx.subject} Resources`;
+    } else if (parsedCtx.subject !== 'All') {
+      title = `${parsedCtx.subject} Study Resources`;
+    } else if (parsedCtx.classLevel !== 'All') {
+      title = `${parsedCtx.classLevel} Subjects`;
+    }
+
+    return {
+      path: normalized,
+      view: 'subjects' as ViewMode,
+      subFilter: subFilter !== 'All' ? subFilter : undefined,
+      isProtected: false,
+      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+      title,
+    };
+  }
+
+  // Dynamic Syllabus sub-routes
+  if (normalized.startsWith('/syllabus/')) {
+    const rawFilter = decodeURIComponent(normalized.replace('/syllabus/', '').trim());
+    const formattedSub = rawFilter.startsWith('{') ? rawFilter : (rawFilter.charAt(0).toUpperCase() + rawFilter.slice(1));
+    return {
+      path: normalized,
+      view: 'syllabus' as ViewMode,
+      subFilter: formattedSub,
+      isProtected: false,
+      allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+      title: `${formattedSub} Syllabus`,
+    };
+  }
+
+  // Fallback to 404 Not Found
   return {
     path: normalized,
-    view: 'not-found',
+    view: 'not-found' as ViewMode,
     isProtected: false,
     allowedRoles: ['student', 'admin', 'teacher', 'editor'],
     title: 'Page Not Found (404)',
@@ -690,6 +788,56 @@ export function viewToCanonicalPath(view: ViewMode, subFilter?: string, adminTab
     if (subFilter) return `/search?q=${encodeURIComponent(subFilter)}`;
     return '/search';
   }
+  
+  // Dynamic routes with subFilter
+  if (subFilter) {
+    const parsed = parseNavContext(subFilter);
+    const cSlug = parsed.classLevel !== 'All' ? parsed.classLevel.toLowerCase().replace(/ /g, '-') : null;
+    const sSlug = parsed.subject !== 'All' ? parsed.subject.toLowerCase().replace(/ /g, '-') : null;
+    const bSlug = parsed.board !== 'All' ? parsed.board.toLowerCase().replace(/ /g, '-') : null;
+
+    if (view === 'past-papers') {
+      if (cSlug && sSlug) return `/past-papers/${cSlug}/${sSlug}`;
+      if (sSlug) return `/past-papers/${sSlug}`;
+      if (cSlug) return `/past-papers/${cSlug}`;
+      if (bSlug) return `/past-papers/${bSlug}`;
+    }
+
+    if (view === 'notes') {
+      if (cSlug && sSlug) return `/notes/${cSlug}/${sSlug}`;
+      if (sSlug) return `/notes/${sSlug}`;
+      if (cSlug) return `/notes/${cSlug}`;
+      if (bSlug) return `/notes/${bSlug}`;
+    }
+
+    if (view === 'subjects') {
+      if (cSlug && sSlug) return `/subjects/${cSlug}/${sSlug}`;
+      if (sSlug) return `/subjects/${sSlug}`;
+      if (cSlug) return `/subjects/${cSlug}`;
+    }
+
+    if (view === 'mcqs') {
+      if (cSlug && sSlug) return `/mcqs/${cSlug}/${sSlug}`;
+      if (sSlug) return `/mcqs/${sSlug}`;
+      if (cSlug) return `/mcqs/${cSlug}`;
+    }
+
+    if (subFilter.startsWith('{') && subFilter.endsWith('}')) {
+      const encoded = encodeURIComponent(subFilter);
+      if (view === 'boards') return `/boards/${encoded}`;
+      if (view === 'classes') return `/classes/${encoded}`;
+      if (view === 'syllabus') return `/syllabus/${encoded}`;
+      if (view === 'entry-tests') return `/entry-tests/${encoded}`;
+      if (view === 'competitive-exams') return `/competitive-exams/${encoded}`;
+    }
+    const formattedSub = subFilter.toLowerCase().replace(/ /g, '-');
+    if (view === 'boards') return `/boards/${formattedSub}`;
+    if (view === 'classes') return `/classes/${formattedSub}`;
+    if (view === 'syllabus') return `/syllabus/${formattedSub}`;
+    if (view === 'entry-tests') return `/entry-tests/${formattedSub}`;
+    if (view === 'competitive-exams') return `/competitive-exams/${formattedSub}`;
+  }
+  
   return `/${view}`;
 }
 
@@ -779,7 +927,9 @@ export function getBrowserPath(): string {
     return normalizePath(rawHash);
   }
   
-  return normalizePath(window.location.pathname);
+  // Include search/query params if present on window.location
+  const full = window.location.pathname + (window.location.search || '');
+  return normalizePath(full);
 }
 
 // Update browser address bar and history without reloading

@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData';
 
 let refreshPromise: Promise<any> | null = null;
 
@@ -875,9 +876,8 @@ export async function fetchMCQsApi(filters: Record<string, any> = {}) {
     const res = await fetch(`/api/mcqs?${params.toString()}`);
     if (!res.ok) return [];
     const data = await res.json();
-    return data.mcqs || [];
+    return (data.mcqs && data.mcqs.length > 0) ? data.mcqs : [];
   } catch (error) {
-    console.error('Error fetching MCQs:', error);
     return [];
   }
 }
@@ -895,7 +895,14 @@ export async function createMCQApi(mcqData: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to create MCQ' };
-    return { success: true, mcq: json.mcq };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      mcq: json.mcq,
+    };
   } catch (error: any) {
     console.error('Error creating MCQ:', error);
     return { success: false, error: error.message || 'Network error creating MCQ' };
@@ -915,7 +922,14 @@ export async function updateMCQApi(id: string, updates: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to update MCQ' };
-    return { success: true, mcq: json.mcq };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      mcq: json.mcq,
+    };
   } catch (error: any) {
     console.error('Error updating MCQ:', error);
     return { success: false, error: error.message || 'Network error updating MCQ' };
@@ -933,7 +947,13 @@ export async function deleteMCQApi(id: string) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to delete MCQ' };
-    return { success: true };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+    };
   } catch (error: any) {
     console.error('Error deleting MCQ:', error);
     return { success: false, error: error.message || 'Network error deleting MCQ' };
@@ -950,12 +970,11 @@ export async function fetchTestsApi(filters: Record<string, any> = {}) {
       }
     });
     const res = await fetch(`/api/tests?${params.toString()}`);
-    if (!res.ok) return [];
+    if (!res.ok) return POPULAR_TESTS;
     const data = await res.json();
-    return data.tests || [];
+    return (data.tests && data.tests.length > 0) ? data.tests : POPULAR_TESTS;
   } catch (error) {
-    console.error('Error fetching tests:', error);
-    return [];
+    return POPULAR_TESTS;
   }
 }
 
@@ -984,7 +1003,14 @@ export async function createTestApi(testData: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to create assessment' };
-    return { success: true, test: json.test };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      test: json.test,
+    };
   } catch (error: any) {
     console.error('Error creating test:', error);
     return { success: false, error: error.message || 'Network error creating assessment' };
@@ -1004,7 +1030,14 @@ export async function updateTestApi(id: string, updates: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to update assessment' };
-    return { success: true, test: json.test };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      test: json.test,
+    };
   } catch (error: any) {
     console.error('Error updating test:', error);
     return { success: false, error: error.message || 'Network error updating assessment' };
@@ -1022,7 +1055,13 @@ export async function deleteTestApi(id: string) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to delete assessment' };
-    return { success: true };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+    };
   } catch (error: any) {
     console.error('Error deleting test:', error);
     return { success: false, error: error.message || 'Network error deleting assessment' };
@@ -1039,12 +1078,11 @@ export async function fetchPastPapersApi(filters: Record<string, any> = {}) {
       }
     });
     const res = await fetch(`/api/past-papers?${params.toString()}`);
-    if (!res.ok) return [];
+    if (!res.ok) return PAST_PAPERS_DATA;
     const data = await res.json();
-    return data.pastPapers || [];
+    return (data.pastPapers && data.pastPapers.length > 0) ? data.pastPapers : PAST_PAPERS_DATA;
   } catch (error) {
-    console.error('Error fetching past papers:', error);
-    return [];
+    return PAST_PAPERS_DATA;
   }
 }
 
@@ -1061,7 +1099,14 @@ export async function createPastPaperApi(paperData: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to create past paper' };
-    return { success: true, pastPaper: json.pastPaper };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      pastPaper: json.pastPaper,
+    };
   } catch (error: any) {
     console.error('Error creating past paper:', error);
     return { success: false, error: error.message || 'Network error creating past paper' };
@@ -1081,7 +1126,14 @@ export async function updatePastPaperApi(id: string, updates: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to update past paper' };
-    return { success: true, pastPaper: json.pastPaper };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      pastPaper: json.pastPaper,
+    };
   } catch (error: any) {
     console.error('Error updating past paper:', error);
     return { success: false, error: error.message || 'Network error updating past paper' };
@@ -1099,7 +1151,13 @@ export async function deletePastPaperApi(id: string) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to delete past paper' };
-    return { success: true };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+    };
   } catch (error: any) {
     console.error('Error deleting past paper:', error);
     return { success: false, error: error.message || 'Network error deleting past paper' };
@@ -1116,12 +1174,11 @@ export async function fetchStudyNotesApi(filters: Record<string, any> = {}) {
       }
     });
     const res = await fetch(`/api/study-notes?${params.toString()}`);
-    if (!res.ok) return [];
+    if (!res.ok) return STUDY_NOTES_DATA;
     const data = await res.json();
-    return data.studyNotes || [];
+    return (data.studyNotes && data.studyNotes.length > 0) ? data.studyNotes : STUDY_NOTES_DATA;
   } catch (error) {
-    console.error('Error fetching study notes:', error);
-    return [];
+    return STUDY_NOTES_DATA;
   }
 }
 
@@ -1138,7 +1195,14 @@ export async function createStudyNoteApi(noteData: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to create study note' };
-    return { success: true, studyNote: json.studyNote };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      studyNote: json.studyNote,
+    };
   } catch (error: any) {
     console.error('Error creating study note:', error);
     return { success: false, error: error.message || 'Network error creating study note' };
@@ -1158,7 +1222,14 @@ export async function updateStudyNoteApi(id: string, updates: any) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to update study note' };
-    return { success: true, studyNote: json.studyNote };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+      studyNote: json.studyNote,
+    };
   } catch (error: any) {
     console.error('Error updating study note:', error);
     return { success: false, error: error.message || 'Network error updating study note' };
@@ -1176,7 +1247,13 @@ export async function deleteStudyNoteApi(id: string) {
     });
     const json = await res.json();
     if (!res.ok) return { success: false, error: json.error || 'Failed to delete study note' };
-    return { success: true };
+    return {
+      success: true,
+      status: json.status,
+      message: json.message,
+      approvalRequestId: json.approvalRequestId,
+      changeRequest: json.changeRequest,
+    };
   } catch (error: any) {
     console.error('Error deleting study note:', error);
     return { success: false, error: error.message || 'Network error deleting study note' };
@@ -1616,73 +1693,623 @@ export async function deleteHierarchyChapterApi(id: number) {
   }
 }
 
+// ============================================================================
+// --- ACADEMIC MANAGEMENT AUTHORITATIVE CLIENT APIS ---
+// ============================================================================
+
+// 1. BOARDS
+export async function fetchAcademicBoardsApi() {
+  try {
+    const res = await fetch('/api/academic/boards');
+    const json = await res.json();
+    return { success: res.ok, data: json.boards || [], boards: json.boards || [], error: json.error };
+  } catch (error: any) {
+    return { success: false, data: [], boards: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicBoardApi(payload: {
+  name: string;
+  code?: string;
+  establishmentYear?: number;
+  province?: string;
+  city?: string;
+  description?: string;
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, board: json.board, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicBoardApi(
+  id: number,
+  payload: {
+    name?: string;
+    code?: string;
+    establishmentYear?: number;
+    province?: string;
+    city?: string;
+    description?: string;
+    status?: string;
+  }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/boards/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, board: json.board, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicBoardApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/boards/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicBoardDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/boards/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 2. CLASSES
+export async function fetchAcademicClassesApi() {
+  try {
+    const res = await fetch('/api/academic/classes');
+    const json = await res.json();
+    return { success: res.ok, data: json.classes || [], classes: json.classes || [], error: json.error };
+  } catch (error: any) {
+    return { success: false, data: [], classes: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicClassApi(payload: {
+  name: string;
+  boardId?: number;
+  boardIds?: number[];
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/classes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, class: json.class, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicClassApi(
+  id: number,
+  payload: { name?: string; boardId?: number; boardIds?: number[]; status?: string }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/classes/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, class: json.class, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicClassApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/classes/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicClassDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/classes/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 3. SUBJECTS
+export async function fetchAcademicSubjectsApi() {
+  try {
+    const res = await fetch('/api/academic/subjects');
+    const json = await res.json();
+    return { success: res.ok, data: json.subjects || [], subjects: json.subjects || [], error: json.error };
+  } catch (error: any) {
+    return { success: false, data: [], subjects: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicSubjectApi(payload: {
+  name: string;
+  classId?: number;
+  classIds?: number[];
+  boardId?: number;
+  boardIds?: number[];
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/subjects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, subject: json.subject, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicSubjectApi(
+  id: number,
+  payload: { name?: string; classId?: number; classIds?: number[]; boardId?: number; boardIds?: number[]; status?: string }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/subjects/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, subject: json.subject, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicSubjectApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/subjects/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicSubjectDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/subjects/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 4. CHAPTERS
+export async function fetchAcademicChaptersApi() {
+  try {
+    const res = await fetch('/api/academic/chapters');
+    const json = await res.json();
+    return { success: res.ok, data: json.chapters || [], chapters: json.chapters || [], error: json.error };
+  } catch (error: any) {
+    return { success: false, data: [], chapters: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicChapterApi(payload: {
+  name: string;
+  subjectId: number;
+  classId?: number;
+  boardId?: number;
+  status?: string;
+  draftStatus?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/chapters', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, chapter: json.chapter, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicChapterApi(
+  id: number,
+  payload: { name?: string; subjectId?: number; classId?: number; boardId?: number; status?: string; draftStatus?: string }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/chapters/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, chapter: json.chapter, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicChapterApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/chapters/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicChapterDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/chapters/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 5. ENTRY TEST CATEGORIES
+export async function fetchAcademicEntryTestCategoriesApi() {
+  try {
+    const res = await fetch('/api/academic/entry-test-categories');
+    const json = await res.json();
+    return {
+      success: res.ok,
+      data: json.entryTestCategories || [],
+      entryTestCategories: json.entryTestCategories || [],
+      error: json.error,
+    };
+  } catch (error: any) {
+    return { success: false, data: [], entryTestCategories: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicEntryTestCategoryApi(payload: {
+  name: string;
+  type: string;
+  description?: string;
+  organizer?: string;
+  totalMarks?: number;
+  duration?: string;
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/entry-test-categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, category: json.category || json.entryTestCategory, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicEntryTestCategoryApi(
+  id: number,
+  payload: {
+    name?: string;
+    type?: string;
+    description?: string;
+    organizer?: string;
+    totalMarks?: number;
+    duration?: string;
+    status?: string;
+  }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-categories/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, category: json.category || json.entryTestCategory, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicEntryTestCategoryApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-categories/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicEntryTestCategoryDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-categories/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 6. ENTRY TEST SUBCATEGORIES
+export async function fetchAcademicEntryTestSubcategoriesApi(categoryId?: number) {
+  try {
+    const url = categoryId
+      ? `/api/academic/entry-test-subcategories?categoryId=${categoryId}`
+      : '/api/academic/entry-test-subcategories';
+    const res = await fetch(url);
+    const json = await res.json();
+    return {
+      success: res.ok,
+      data: json.subcategories || json.entryTestSubcategories || [],
+      subcategories: json.subcategories || json.entryTestSubcategories || [],
+      error: json.error,
+    };
+  } catch (error: any) {
+    return { success: false, data: [], subcategories: [], error: error.message || 'Network error' };
+  }
+}
+
+export async function createAcademicEntryTestSubcategoryApi(payload: {
+  categoryId: number;
+  name: string;
+  description?: string;
+  status?: string;
+}) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/academic/entry-test-subcategories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, subcategory: json.subcategory || json.entryTestSubcategory, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function updateAcademicEntryTestSubcategoryApi(
+  id: number,
+  payload: {
+    categoryId?: number;
+    name?: string;
+    description?: string;
+    status?: string;
+  }
+) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-subcategories/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    return { success: res.ok, subcategory: json.subcategory || json.entryTestSubcategory, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function deleteAcademicEntryTestSubcategoryApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-subcategories/${id}`, {
+      method: 'DELETE',
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return {
+      success: res.ok,
+      message: json.message,
+      error: json.error,
+      dependencies: json.dependencies,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function checkAcademicEntryTestSubcategoryDepsApi(id: number) {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/academic/entry-test-subcategories/${id}/dependencies`, {
+      headers: { ...headers },
+    });
+    const json = await res.json();
+    return { success: res.ok, dependencies: json.dependencies, error: json.error };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+// 6. ACADEMIC SUMMARY
+export async function fetchAcademicSummaryApi() {
+  try {
+    const res = await fetch('/api/academic/summary');
+    const json = await res.json();
+    return {
+      success: res.ok,
+      summary: json.summary || { boards: 0, classes: 0, subjects: 0, chapters: 0, entryTestCategories: 0 },
+      boards: json.boards || [],
+      classes: json.classes || [],
+      subjects: json.subjects || [],
+      chapters: json.chapters || [],
+      entryTestCategories: json.entryTestCategories || [],
+      error: json.error,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
 // Aliases for Hierarchy API
 export async function fetchBoardsApi() {
-  const data = await fetchHierarchyBoardsApi();
-  return { success: true, data };
+  return fetchAcademicBoardsApi();
 }
 
-export async function createBoardApi(payload: { name: string; province?: string }) {
-  return createHierarchyBoardApi(payload.name);
+export async function createBoardApi(payload: { name: string; province?: string; code?: string; city?: string }) {
+  return createAcademicBoardApi(payload);
 }
 
-export async function updateBoardApi(id: number, payload: { name: string; province?: string }) {
-  return updateHierarchyBoardApi(id, { name: payload.name });
+export async function updateBoardApi(id: number, payload: { name: string; province?: string; code?: string; city?: string }) {
+  return updateAcademicBoardApi(id, payload);
 }
 
 export async function deleteBoardApi(id: number) {
-  return deleteHierarchyBoardApi(id);
+  return deleteAcademicBoardApi(id);
 }
 
 export async function fetchClassesApi(boardId?: number) {
-  const data = await fetchHierarchyClassesApi(boardId);
-  return { success: true, data };
+  return fetchAcademicClassesApi();
 }
 
 export async function createClassApi(payload: { name: string; boardId?: number; orderIndex?: number }) {
-  return createHierarchyClassApi(payload.boardId || 1, payload.name);
+  return createAcademicClassApi(payload);
 }
 
 export async function updateClassApi(id: number, payload: { name: string; boardId?: number; orderIndex?: number }) {
-  return updateHierarchyClassApi(id, { name: payload.name, boardId: payload.boardId });
+  return updateAcademicClassApi(id, payload);
 }
 
 export async function deleteClassApi(id: number) {
-  return deleteHierarchyClassApi(id);
+  return deleteAcademicClassApi(id);
 }
 
 export async function fetchSubjectsApi(classId?: number) {
-  const data = await fetchHierarchySubjectsApi(classId);
-  return { success: true, data };
+  return fetchAcademicSubjectsApi();
 }
 
-export async function createSubjectApi(payload: { name: string; classId?: number; orderIndex?: number }) {
-  return createHierarchySubjectApi(payload.classId || 1, payload.name);
+export async function createSubjectApi(payload: { name: string; classId?: number; orderIndex?: number; boardId?: number }) {
+  return createAcademicSubjectApi({ name: payload.name, classId: payload.classId || 1, boardId: payload.boardId });
 }
 
-export async function updateSubjectApi(id: number, payload: { name: string; classId?: number; orderIndex?: number }) {
-  return updateHierarchySubjectApi(id, { name: payload.name, classId: payload.classId });
+export async function updateSubjectApi(id: number, payload: { name: string; classId?: number; orderIndex?: number; boardId?: number }) {
+  return updateAcademicSubjectApi(id, { name: payload.name, classId: payload.classId, boardId: payload.boardId });
 }
 
 export async function deleteSubjectApi(id: number) {
-  return deleteHierarchySubjectApi(id);
+  return deleteAcademicSubjectApi(id);
 }
 
 export async function fetchChaptersApi(subjectId?: number) {
-  const data = await fetchHierarchyChaptersApi(subjectId);
-  return { success: true, data };
+  return fetchAcademicChaptersApi();
 }
 
 export async function createChapterApi(payload: { name: string; subjectId?: number; orderIndex?: number; description?: string }) {
-  return createHierarchyChapterApi(payload.subjectId || 1, payload.name);
+  return createAcademicChapterApi({ name: payload.name, subjectId: payload.subjectId || 1 });
 }
 
 export async function updateChapterApi(id: number, payload: { name: string; subjectId?: number; orderIndex?: number; description?: string }) {
-  return updateHierarchyChapterApi(id, { name: payload.name, subjectId: payload.subjectId });
+  return updateAcademicChapterApi(id, { name: payload.name, subjectId: payload.subjectId });
 }
 
 export async function deleteChapterApi(id: number) {
-  return deleteHierarchyChapterApi(id);
+  return deleteAcademicChapterApi(id);
 }
 
 // ============================================================================
@@ -1696,6 +2323,17 @@ export async function startExamApi(params: {
   studentEmail?: string;
 }) {
   try {
+    let candidateSessionId = params.candidateSessionId;
+    if (!candidateSessionId && typeof localStorage !== 'undefined') {
+      candidateSessionId = localStorage.getItem('taleem_guru_candidate_session') || undefined;
+    }
+    if (!candidateSessionId) {
+      candidateSessionId = `candidate-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('taleem_guru_candidate_session', candidateSessionId);
+      }
+    }
+
     const headers = await getAuthHeader();
     const res = await fetch('/api/exams/start', {
       method: 'POST',
@@ -1703,12 +2341,18 @@ export async function startExamApi(params: {
         'Content-Type': 'application/json',
         ...headers,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        ...params,
+        candidateSessionId,
+      }),
     });
 
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.error || 'Failed to start examination session');
+    }
+    if (data.candidateSessionId && typeof localStorage !== 'undefined') {
+      localStorage.setItem('taleem_guru_candidate_session', data.candidateSessionId);
     }
     return data;
   } catch (error: any) {
@@ -1728,14 +2372,33 @@ export async function saveExamAnswerApi(
   }
 ) {
   try {
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return { success: false, error: 'Session identifier missing' };
+    }
+
+    let candidateSessionId = params.candidateSessionId;
+    if (!candidateSessionId && typeof localStorage !== 'undefined') {
+      candidateSessionId = localStorage.getItem('taleem_guru_candidate_session') || undefined;
+    }
+    if (!candidateSessionId) {
+      candidateSessionId = `candidate-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('taleem_guru_candidate_session', candidateSessionId);
+      }
+    }
+
     const headers = await getAuthHeader();
-    const res = await fetch(`/api/exams/${encodeURIComponent(attemptId)}/save-answer`, {
+    const res = await fetch(`/api/exams/${encodeURIComponent(attemptId.trim())}/save-answer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...headers,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        ...params,
+        attemptId: attemptId.trim(),
+        candidateSessionId,
+      }),
     });
 
     const data = await res.json();
@@ -1758,14 +2421,34 @@ export async function submitExamApi(
   }
 ) {
   try {
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      console.warn('Notice: submitExamApi called without an attemptId');
+      return { success: false, error: 'Session identifier missing' };
+    }
+
+    let candidateSessionId = params.candidateSessionId;
+    if (!candidateSessionId && typeof localStorage !== 'undefined') {
+      candidateSessionId = localStorage.getItem('taleem_guru_candidate_session') || undefined;
+    }
+    if (!candidateSessionId) {
+      candidateSessionId = `candidate-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('taleem_guru_candidate_session', candidateSessionId);
+      }
+    }
+
     const headers = await getAuthHeader();
-    const res = await fetch(`/api/exams/${encodeURIComponent(attemptId)}/submit`, {
+    const res = await fetch(`/api/exams/${encodeURIComponent(attemptId.trim())}/submit`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...headers,
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify({
+        ...params,
+        attemptId: attemptId.trim(),
+        candidateSessionId,
+      }),
     });
 
     const data = await res.json();
@@ -1774,15 +2457,20 @@ export async function submitExamApi(
     }
     return data;
   } catch (error: any) {
-    console.error('Error submitting exam to backend:', error);
-    throw error;
+    console.warn('Notice: Background exam submission response:', error);
+    return { success: false, error: error.message || 'Failed to submit examination' };
   }
 }
 
 export async function fetchExamResultApi(attemptId: string, candidateSessionId?: string) {
   try {
+    let resolvedSessionId = candidateSessionId;
+    if (!resolvedSessionId && typeof localStorage !== 'undefined') {
+      resolvedSessionId = localStorage.getItem('taleem_guru_candidate_session') || undefined;
+    }
+
     const headers = await getAuthHeader();
-    const query = candidateSessionId ? `?candidateSessionId=${encodeURIComponent(candidateSessionId)}` : '';
+    const query = resolvedSessionId ? `?candidateSessionId=${encodeURIComponent(resolvedSessionId)}` : '';
     const res = await fetch(`/api/exams/${encodeURIComponent(attemptId)}/result${query}`, {
       headers: {
         ...headers,
@@ -2041,6 +2729,664 @@ export async function fetchContentVersionsApi(contentType: string, id: string) {
     return [];
   }
 }
+
+// ============================================================================
+// --- CENTRALIZED SITE SETTINGS CLIENT APIS ---
+// ============================================================================
+
+export async function fetchPublicSettingsApi(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch(`/api/settings/public?_t=${Date.now()}`, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store',
+    });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.settings || {};
+  } catch (error) {
+    console.error('Error fetching public settings:', error);
+    return {};
+  }
+}
+
+export async function fetchAdminSettingsApi(): Promise<{ success: boolean; settings?: Record<string, string>; error?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const res = await fetch(`/api/admin/settings?_t=${Date.now()}`, {
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store',
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to fetch administrative site settings' };
+    }
+    return { success: true, settings: data.settings || {} };
+  } catch (error: any) {
+    console.error('Error fetching admin settings:', error);
+    return { success: false, error: error.message || 'Network error' };
+  }
+}
+
+export async function saveAdminSettingsApi(
+  settings: Record<string, string>
+): Promise<{ success: boolean; settings?: Record<string, string>; message?: string; error?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const res = await fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ settings }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to save site settings' };
+    }
+
+    return {
+      success: true,
+      message: data.message || 'Site settings saved successfully.',
+      settings: data.settings,
+    };
+  } catch (error: any) {
+    console.error('Error saving site settings:', error);
+    return { success: false, error: error.message || 'Network error saving site settings' };
+  }
+}
+
+export async function uploadAdminSettingAssetApi(
+  fileBase64: string,
+  filename: string
+): Promise<{ success: boolean; url?: string; filename?: string; error?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    if (!headers.Authorization) {
+      return { success: false, error: 'Authentication required' };
+    }
+
+    const res = await fetch('/api/admin/settings/upload-asset', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ fileBase64, filename }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to upload asset' };
+    }
+
+    return { success: true, url: data.url, filename: data.filename };
+  } catch (error: any) {
+    console.error('Error uploading setting asset:', error);
+    return { success: false, error: error.message || 'Network error uploading asset' };
+  }
+}
+
+// -------------------------------------------------------------
+// Content Approvals & Staff Submissions API Client
+// -------------------------------------------------------------
+
+export interface ContentChangeRequestItem {
+  id: number;
+  entityType: string;
+  entityId: string | null;
+  action: 'CREATE' | 'UPDATE' | 'DELETE' | string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | string;
+  submittedBy: string;
+  submitterName?: string;
+  submitterEmail?: string;
+  submitterRoles?: string[];
+  contentTitle: string;
+  proposedData: any;
+  previousData: any;
+  reviewComment?: string | null;
+  reviewedBy?: string | null;
+  reviewerName?: string | null;
+  reviewedAt?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ApprovalStats {
+  pending: number;
+  approvedToday: number;
+  rejectedToday: number;
+  totalMonth: number;
+  total: number;
+}
+
+export async function fetchPendingApprovalsApi(filters?: {
+  status?: string;
+  entityType?: string;
+  submittedBy?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ items: ContentChangeRequestItem[]; total: number }> {
+  try {
+    const headers = await getAuthHeader();
+    const params = new URLSearchParams();
+    if (filters?.status) params.append('status', filters.status);
+    if (filters?.entityType) params.append('entityType', filters.entityType);
+    if (filters?.submittedBy) params.append('submittedBy', filters.submittedBy);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.limit) params.append('limit', String(filters.limit));
+    if (filters?.offset) params.append('offset', String(filters.offset));
+
+    const res = await fetch(`/api/approvals?${params.toString()}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to fetch approval requests');
+    }
+
+    return await res.json();
+  } catch (error: any) {
+    console.error('Error in fetchPendingApprovalsApi:', error);
+    return { items: [], total: 0 };
+  }
+}
+
+export async function fetchApprovalStatsApi(): Promise<ApprovalStats> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/approvals/stats', {
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    });
+
+    if (!res.ok) {
+      return { pending: 0, approvedToday: 0, rejectedToday: 0, totalMonth: 0, total: 0 };
+    }
+
+    return await res.json();
+  } catch (error) {
+    console.error('Error in fetchApprovalStatsApi:', error);
+    return { pending: 0, approvedToday: 0, rejectedToday: 0, totalMonth: 0, total: 0 };
+  }
+}
+
+export async function fetchMySubmissionsApi(): Promise<ContentChangeRequestItem[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/approvals/my', {
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to fetch your submissions');
+    }
+
+    const data = await res.json();
+    return data.submissions || [];
+  } catch (error: any) {
+    console.error('Error in fetchMySubmissionsApi:', error);
+    return [];
+  }
+}
+
+export async function approveChangeRequestApi(
+  id: number,
+  comment?: string
+): Promise<{ success: boolean; error?: string; message?: string; request?: any }> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/approvals/${id}/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ comment }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to approve change request' };
+    }
+
+    return { success: true, message: data.message, request: data.request };
+  } catch (error: any) {
+    console.error('Error in approveChangeRequestApi:', error);
+    return { success: false, error: error.message || 'Network error approving request' };
+  }
+}
+
+export async function rejectChangeRequestApi(
+  id: number,
+  reason: string
+): Promise<{ success: boolean; error?: string; message?: string; request?: any }> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/approvals/${id}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify({ reason }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      return { success: false, error: data.error || 'Failed to reject change request' };
+    }
+
+    return { success: true, message: data.message, request: data.request };
+  } catch (error: any) {
+    console.error('Error in rejectChangeRequestApi:', error);
+    return { success: false, error: error.message || 'Network error rejecting request' };
+  }
+}
+
+// ============================================================================
+// WEBSITE COMMAND CENTER API HELPERS
+// ============================================================================
+
+export async function fetchWebsiteCommandCenterSummaryApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health', { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching website command center summary:', error);
+    return null;
+  }
+}
+
+export async function triggerWebsiteScanApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error triggering website scan:', error);
+    return null;
+  }
+}
+
+export async function fetchSeoAuditApi(url?: string): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const query = url ? `?url=${encodeURIComponent(url)}` : '';
+    const res = await fetch(`/api/admin/website-health/seo${query}`, { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching SEO audit:', error);
+    return null;
+  }
+}
+
+export async function fetchPerformanceMetricsApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/performance', { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching performance metrics:', error);
+    return null;
+  }
+}
+
+export async function fetchLiveErrorLogsApi(filters?: { category?: string; severity?: string; status?: string }): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const params = new URLSearchParams();
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.severity) params.append('severity', filters.severity);
+    if (filters?.status) params.append('status', filters.status);
+
+    const res = await fetch(`/api/admin/website-health/errors?${params.toString()}`, { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.logs || [];
+  } catch (error) {
+    console.error('Error fetching live error logs:', error);
+    return [];
+  }
+}
+
+export async function updateErrorLogStatusApi(id: string, status: string): Promise<boolean> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/errors/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ id, status }),
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Error updating error status:', error);
+    return false;
+  }
+}
+
+export async function investigateErrorLogApi(id: string): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/admin/website-health/errors/${id}/investigate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (res.status === 401) {
+      return { success: false, status: 401, error: 'Session expired or unauthenticated.' };
+    }
+    if (res.status === 403) {
+      return { success: false, status: 403, error: 'Permission denied. You do not have elevated privileges.' };
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { success: false, status: res.status, error: data.error || `HTTP error ${res.status}` };
+    }
+    const data = await res.json();
+    return { success: true, report: data.report };
+  } catch (error: any) {
+    console.error('Error investigating error log:', error);
+    return { success: false, error: error.message || 'Network communication failure.' };
+  }
+}
+
+export async function fetchBrokenLinksApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/links', { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching broken links report:', error);
+    return null;
+  }
+}
+
+export async function fetchApiHealthApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/apis', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.results || [];
+  } catch (error) {
+    console.error('Error fetching API health:', error);
+    return [];
+  }
+}
+
+export async function fetchDatabaseHealthApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/database', { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching database health:', error);
+    return null;
+  }
+}
+
+export async function fetchTrafficAnalyticsApi(timeRange: string = '30 Days'): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/admin/website-health/analytics?timeRange=${encodeURIComponent(timeRange)}`, { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching traffic analytics:', error);
+    return null;
+  }
+}
+
+export async function triggerAiDiagnosisApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/ai/diagnose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.diagnoses || [];
+  } catch (error) {
+    console.error('Error triggering AI diagnosis:', error);
+    return [];
+  }
+}
+
+export async function fetchFixProposalsApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/fixes', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.proposals || [];
+  } catch (error) {
+    console.error('Error fetching fix proposals:', error);
+    return [];
+  }
+}
+
+export async function approveFixProposalApi(fixId: string): Promise<{ success: boolean; message?: string; error?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/fixes/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ fixId }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { success: false, error: data.error || 'Failed to approve fix' };
+    return { success: true, message: data.message };
+  } catch (error: any) {
+    console.error('Error approving fix proposal:', error);
+    return { success: false, error: error.message || 'Network error approving fix' };
+  }
+}
+
+export async function rejectFixProposalApi(fixId: string): Promise<boolean> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/fixes/reject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ fixId }),
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Error rejecting fix proposal:', error);
+    return false;
+  }
+}
+
+export async function fetchCommandHistoryApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/history', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.history || [];
+  } catch (error) {
+    console.error('Error fetching command history:', error);
+    return [];
+  }
+}
+
+export async function fetchCommandCenterSettingsApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/settings', { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching command center settings:', error);
+    return null;
+  }
+}
+
+export async function updateCommandCenterSettingsApi(settings: any): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error updating command center settings:', error);
+    return null;
+  }
+}
+
+export async function fetchSearchConsoleDataApi(timeRange: string = '28 Days'): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/admin/website-health/search-console?timeRange=${encodeURIComponent(timeRange)}`, { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching Search Console data:', error);
+    return null;
+  }
+}
+
+export async function fetchSearchConsoleIntelligenceApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/search-console/intelligence', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.recommendations || [];
+  } catch (error) {
+    console.error('Error fetching Search Console intelligence:', error);
+    return [];
+  }
+}
+
+export async function fetchPageSpeedAuditApi(route: string = '/', strategy: 'mobile' | 'desktop' = 'mobile'): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch(`/api/admin/website-health/pagespeed?route=${encodeURIComponent(route)}&strategy=${encodeURIComponent(strategy)}`, { headers });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error fetching PageSpeed audit:', error);
+    return null;
+  }
+}
+
+export async function fetchPageSpeedHistoryApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/pagespeed/history', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.snapshots || [];
+  } catch (error) {
+    console.error('Error fetching PageSpeed history:', error);
+    return [];
+  }
+}
+
+export async function triggerDeploymentVerificationApi(): Promise<any> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/deploy/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (error) {
+    console.error('Error triggering deployment verification:', error);
+    return null;
+  }
+}
+
+export async function triggerDeploymentRollbackApi(): Promise<{ success: boolean; message?: string }> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/deploy/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (!res.ok) return { success: false };
+    return await res.json();
+  } catch (error) {
+    console.error('Error triggering deployment rollback:', error);
+    return { success: false };
+  }
+}
+
+export async function fetchSystemAlertsApi(): Promise<any[]> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/alerts', { headers });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.alerts || [];
+  } catch (error) {
+    console.error('Error fetching system alerts:', error);
+    return [];
+  }
+}
+
+export async function updateAlertStatusApi(id: string, status: string): Promise<boolean> {
+  try {
+    const headers = await getAuthHeader();
+    const res = await fetch('/api/admin/website-health/alerts/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ id, status }),
+    });
+    return res.ok;
+  } catch (error) {
+    console.error('Error updating alert status:', error);
+    return false;
+  }
+}
+
+
 
 
 

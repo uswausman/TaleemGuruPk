@@ -1,5 +1,5 @@
-import { ViewMode } from '../types';
-import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from './config';
+import type { ViewMode } from '../types.ts';
+import { CANONICAL_PRODUCTION_DOMAIN, getCanonicalUrl } from './config.ts';
 
 export interface RouteSeoConfig {
   title: string;
@@ -276,8 +276,13 @@ export function determineRobotsDirective(options: {
   isNotFound?: boolean;
   isEmptyContent?: boolean;
   hasSearchQuery?: boolean;
+  defaultDirective?: string;
 }): string {
-  const { view, contentStatus, isNotFound, isEmptyContent, hasSearchQuery } = options;
+  const { view, contentStatus, isNotFound, isEmptyContent, hasSearchQuery, defaultDirective } = options;
+
+  if (defaultDirective && defaultDirective.includes('noindex')) {
+    return defaultDirective;
+  }
 
   // 1. Not Found
   if (isNotFound || view === 'not-found') {
@@ -323,33 +328,42 @@ export function determineRobotsDirective(options: {
 export function buildDynamicTitle(
   view: ViewMode | string,
   subFilter?: string,
-  customTitle?: string
+  customTitle?: string,
+  siteName: string = 'Taleem Guru'
 ): string {
   if (customTitle) return customTitle;
 
   const base = ROUTE_SEO_REGISTRY[view] || ROUTE_SEO_REGISTRY.home;
-  if (!subFilter) return base.title;
+  if (!subFilter) {
+    return base.title
+      .replace(/TALEEM GURU/gi, siteName.toUpperCase())
+      .replace(/Taleem\s*Guru/gi, siteName)
+      .replace(/TaleemGuru/gi, siteName);
+  }
 
   const cleanFilter = subFilter.trim();
   switch (view) {
     case 'boards':
-      return `${cleanFilter} BISE Board - Model Papers, Syllabi & Past Papers | Taleem Guru`;
+      return `${cleanFilter} BISE Board - Model Papers, Syllabi & Past Papers | ${siteName}`;
     case 'classes':
-      return `${cleanFilter} Syllabus, Chapter MCQs & Solved Papers | Taleem Guru`;
+      return `${cleanFilter} Syllabus, Chapter MCQs & Solved Papers | ${siteName}`;
     case 'subjects':
-      return `${cleanFilter} Solved MCQs, Notes & Online Chapter Tests | Taleem Guru`;
+      return `${cleanFilter} Solved MCQs, Notes & Online Chapter Tests | ${siteName}`;
     case 'past-papers':
-      return `${cleanFilter} Solved Past Papers with Answer Keys | Taleem Guru`;
+      return `${cleanFilter} Solved Past Papers with Answer Keys | ${siteName}`;
     case 'notes':
-      return `${cleanFilter} Chapter Study Notes & Formula Sheets | Taleem Guru`;
+      return `${cleanFilter} Chapter Study Notes & Formula Sheets | ${siteName}`;
     case 'mcqs':
-      return `${cleanFilter} Chapter MCQs Bank with Solutions | Taleem Guru`;
+      return `${cleanFilter} Chapter MCQs Bank with Solutions | ${siteName}`;
     case 'entry-tests':
-      return `${cleanFilter} Syllabus Mocks & Past Papers | Taleem Guru`;
+      return `${cleanFilter} Syllabus Mocks & Past Papers | ${siteName}`;
     case 'search':
-      return `Search: "${cleanFilter}" - Educational Results | Taleem Guru`;
+      return `Search: "${cleanFilter}" - Educational Results | ${siteName}`;
     default:
-      return `${cleanFilter} - ${base.title}`;
+      return `${cleanFilter} - ${base.title
+        .replace(/TALEEM GURU/gi, siteName.toUpperCase())
+        .replace(/Taleem\s*Guru/gi, siteName)
+        .replace(/TaleemGuru/gi, siteName)}`;
   }
 }
 
@@ -359,29 +373,34 @@ export function buildDynamicTitle(
 export function buildDynamicDescription(
   view: ViewMode | string,
   subFilter?: string,
-  customDescription?: string
+  customDescription?: string,
+  siteName: string = 'Taleem Guru'
 ): string {
   if (customDescription) return customDescription;
 
   const base = ROUTE_SEO_REGISTRY[view] || ROUTE_SEO_REGISTRY.home;
-  if (!subFilter) return base.description;
+  if (!subFilter) {
+    return base.description
+      .replace(/Taleem\s*Guru/gi, siteName)
+      .replace(/TaleemGuru/gi, siteName);
+  }
 
   const cleanFilter = subFilter.trim();
   switch (view) {
     case 'boards':
-      return `Access verified past papers, chapter tests, model exams, and date sheet notices for ${cleanFilter} across all Matric & Inter grades on Taleem Guru.`;
+      return `Access verified past papers, chapter tests, model exams, and date sheet notices for ${cleanFilter} across all Matric & Inter grades on ${siteName}.`;
     case 'classes':
-      return `Complete curriculum preparation for ${cleanFilter} students in Pakistan. Chapter-wise MCQs, revision notes, and board past papers on Taleem Guru.`;
+      return `Complete curriculum preparation for ${cleanFilter} students in Pakistan. Chapter-wise MCQs, revision notes, and board past papers on ${siteName}.`;
     case 'subjects':
-      return `Comprehensive syllabus preparation for ${cleanFilter}. Practice chapter MCQs, download formula sheets, and take timed online assessments on Taleem Guru.`;
+      return `Comprehensive syllabus preparation for ${cleanFilter}. Practice chapter MCQs, download formula sheets, and take timed online assessments on ${siteName}.`;
     case 'past-papers':
-      return `Download 10-year past examination papers and answer keys for ${cleanFilter} with step-by-step verified solutions on Taleem Guru.`;
+      return `Download 10-year past examination papers and answer keys for ${cleanFilter} with step-by-step verified solutions on ${siteName}.`;
     case 'notes':
-      return `High-yield chapter notes, definitions, formula summaries, and solved short questions for ${cleanFilter} on Taleem Guru.`;
+      return `High-yield chapter notes, definitions, formula summaries, and solved short questions for ${cleanFilter} on ${siteName}.`;
     case 'mcqs':
-      return `Extensive collection of board-verified multiple choice questions for ${cleanFilter} with explanations on Taleem Guru.`;
+      return `Extensive collection of board-verified multiple choice questions for ${cleanFilter} with explanations on ${siteName}.`;
     default:
-      return `Educational resources, tests, past papers, and notes for ${cleanFilter} on Taleem Guru Pakistan.`;
+      return `Educational resources, tests, past papers, and notes for ${cleanFilter} on ${siteName} Pakistan.`;
   }
 }
 
@@ -395,6 +414,7 @@ export function generateSchemaGraph(options: {
   title: string;
   description: string;
   subFilter?: string;
+  siteName?: string;
   activeItem?: {
     id: string;
     title: string;
@@ -410,16 +430,17 @@ export function generateSchemaGraph(options: {
   } | null;
 }) {
   const { view, canonicalUrl, title, description, subFilter, activeItem } = options;
+  const siteName = options.siteName || 'Taleem Guru';
   const baseUrl = CANONICAL_PRODUCTION_DOMAIN;
 
   // 1. Authoritative EducationalOrganization (No fake reviews or ratings)
   const organizationNode = {
     '@type': 'EducationalOrganization',
     '@id': `${baseUrl}/#organization`,
-    name: 'Taleem Guru',
+    name: siteName,
     url: baseUrl,
     logo: `${baseUrl}/vite.svg`,
-    description: 'Pakistan’s Smart Online Test & Quiz Platform for BISE Boards, MDCAT, ECAT, CSS, and Matric/Inter Exam Preparation.',
+    description: `Pakistan’s Smart Online Test & Quiz Platform for BISE Boards, MDCAT, ECAT, CSS, and Matric/Inter Exam Preparation.`,
     slogan: 'Learn. Practice. Test. Improve.',
     educationalCredentialAwarded: 'Certificate of Merit & Assessment Performance Report',
     areaServed: {
@@ -441,7 +462,7 @@ export function generateSchemaGraph(options: {
     '@type': 'WebSite',
     '@id': `${baseUrl}/#website`,
     url: baseUrl,
-    name: 'Taleem Guru - Pakistan Online Tests & MCQs',
+    name: `${siteName} - Pakistan Online Tests & MCQs`,
     publisher: {
       '@id': `${baseUrl}/#organization`,
     },

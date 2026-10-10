@@ -2,7 +2,12 @@ import { jsPDF } from 'jspdf';
 import { MCQ, TestResult, StudyNote, PastPaper, Certificate } from '../types';
 import { TALEEMGURU_LOGO_BASE64 } from './logoBase64';
 
-export const BRAND_NAME = 'TaleemGuru.pk';
+export let BRAND_NAME = 'Taleem Guru';
+export function setBrandName(name: string) {
+  if (name && typeof name === 'string' && name.trim().length > 0) {
+    BRAND_NAME = name.trim();
+  }
+}
 export const BRAND_TAGLINE = 'Learn. Practice. Test. Improve.';
 export const BRAND_URL = 'https://taleemguru.pk';
 

@@ -1,5 +1,5 @@
 import { eq, desc, and, sql, ilike, inArray } from 'drizzle-orm';
-import { db } from './index';
+import { db } from './index.ts';
 import {
   mcqs,
   tests,
@@ -16,10 +16,10 @@ import {
   auditLogs,
   documents,
   contentVersions,
-} from './schema';
-import { saveAuditLogToDb } from './users';
-import type { MCQ, TestConfig, PastPaper, StudyNote } from '../types';
-import { MCQS_DATABASE, POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData';
+} from './schema.ts';
+import { saveAuditLogToDb } from './users.ts';
+import type { MCQ, TestConfig, PastPaper, StudyNote } from '../types.ts';
+import { POPULAR_TESTS, PAST_PAPERS_DATA, STUDY_NOTES_DATA } from '../data/mockData.ts';
 import {
   MASTER_PAST_PAPERS,
   MASTER_STUDY_NOTES,
@@ -27,7 +27,7 @@ import {
   ACADEMIC_CLASSES,
   ACADEMIC_SUBJECTS,
   ACADEMIC_CHAPTERS,
-} from '../data/educationalHierarchy';
+} from '../data/educationalHierarchy.ts';
 
 export interface MCQFilters {
   subject?: string;
@@ -439,7 +439,11 @@ export async function getTestByIdFromDb(id: string): Promise<TestConfig | null> 
   if (!db) return null;
   try {
     const testRows = await db.select().from(tests).where(eq(tests.id, id)).limit(1);
-    if (testRows.length === 0) return null;
+    if (testRows.length === 0) {
+      const fallback = POPULAR_TESTS.find((pt) => pt.id === id);
+      if (fallback) return fallback;
+      return null;
+    }
     const t = testRows[0];
 
     const junctionRows = await db
@@ -1282,14 +1286,6 @@ export async function seedInitialEducationalContent(): Promise<{ mcqsCount: numb
   let notesCount = 0;
 
   try {
-    // 1. Seed MCQs if empty
-    const existingMCQs = await db.select({ count: sql<number>`count(*)` }).from(mcqs);
-    const numMCQs = Number(existingMCQs[0]?.count || 0);
-    if (numMCQs === 0 && MCQS_DATABASE.length > 0) {
-      console.log(`[Database Seeder] Seeding ${MCQS_DATABASE.length} foundational MCQs into PostgreSQL...`);
-      mcqsCount = await bulkInsertMCQsInDb(MCQS_DATABASE, 'system-seeder');
-    }
-
     // 2. Seed Tests if empty
     const existingTests = await db.select({ count: sql<number>`count(*)` }).from(tests);
     const numTests = Number(existingTests[0]?.count || 0);

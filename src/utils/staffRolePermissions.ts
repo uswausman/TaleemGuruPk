@@ -36,6 +36,9 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-rose-200 dark:border-rose-900/50',
     allowedSections: [
       'dashboard',
+      'website-command-center',
+      'approvals',
+      'my-submissions',
       'staff',
       'students',
       'boards',
@@ -53,6 +56,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
       'certificates',
       'reports',
       'audit-logs',
+      'website-command-center',
       'settings',
       'bulk-import',
     ],
@@ -73,6 +77,9 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-purple-200 dark:border-purple-900/50',
     allowedSections: [
       'dashboard',
+      'website-command-center',
+      'approvals',
+      'my-submissions',
       'staff',
       'students',
       'boards',
@@ -90,6 +97,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
       'certificates',
       'reports',
       'audit-logs',
+      'website-command-center',
       'settings',
       'bulk-import',
     ],
@@ -110,6 +118,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-indigo-200 dark:border-indigo-900/50',
     allowedSections: [
       'dashboard',
+      'my-submissions',
       'students',
       'questions',
       'question-bank',
@@ -137,6 +146,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-blue-200 dark:border-blue-900/50',
     allowedSections: [
       'dashboard',
+      'my-submissions',
       'quizzes',
       'questions',
       'question-bank',
@@ -165,6 +175,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-emerald-200 dark:border-emerald-900/50',
     allowedSections: [
       'dashboard',
+      'my-submissions',
       'questions',
       'question-bank',
       'notes',
@@ -193,6 +204,7 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
     borderLight: 'border-amber-200 dark:border-amber-900/50',
     allowedSections: [
       'dashboard',
+      'my-submissions',
       'boards',
       'classes',
       'subjects',
@@ -266,10 +278,11 @@ export const ROLE_CAPABILITIES: Record<StaffRole, RoleCapability> = {
  */
 export function isSectionAllowedForRoles(section: AdminSection, roles: StaffRole[]): boolean {
   if (!roles || roles.length === 0) return section === 'dashboard';
+  const targetSection = (section as string) === 'site-settings' ? 'settings' : section;
   // If any role allows this section, grant access
   return roles.some((r) => {
     const cap = ROLE_CAPABILITIES[r] || ROLE_CAPABILITIES.Student;
-    return cap.allowedSections.includes(section);
+    return cap.allowedSections.includes(targetSection as AdminSection) || cap.allowedSections.includes(section);
   });
 }
 

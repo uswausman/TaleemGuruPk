@@ -126,6 +126,11 @@ export const staffAssignments = pgTable('staff_assignments', {
 export const boards = pgTable('boards', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
+  code: text('code'),
+  establishmentYear: integer('establishment_year'),
+  province: text('province'),
+  city: text('city'),
+  description: text('description'),
   status: text('status').default('Active').notNull(), // 'Active' | 'Inactive'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -141,23 +146,71 @@ export const classes = pgTable('classes', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Junction table for Many-to-Many Classes <-> Boards
+export const classBoards = pgTable('class_boards', {
+  id: serial('id').primaryKey(),
+  classId: integer('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
+  boardId: integer('board_id').references(() => boards.id, { onDelete: 'cascade' }).notNull(),
+});
+
 // Subjects
 export const subjects = pgTable('subjects', {
   id: serial('id').primaryKey(),
   classId: integer('class_id').references(() => classes.id).notNull(),
+  boardId: integer('board_id').references(() => boards.id),
   name: text('name').notNull(),
   status: text('status').default('Active').notNull(), // 'Active' | 'Inactive'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// Junction table for Many-to-Many Subjects <-> Boards
+export const subjectBoards = pgTable('subject_boards', {
+  id: serial('id').primaryKey(),
+  subjectId: integer('subject_id').references(() => subjects.id, { onDelete: 'cascade' }).notNull(),
+  boardId: integer('board_id').references(() => boards.id, { onDelete: 'cascade' }).notNull(),
+});
+
+// Junction table for Many-to-Many Subjects <-> Classes
+export const subjectClasses = pgTable('subject_classes', {
+  id: serial('id').primaryKey(),
+  subjectId: integer('subject_id').references(() => subjects.id, { onDelete: 'cascade' }).notNull(),
+  classId: integer('class_id').references(() => classes.id, { onDelete: 'cascade' }).notNull(),
+});
+
 // Chapters / Topics
 export const chapters = pgTable('chapters', {
   id: serial('id').primaryKey(),
   subjectId: integer('subject_id').references(() => subjects.id).notNull(),
+  classId: integer('class_id').references(() => classes.id),
   name: text('name').notNull(),
   status: text('status').default('Active').notNull(), // 'Active' | 'Inactive'
   draftStatus: text('draft_status').default('Draft').notNull(), // 'Draft' | 'Published'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Entry Test Categories (Parent Categories e.g. Armed Forces, Medical, Engineering, Civil Services)
+export const entryTestCategories = pgTable('entry_test_categories', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type'), // Optional legacy field
+  description: text('description'),
+  organizer: text('organizer'),
+  totalMarks: integer('total_marks'),
+  duration: text('duration'),
+  status: text('status').default('Active').notNull(), // 'Active' | 'Inactive'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Entry Test Subcategories (Subcategories under Parent Categories e.g. Armed Forces -> Army, Navy, Air Force)
+export const entryTestSubcategories = pgTable('entry_test_subcategories', {
+  id: serial('id').primaryKey(),
+  categoryId: integer('category_id').references(() => entryTestCategories.id).notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  status: text('status').default('Active').notNull(), // 'Active' | 'Inactive'
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -463,6 +516,92 @@ export const notifications = pgTable('notifications', {
   senderUid: text('sender_uid'),
   senderName: text('sender_name'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// 8. Site Settings Table for Centralized Administrative Platform Configuration
+export const siteSettings = pgTable('site_settings', {
+  id: serial('id').primaryKey(),
+  key: text('key').notNull().unique(),
+  category: text('category').notNull(),
+  value: text('value'),
+  isPublic: boolean('is_public').default(true).notNull(),
+  updatedBy: text('updated_by'),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Newsletter Subscribers
+export const newsletterSubscribers = pgTable('newsletter_subscribers', {
+  id: serial('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  status: text('status').default('active').notNull(), // 'active' | 'inactive'
+  subscribedAt: timestamp('subscribed_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Newsletter Campaigns/Tips
+export const newsletterCampaigns = pgTable('newsletter_campaigns', {
+  id: serial('id').primaryKey(),
+  subject: text('subject').notNull(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  ctaText: text('cta_text'),
+  ctaUrl: text('cta_url'),
+  status: text('status').default('draft').notNull(), // 'draft' | 'published' | 'scheduled'
+  scheduledAt: timestamp('scheduled_at'),
+  sentAt: timestamp('sent_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Newsletter Logs
+export const newsletterLogs = pgTable('newsletter_logs', {
+  id: serial('id').primaryKey(),
+  campaignId: integer('campaign_id').references(() => newsletterCampaigns.id),
+  subscriberId: integer('subscriber_id').references(() => newsletterSubscribers.id),
+  sentAt: timestamp('sent_at').defaultNow().notNull(),
+  status: text('status').notNull(), // 'sent' | 'failed'
+  providerMessageId: text('provider_message_id'),
+  error: text('error'),
+});
+
+// Content Change Requests for Approval Workflow
+export const contentChangeRequests = pgTable('content_change_requests', {
+  id: serial('id').primaryKey(),
+  entityType: text('entity_type').notNull(), // 'mcqs' | 'tests' | 'past_papers' | 'study_notes' | 'boards' | 'classes' | 'subjects' | 'chapters' | 'syllabus'
+  entityId: text('entity_id'), // null for CREATE actions
+  action: text('action').notNull(), // 'CREATE' | 'UPDATE' | 'DELETE'
+  submittedBy: text('submitted_by').notNull(), // User UID
+  status: text('status').default('PENDING').notNull(), // 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
+  proposedData: jsonb('proposed_data'), // JSON blob of changes
+  previousData: jsonb('previous_data'), // JSON blob of state before change
+  reviewComment: text('review_comment'),
+  reviewedBy: text('reviewed_by'),
+  reviewedAt: timestamp('reviewed_at'),
+  publishedAt: timestamp('published_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// Website Error Incidents for Persistent Control Center Monitoring
+export const websiteErrorIncidents = pgTable('website_error_incidents', {
+  id: text('id').primaryKey(), // unique identifier
+  severity: text('severity').notNull(), // 'CRITICAL' | 'ERROR' | 'WARN' | 'INFO'
+  category: text('category').notNull(), // 'API' | 'Database' | 'Authentication' | 'SEO' | '4xx' | '5xx' | 'Runtime'
+  route: text('route').notNull(),
+  method: text('method').default('GET').notNull(),
+  statusCode: integer('status_code').notNull(),
+  errorMessage: text('error_message').notNull(),
+  occurrenceCount: integer('occurrence_count').default(1).notNull(),
+  firstSeen: timestamp('first_seen').defaultNow().notNull(),
+  lastSeen: timestamp('last_seen').defaultNow().notNull(),
+  incidentStatus: text('incident_status').default('Open').notNull(), // 'Open' | 'Investigating' | 'Resolved'
+  fingerprint: text('fingerprint').notNull().unique(), // unique hash signature to prevent duplicates
+  investigationStartedAt: timestamp('investigation_started_at'),
+  investigationCompletedAt: timestamp('investigation_completed_at'),
+  resolvedAt: timestamp('resolved_at'),
+  resolvedBy: text('resolved_by'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // Relations

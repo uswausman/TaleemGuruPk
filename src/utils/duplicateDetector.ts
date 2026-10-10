@@ -1,5 +1,5 @@
 import { MCQ, TestConfig } from '../types';
-import { MCQS_DATABASE, POPULAR_TESTS } from '../data/mockData';
+import { POPULAR_TESTS } from '../data/mockData';
 
 /**
  * Normalizes text for comparison:
@@ -47,9 +47,6 @@ export function checkDuplicateMCQ(
   // 2. localStorage cached questions
   // 3. Built-in default database
   const questionsMap = new Map<string, MCQ>();
-
-  // Add built-in
-  MCQS_DATABASE.forEach((q) => questionsMap.set(q.id, q));
 
   // Add localStorage if available
   if (typeof window !== 'undefined') {

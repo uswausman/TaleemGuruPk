@@ -11,6 +11,7 @@ export interface BootstrapAdminConfig {
 
 export const DEFAULT_BOOTSTRAP_ADMINS: Record<string, BootstrapAdminConfig> = {
   'admin@taleemguru.pk': { name: 'Admin', roles: ['Admin'] },
+  'uswausman143@gmail.com': { name: 'Admin', roles: ['Admin'] },
 };
 
 export function getTrustedBootstrapAdmins(): Record<string, BootstrapAdminConfig> {

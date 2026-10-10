@@ -364,9 +364,9 @@ export function mapSupabaseUserToStudentProfile(
     board: metadata.board || 'BISE Lahore',
     classLevel: metadata.class_level || 'Class 10 (Matric Pt 2)',
     targetExam: metadata.target_exam || 'MDCAT / BISE Board Exam',
-    points: metadata.points || (isExplicitAdmin ? 9999 : 100),
-    streakDays: metadata.streak_days || 1,
-    testsTaken: metadata.tests_taken || 0,
+    points: metadata.points !== undefined ? metadata.points : 0,
+    streakDays: metadata.streak_days !== undefined ? metadata.streak_days : 0,
+    testsTaken: metadata.tests_taken !== undefined ? metadata.tests_taken : 0,
     savedQuestionIds: metadata.saved_question_ids || [],
     wrongQuestionIds: metadata.wrong_question_ids || [],
     certificates: metadata.certificates || [],
@@ -393,7 +393,7 @@ export function mapSupabaseUserToAdminUser(user: User | NormalizedAuthUser | any
     roles: ['Admin'],
     status: 'Active',
     testsCompleted: metadata.tests_taken || 0,
-    points: metadata.points || 9999,
+    points: metadata.points || 0,
     joinedDate: user.created_at ? new Date(user.created_at).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB'),
   };
 }
@@ -509,7 +509,7 @@ export async function getUserProfile(uid: string): Promise<StudentProfile | null
           if (res.ok) {
             const data = await res.json();
             if (data?.profile) {
-              const isAdmin = data.profile.role === 'Admin' || userEmail === 'admin@taleemguru.pk';
+              const isAdmin = data.profile.role === 'Admin';
               const safeName = data.profile.name === 'avatar-1' || !data.profile.name
                 ? (isAdmin ? 'Admin' : baseProfile.name)
                 : data.profile.name;

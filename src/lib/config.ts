@@ -14,11 +14,12 @@ export const ALLOWED_PRODUCTION_DOMAINS = [
 ];
 
 /**
- * Returns a standardized canonical URL on https://www.taleemguru.pk
+ * Returns a standardized canonical URL on https://www.taleemguru.pk or the configured base domain.
  * Strips all query parameters, trailing slashes (except root), and hash fragments.
  */
-export const getCanonicalUrl = (pathname = '/'): string => {
-  if (!pathname || pathname === '/') return `${CANONICAL_PRODUCTION_DOMAIN}/`;
+export const getCanonicalUrl = (pathname = '/', baseDomain = CANONICAL_PRODUCTION_DOMAIN): string => {
+  const base = (baseDomain || CANONICAL_PRODUCTION_DOMAIN).replace(/\/$/, '');
+  if (!pathname || pathname === '/') return `${base}/`;
   
   // Strip query parameters and hash fragments
   const cleanPath = pathname.split('?')[0].split('#')[0].trim();
@@ -27,7 +28,7 @@ export const getCanonicalUrl = (pathname = '/'): string => {
     ? normalized.slice(0, -1) 
     : normalized;
     
-  return `${CANONICAL_PRODUCTION_DOMAIN}${withoutTrailingSlash}`;
+  return `${base}${withoutTrailingSlash}`;
 };
 
 /**
