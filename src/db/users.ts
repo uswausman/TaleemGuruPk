@@ -660,13 +660,13 @@ export async function getTopLeaderboard(limitCount = 20) {
       console.warn(`[Leaderboard Query] Attempt ${attempts} failed:`, error);
       if (attempts >= maxAttempts) {
         console.error('Failed to get leaderboard after max attempts:', error);
-        throw new Error('Failed to load leaderboard', { cause: error });
+        return [];
       }
       // Wait before retrying (exponential backoff)
       await new Promise((resolve) => setTimeout(resolve, delayMs * attempts));
     }
   }
-  throw new Error('Failed to load leaderboard');
+  return [];
 }
 
 export async function toggleBookmarkInDb(userUid: string, questionId: string) {
