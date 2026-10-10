@@ -339,7 +339,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     view: 'admin-panel',
     adminTab: 'dashboard',
     isProtected: false,
-    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Admin Sign In',
   },
   '/admin-login': {
@@ -347,7 +347,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     view: 'admin-panel',
     adminTab: 'dashboard',
     isProtected: false,
-    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Admin Sign In',
   },
   '/admin': {
@@ -355,7 +355,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     view: 'admin-panel',
     adminTab: 'dashboard',
     isProtected: false,
-    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Admin Console',
   },
   '/admin-panel': {
@@ -363,7 +363,7 @@ export const ROUTE_DEFINITIONS: Record<string, RouteDefinition> = {
     view: 'admin-panel',
     adminTab: 'dashboard',
     isProtected: false,
-    allowedRoles: ['student', 'admin', 'teacher', 'editor'],
+    allowedRoles: ['admin', 'teacher', 'editor'],
     title: 'Admin Control Center',
   },
   '/admin/dashboard': {
@@ -849,8 +849,29 @@ export function evaluateAccess(
 ): RouteAuthResult {
   const route = resolveRoute(path);
 
-  // If public route, instantly authorized
+  // Determine user's normalized roles from verified profile if user is present
+  const rawRoles = (user && user.roles && user.roles.length > 0) ? user.roles : (user ? [(user as any).role || 'Student'] : []);
+  const normalizedRoles = rawRoles.map((r) => normalizeRole(r));
+
+  // If non-protected route (e.g., /admin login portal), unauthenticated visitors can access it.
+  // However, if a user IS authenticated, verify that their role is authorized for the route.
   if (!route.isProtected) {
+    if (isAuthenticated && user) {
+      const hasRolePermission = normalizedRoles.some((r) => route.allowedRoles.includes(r));
+      if (!hasRolePermission) {
+        const primaryRole = normalizedRoles.includes('admin')
+          ? 'admin'
+          : (normalizedRoles.includes('teacher') ? 'teacher' : (normalizedRoles.includes('editor') ? 'editor' : 'student'));
+        return {
+          isAllowed: false,
+          status: 'FORBIDDEN',
+          path: route.path,
+          requiredRoles: route.allowedRoles,
+          currentRole: primaryRole,
+          message: `Access Denied: You are signed in as [${rawRoles.join(', ')}], but this section requires ${route.allowedRoles.map(r => r.toUpperCase()).join(' or ')} privileges.`,
+        };
+      }
+    }
     return {
       isAllowed: true,
       status: 'AUTHORIZED',
@@ -871,10 +892,6 @@ export function evaluateAccess(
       message: `Authentication required to access ${route.title} (${route.path}). Please log in.`,
     };
   }
-
-  // Determine user's normalized roles from verified profile
-  const rawRoles = (user.roles && user.roles.length > 0) ? user.roles : [(user as any).role || 'Student'];
-  const normalizedRoles = rawRoles.map((r) => normalizeRole(r));
 
   // Check if ANY of the user's assigned roles is in the allowedRoles list
   const hasPermission = normalizedRoles.some((r) => route.allowedRoles.includes(r));
