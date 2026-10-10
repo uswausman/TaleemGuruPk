@@ -40,7 +40,7 @@ export const isSupabaseConfigured = Boolean(
 function initializeSupabaseClient(): SupabaseClient {
   if (!isSupabaseConfigured) {
     const configError = new Error(
-      'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables.'
+      'CONFIG_MISSING: Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables.'
     );
 
     return new Proxy({} as SupabaseClient, {
