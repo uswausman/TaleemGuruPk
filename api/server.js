@@ -8,488 +8,10 @@ var __export = (target, all) => {
 import fs6 from "fs";
 import path5 from "path";
 import express2 from "express";
-import { createServer as createViteServer } from "vite";
 
 // src/serverApp.ts
 import express from "express";
-import fs4 from "fs";
-
-// src/server/documentBranding.ts
-import crypto from "crypto";
-import fs from "fs";
-import path from "path";
-import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
-var TALEEM_TAGLINE = "Learn. Practice. Test. Improve.";
-var TALEEM_BRAND_FOOTER = "\xA9 TaleemGuru.pk | Learn. Practice. Test. Improve. | https://taleemguru.pk";
-var TALEEM_WEBSITE_URL = "https://taleemguru.pk";
-var TALEEM_BRAND_KEYWORD = "TaleemGuru.pk-Branded";
-var TALEEM_PRODUCER_STRING = "TaleemGuru.pk Document Branding Engine v2.0";
-var memoryCache = /* @__PURE__ */ new Map();
-var CACHE_DIR = path.join(process.cwd(), ".cache", "branded_docs");
-try {
-  if (!fs.existsSync(CACHE_DIR)) {
-    fs.mkdirSync(CACHE_DIR, { recursive: true });
-  }
-} catch {
-}
-function computeHash(data) {
-  return crypto.createHash("sha256").update(data).digest("hex");
-}
-function isPdfDocumentAlreadyBranded(pdfDoc) {
-  try {
-    const keywords = pdfDoc.getKeywords();
-    if (keywords && keywords.toLowerCase().includes("taleemguru")) {
-      return true;
-    }
-    const producer = pdfDoc.getProducer();
-    if (producer && producer.toLowerCase().includes("taleemguru")) {
-      return true;
-    }
-    const creator = pdfDoc.getCreator();
-    if (creator && creator.toLowerCase().includes("taleemguru")) {
-      return true;
-    }
-    const title = pdfDoc.getTitle();
-    if (title && title.toLowerCase().includes("taleemguru branded")) {
-      return true;
-    }
-  } catch (err) {
-    console.warn("[Branding] Error reading PDF metadata:", err);
-  }
-  return false;
-}
-async function brandPdfBuffer(inputBuffer, options) {
-  const hash = computeHash(inputBuffer);
-  const cached = memoryCache.get(hash);
-  if (cached && !options?.forceRebrand) {
-    return { buffer: cached.buffer, wasAlreadyBranded: true, pageCount: 0 };
-  }
-  const diskPath = path.join(CACHE_DIR, `${hash}.pdf`);
-  if (fs.existsSync(diskPath) && !options?.forceRebrand) {
-    try {
-      const diskBuffer = fs.readFileSync(diskPath);
-      memoryCache.set(hash, { buffer: diskBuffer, mimeType: "application/pdf", timestamp: Date.now() });
-      return { buffer: diskBuffer, wasAlreadyBranded: true, pageCount: 0 };
-    } catch {
-    }
-  }
-  let pdfDoc;
-  try {
-    pdfDoc = await PDFDocument.load(inputBuffer, { ignoreEncryption: true });
-  } catch (loadErr) {
-    throw new Error(`Failed to parse PDF document: ${loadErr.message || "Invalid PDF structure"}`);
-  }
-  if (!options?.forceRebrand && isPdfDocumentAlreadyBranded(pdfDoc)) {
-    memoryCache.set(hash, { buffer: inputBuffer, mimeType: "application/pdf", timestamp: Date.now() });
-    return { buffer: inputBuffer, wasAlreadyBranded: true, pageCount: pdfDoc.getPageCount() };
-  }
-  const pages = pdfDoc.getPages();
-  const pageCount = pages.length;
-  let helveticaFont;
-  let helveticaBoldFont;
-  try {
-    helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    helveticaBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  } catch {
-  }
-  let stampedPagesCount = 0;
-  for (let i = 0; i < pageCount; i++) {
-    const page = pages[i];
-    try {
-      const { width, height } = page.getSize();
-      const rotation = page.getRotation().angle;
-      if (helveticaFont && helveticaBoldFont) {
-        const fontSize = 7.5;
-        const brandText = TALEEM_BRAND_FOOTER;
-        const urlText = TALEEM_WEBSITE_URL;
-        const brandColor = rgb(0.06, 0.43, 0.27);
-        const urlColor = rgb(0.4, 0.45, 0.52);
-        const lineColor = rgb(0.86, 0.89, 0.92);
-        if (rotation === 0) {
-          const margin = 32;
-          const yBaseline = 12;
-          const yLine = 21;
-          page.drawLine({
-            start: { x: margin, y: yLine },
-            end: { x: width - margin, y: yLine },
-            thickness: 0.5,
-            color: lineColor
-          });
-          page.drawText(brandText, {
-            x: margin,
-            y: yBaseline,
-            size: fontSize,
-            font: helveticaBoldFont,
-            color: brandColor
-          });
-          const urlWidth = helveticaFont.widthOfTextAtSize(urlText, fontSize);
-          page.drawText(urlText, {
-            x: width - margin - urlWidth,
-            y: yBaseline,
-            size: fontSize,
-            font: helveticaFont,
-            color: urlColor
-          });
-        } else if (rotation === 90) {
-          const margin = 32;
-          const xBaseline = width - 12;
-          const xLine = width - 21;
-          page.drawLine({
-            start: { x: xLine, y: margin },
-            end: { x: xLine, y: height - margin },
-            thickness: 0.5,
-            color: lineColor
-          });
-          page.drawText(brandText, {
-            x: xBaseline,
-            y: margin,
-            size: fontSize,
-            font: helveticaBoldFont,
-            color: brandColor,
-            rotate: degrees(90)
-          });
-        } else {
-          page.drawText(brandText, {
-            x: 32,
-            y: 12,
-            size: fontSize,
-            font: helveticaBoldFont,
-            color: brandColor
-          });
-        }
-        stampedPagesCount++;
-      }
-    } catch (pageErr) {
-      console.warn(`[Branding] Failed to stamp page ${i + 1}:`, pageErr);
-    }
-  }
-  if (stampedPagesCount === 0) {
-    try {
-      const creditPage = pdfDoc.addPage([595.28, 841.89]);
-      const { width, height } = creditPage.getSize();
-      creditPage.drawRectangle({
-        x: 20,
-        y: 20,
-        width: width - 40,
-        height: height - 40,
-        borderColor: rgb(0.06, 0.43, 0.27),
-        borderWidth: 1.5,
-        color: rgb(0.98, 0.99, 0.98)
-      });
-      if (helveticaBoldFont && helveticaFont) {
-        creditPage.drawText("TALEEM GURU PAKISTAN", {
-          x: width / 2 - 120,
-          y: height - 100,
-          size: 20,
-          font: helveticaBoldFont,
-          color: rgb(0.06, 0.43, 0.27)
-        });
-        creditPage.drawText("Learn. Practice. Test. Improve.", {
-          x: width / 2 - 100,
-          y: height - 125,
-          size: 12,
-          font: helveticaBoldFont,
-          color: rgb(0.3, 0.35, 0.4)
-        });
-        creditPage.drawText(TALEEM_BRAND_FOOTER, {
-          x: width / 2 - 150,
-          y: height - 200,
-          size: 11,
-          font: helveticaBoldFont,
-          color: rgb(0.1, 0.15, 0.2)
-        });
-        creditPage.drawText(`Visit ${TALEEM_WEBSITE_URL} for past papers, practice tests, and study notes.`, {
-          x: width / 2 - 165,
-          y: height - 230,
-          size: 10,
-          font: helveticaFont,
-          color: rgb(0.4, 0.45, 0.5)
-        });
-      }
-    } catch (creditPageErr) {
-      console.warn("[Branding] Failed to append credit page:", creditPageErr);
-    }
-  }
-  try {
-    pdfDoc.setAuthor("TaleemGuru.pk");
-    pdfDoc.setSubject("Downloaded from TaleemGuru.pk");
-    pdfDoc.setProducer(TALEEM_PRODUCER_STRING);
-    pdfDoc.setCreator(`${TALEEM_BRAND_FOOTER} \u2022 ${TALEEM_WEBSITE_URL}`);
-    const currentKeywords = pdfDoc.getKeywords() || "";
-    pdfDoc.setKeywords([TALEEM_BRAND_KEYWORD, "TaleemGuru.pk", "Academic Study Material", currentKeywords].filter(Boolean));
-    pdfDoc.setModificationDate(/* @__PURE__ */ new Date());
-  } catch (metaErr) {
-    console.warn("[Branding] Could not update PDF metadata:", metaErr);
-  }
-  const brandedBytes = await pdfDoc.save();
-  const outputBuffer = Buffer.from(brandedBytes);
-  memoryCache.set(hash, { buffer: outputBuffer, mimeType: "application/pdf", timestamp: Date.now() });
-  try {
-    fs.writeFileSync(diskPath, outputBuffer);
-  } catch {
-  }
-  return {
-    buffer: outputBuffer,
-    wasAlreadyBranded: false,
-    pageCount
-  };
-}
-function brandTextContent(content, title) {
-  if (content.includes("TaleemGuru.pk") && content.includes(TALEEM_TAGLINE)) {
-    return content;
-  }
-  const header = `================================================================================
-                    \u2605 TALEEM GURU PAKISTAN \u2605
-                 Learn. Practice. Test. Improve.
-                      ${TALEEM_WEBSITE_URL}
-================================================================================
-DOCUMENT: ${title || "Academic Study Material"}
-SOURCE: ${TALEEM_BRAND_FOOTER}
-WEBSITE: ${TALEEM_WEBSITE_URL}
-COPYRIGHT: \xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} TaleemGuru.pk. All rights reserved.
-================================================================================
-
-`;
-  const footer = `
-
-================================================================================
-${TALEEM_BRAND_FOOTER}
-Online testing, past papers, notes & exam preparation: ${TALEEM_WEBSITE_URL}
-================================================================================`;
-  return `${header}${content.trim()}${footer}`;
-}
-
-// src/server/documentSecurity.ts
-import dns from "dns";
-import path2 from "path";
-import fs2 from "fs";
-var MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
-var FETCH_TIMEOUT_MS = 8e3;
-var MAX_REDIRECT_HOPS = 3;
-function isPrivateOrReservedIPv4(ip) {
-  const parts = ip.split(".").map((p) => parseInt(p, 10));
-  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
-    return true;
-  }
-  const [a, b, c, d] = parts;
-  if (a === 0) return true;
-  if (a === 10) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 0 && c === 0) return true;
-  if (a === 192 && b === 0 && c === 2) return true;
-  if (a === 192 && b === 88 && c === 99) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 198 && (b === 18 || b === 19)) return true;
-  if (a === 198 && b === 51 && c === 100) return true;
-  if (a === 203 && b === 0 && c === 113) return true;
-  if (a >= 224 && a <= 239) return true;
-  if (a >= 240) return true;
-  if (a === 255 && b === 255 && c === 255 && d === 255) return true;
-  return false;
-}
-function isPrivateOrReservedIPv6(ip) {
-  const cleanIp = ip.toLowerCase().trim();
-  if (cleanIp === "::1" || cleanIp === "0:0:0:0:0:0:0:1") return true;
-  if (cleanIp === "::" || cleanIp === "0:0:0:0:0:0:0:0") return true;
-  if (cleanIp.startsWith("::ffff:")) {
-    const mappedIpv4 = cleanIp.replace("::ffff:", "");
-    if (mappedIpv4.includes(".")) {
-      return isPrivateOrReservedIPv4(mappedIpv4);
-    }
-  }
-  if (cleanIp.startsWith("fc") || cleanIp.startsWith("fd")) return true;
-  if (cleanIp.startsWith("fe8") || cleanIp.startsWith("fe9") || cleanIp.startsWith("fea") || cleanIp.startsWith("feb")) {
-    return true;
-  }
-  if (cleanIp.startsWith("ff")) return true;
-  return false;
-}
-function isDisallowedIp(ip) {
-  if (ip.includes(":")) {
-    return isPrivateOrReservedIPv6(ip);
-  }
-  return isPrivateOrReservedIPv4(ip);
-}
-async function validateRemoteUrl(rawUrl) {
-  try {
-    if (!rawUrl || typeof rawUrl !== "string" || rawUrl.trim().length === 0) {
-      return { valid: false, error: "URL is required" };
-    }
-    if (rawUrl.length > 2048) {
-      return { valid: false, error: "URL exceeds maximum permitted length" };
-    }
-    if (/[\x00-\x1F\x7F]/.test(rawUrl)) {
-      return { valid: false, error: "URL contains illegal control characters" };
-    }
-    let parsed;
-    try {
-      parsed = new URL(rawUrl);
-    } catch {
-      return { valid: false, error: "Malformed URL" };
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return { valid: false, error: "Disallowed URL scheme. Only HTTP and HTTPS are permitted." };
-    }
-    const hostname = parsed.hostname.toLowerCase().trim();
-    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".lan") || hostname.endsWith(".home") || hostname.endsWith(".corp") || hostname.endsWith(".test") || hostname.endsWith(".invalid")) {
-      return { valid: false, error: "Access to internal hostnames is prohibited." };
-    }
-    const cleanHost = hostname.replace(/^\[/, "").replace(/\]$/, "");
-    if (cleanHost.split(".").length === 4 && cleanHost.split(".").every((p) => !isNaN(Number(p)))) {
-      if (isDisallowedIp(cleanHost)) {
-        return { valid: false, error: "Access to private or loopback IP ranges is prohibited." };
-      }
-    } else if (cleanHost.includes(":")) {
-      if (isDisallowedIp(cleanHost)) {
-        return { valid: false, error: "Access to private or loopback IPv6 ranges is prohibited." };
-      }
-    }
-    try {
-      const records = await dns.promises.lookup(hostname, { all: true });
-      if (!records || records.length === 0) {
-        return { valid: false, error: "Could not resolve domain name" };
-      }
-      for (const record of records) {
-        if (isDisallowedIp(record.address)) {
-          return {
-            valid: false,
-            error: "Domain resolves to a prohibited internal or private network address."
-          };
-        }
-      }
-    } catch (dnsErr) {
-      return { valid: false, error: "Domain resolution failed" };
-    }
-    return { valid: true, url: parsed };
-  } catch (err) {
-    return { valid: false, error: "URL validation error" };
-  }
-}
-async function safeFetchRemoteDocument(targetUrl, options = {}) {
-  const maxBytes = options.maxBytes || MAX_DOCUMENT_SIZE_BYTES;
-  const timeoutMs = options.timeoutMs || FETCH_TIMEOUT_MS;
-  let currentUrl = targetUrl;
-  let hops = 0;
-  while (hops <= MAX_REDIRECT_HOPS) {
-    const validation = await validateRemoteUrl(currentUrl);
-    if (!validation.valid || !validation.url) {
-      throw new Error(validation.error || "Invalid or prohibited destination URL");
-    }
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(currentUrl, {
-        method: "GET",
-        headers: {
-          "User-Agent": "TaleemGuru-DocumentBranding/2.0 (+https://taleemguru.pk)",
-          "Accept": "application/pdf, text/plain, text/markdown, application/octet-stream"
-        },
-        redirect: "manual",
-        // Manual redirect inspection to prevent redirect-to-private SSRF
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if ([301, 302, 303, 307, 308].includes(response.status)) {
-        const locationHeader = response.headers.get("location");
-        if (!locationHeader) {
-          throw new Error("Redirect response missing Location header");
-        }
-        const nextUrl = new URL(locationHeader, currentUrl).toString();
-        currentUrl = nextUrl;
-        hops++;
-        continue;
-      }
-      if (!response.ok) {
-        throw new Error(`Remote server responded with status HTTP ${response.status}`);
-      }
-      const contentLengthHeader = response.headers.get("content-length");
-      if (contentLengthHeader) {
-        const contentLength = parseInt(contentLengthHeader, 10);
-        if (!isNaN(contentLength) && contentLength > maxBytes) {
-          throw new Error(`Document exceeds maximum size limit of ${Math.round(maxBytes / (1024 * 1024))}MB`);
-        }
-      }
-      const contentType = response.headers.get("content-type") || "application/pdf";
-      const arrayBuffer = await response.arrayBuffer();
-      if (arrayBuffer.byteLength > maxBytes) {
-        throw new Error(`Downloaded document exceeds maximum size limit of ${Math.round(maxBytes / (1024 * 1024))}MB`);
-      }
-      return {
-        buffer: Buffer.from(arrayBuffer),
-        contentType
-      };
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        throw new Error("Remote document fetch timed out");
-      }
-      throw err;
-    }
-  }
-  throw new Error("Too many redirects while retrieving remote document");
-}
-function resolveSafeLocalFilePath(relativePath, baseDir) {
-  try {
-    if (!relativePath || typeof relativePath !== "string") {
-      return { valid: false, error: "Path parameter is required" };
-    }
-    if (relativePath.includes("\0") || /%00/i.test(relativePath)) {
-      return { valid: false, error: "Invalid path: null byte detected" };
-    }
-    if (/%2e%2e/i.test(relativePath) || /%252e%252e/i.test(relativePath) || /%2f/i.test(relativePath)) {
-      return { valid: false, error: "Invalid path: encoded traversal detected" };
-    }
-    const cleanRelative = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
-    if (cleanRelative.includes("..")) {
-      return { valid: false, error: "Invalid path: directory traversal prohibited" };
-    }
-    const publicRoot = path2.resolve(baseDir || path2.join(process.cwd(), "public"));
-    const resolvedPath = path2.resolve(publicRoot, cleanRelative);
-    if (!resolvedPath.startsWith(publicRoot + path2.sep) && resolvedPath !== publicRoot) {
-      return { valid: false, error: "Access denied: path escapes designated directory" };
-    }
-    const normalizedTarget = resolvedPath.toLowerCase();
-    if (normalizedTarget.includes(".env") || normalizedTarget.includes(".git") || normalizedTarget.includes("node_modules") || normalizedTarget.includes("server.ts") || normalizedTarget.includes("src" + path2.sep)) {
-      return { valid: false, error: "Access denied: sensitive system file requested" };
-    }
-    if (!fs2.existsSync(resolvedPath)) {
-      return { valid: false, error: "File not found" };
-    }
-    const stat = fs2.statSync(resolvedPath);
-    if (!stat.isFile()) {
-      return { valid: false, error: "Target path is not a file" };
-    }
-    if (stat.size > MAX_DOCUMENT_SIZE_BYTES) {
-      return { valid: false, error: "File exceeds maximum permitted size" };
-    }
-    return { valid: true, absolutePath: resolvedPath };
-  } catch (err) {
-    return { valid: false, error: "Path resolution error" };
-  }
-}
-function sanitizeDownloadFilename(rawFilename, fallback = "TaleemGuru_Document.pdf") {
-  if (!rawFilename || typeof rawFilename !== "string") return fallback;
-  let clean = rawFilename.replace(/[/\\?%*:|"<>]/g, "_").replace(/[\x00-\x1F\x7F]/g, "");
-  clean = clean.replace(/\.{2,}/g, ".");
-  clean = clean.replace(/_+/g, "_").trim();
-  clean = clean.replace(/^\.+/, "");
-  if (clean.length === 0 || clean === "." || clean === "..") {
-    return fallback;
-  }
-  if (clean.length > 120) {
-    const ext = path2.extname(clean);
-    clean = clean.substring(0, 110) + (ext || ".pdf");
-  }
-  return clean;
-}
-
-// src/server/documentStorage.ts
-import fs3 from "fs";
-import path3 from "path";
-import crypto2 from "crypto";
+import { randomUUID } from "node:crypto";
 
 // src/db/index.ts
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -1033,22 +555,94 @@ var testQuestionsRelations = relations(testQuestions, ({ one }) => ({
 }));
 
 // src/db/index.ts
+function sanitizeSupabaseConnectionString(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("pooler.supabase.com")) {
+      let projectRef = "gshwabwmhzxbxbetqgcp";
+      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+      if (supabaseUrl) {
+        try {
+          const sHost = new URL(supabaseUrl).hostname;
+          projectRef = sHost.split(".")[0] || projectRef;
+        } catch (e) {
+        }
+      }
+      if (parsed.username === "postgres" && projectRef && !parsed.username.includes(".")) {
+        parsed.username = `postgres.${projectRef}`;
+      }
+      if (parsed.port === "5432" || !parsed.port) {
+        parsed.port = "6543";
+      }
+      return parsed.toString();
+    }
+  } catch (e) {
+  }
+  return urlStr;
+}
 function resolveDatabaseConnectionString() {
+  const isVercel = process.env.VERCEL === "1" || process.env.VERCEL_ENV !== void 0;
+  const isProd = process.env.NODE_ENV === "production" || process.env.VERCEL_ENV === "production";
+  const supabaseCandidates = [
+    { name: "SUPABASE_DATABASE_URL", val: process.env.SUPABASE_DATABASE_URL },
+    { name: "SUPABASE_DB_URL", val: process.env.SUPABASE_DB_URL }
+  ];
+  for (const item of supabaseCandidates) {
+    if (item.val && item.val.trim().length > 0) {
+      const sanitized = sanitizeSupabaseConnectionString(item.val.trim());
+      return { url: sanitized, selectedEnvVar: item.name };
+    }
+  }
   const candidates = [
-    process.env.DATABASE_URL,
-    process.env.POSTGRES_URL,
-    process.env.POSTGRES_PRISMA_URL,
-    process.env.POSTGRES_URL_NON_POOLING,
-    process.env.SUPABASE_DATABASE_URL,
-    process.env.SUPABASE_DB_URL,
-    process.env.PG_CONNECTION_STRING
+    { name: "DATABASE_URL", val: process.env.DATABASE_URL },
+    { name: "POSTGRES_URL", val: process.env.POSTGRES_URL },
+    { name: "POSTGRES_PRISMA_URL", val: process.env.POSTGRES_PRISMA_URL },
+    { name: "POSTGRES_URL_NON_POOLING", val: process.env.POSTGRES_URL_NON_POOLING },
+    { name: "PG_CONNECTION_STRING", val: process.env.PG_CONNECTION_STRING }
   ];
   for (const candidate of candidates) {
-    if (candidate && typeof candidate === "string" && candidate.trim().length > 0) {
-      return candidate.trim();
+    if (candidate.val && typeof candidate.val === "string" && candidate.val.trim().length > 0) {
+      const rawUrl = candidate.val.trim();
+      if (isVercel || isProd) {
+        try {
+          const host = new URL(rawUrl).host.toLowerCase();
+          if (host.includes("supabase")) {
+            const sanitized2 = sanitizeSupabaseConnectionString(rawUrl);
+            return { url: sanitized2, selectedEnvVar: candidate.name };
+          } else {
+            console.warn(`[Database] WARNING: Skipping non-Supabase database candidate ${candidate.name} (host: ${host}) in production to prevent silent override of authoritative Supabase database.`);
+            continue;
+          }
+        } catch (e) {
+          if (rawUrl.toLowerCase().includes("supabase")) {
+            const sanitized2 = sanitizeSupabaseConnectionString(rawUrl);
+            return { url: sanitized2, selectedEnvVar: candidate.name };
+          } else {
+            console.warn(`[Database] WARNING: Skipping unparseable non-Supabase candidate ${candidate.name} in production.`);
+            continue;
+          }
+        }
+      }
+      const sanitized = sanitizeSupabaseConnectionString(rawUrl);
+      return { url: sanitized, selectedEnvVar: candidate.name };
     }
   }
   return void 0;
+}
+function redactConnectionString(url) {
+  if (!url) return "none";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//***:***@${parsed.host}${parsed.pathname}`;
+  } catch (e) {
+    let cleaned = url.replace(/postgres(?:ql)?:\/\/([^:]+):([^@]+)@/gi, "postgres://***:***@");
+    const qIndex = cleaned.indexOf("?");
+    if (qIndex !== -1) {
+      cleaned = cleaned.substring(0, qIndex);
+    }
+    return cleaned;
+  }
 }
 function isLocalHost(host) {
   if (!host) return true;
@@ -1061,6 +655,7 @@ var createPool = () => {
       const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === "1" || process.env.VERCEL_ENV === "production";
       if (process.env.SQL_HOST) {
         const isUnixSocket = process.env.SQL_HOST.startsWith("/");
+        console.info(`[Database] Initializing connection pool with SQL_HOST: ${process.env.SQL_HOST}`);
         global._postgresPool = new Pool({
           host: process.env.SQL_HOST,
           user: process.env.SQL_USER,
@@ -1072,18 +667,23 @@ var createPool = () => {
           connectionTimeoutMillis: 15e3
         });
       } else {
-        const connectionString = resolveDatabaseConnectionString();
-        if (connectionString) {
+        const resolved = resolveDatabaseConnectionString();
+        const isVercel = process.env.VERCEL === "1" || process.env.VERCEL_ENV !== void 0;
+        if (resolved && resolved.url) {
+          const connectionString = resolved.url;
           const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
           const hasSslDisabled = connectionString.includes("sslmode=disable") || process.env.SQL_SSL === "false";
+          const redacted = redactConnectionString(connectionString);
+          console.info(`[Database] Initializing connection pool via ${resolved.selectedEnvVar}: ${redacted}`);
           global._postgresPool = new Pool({
             connectionString,
             ssl: isLocal || hasSslDisabled ? false : { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 1e4,
             connectionTimeoutMillis: 15e3
           });
         } else if (process.env.POSTGRES_HOST && !isLocalHost(process.env.POSTGRES_HOST)) {
+          console.info(`[Database] Initializing connection pool with POSTGRES_HOST: ${process.env.POSTGRES_HOST}`);
           global._postgresPool = new Pool({
             host: process.env.POSTGRES_HOST,
             user: process.env.POSTGRES_USER,
@@ -1091,11 +691,12 @@ var createPool = () => {
             database: process.env.POSTGRES_DATABASE,
             port: process.env.POSTGRES_PORT ? parseInt(process.env.POSTGRES_PORT, 10) : 5432,
             ssl: { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 1e4,
             connectionTimeoutMillis: 15e3
           });
         } else if (process.env.PGHOST && !isLocalHost(process.env.PGHOST)) {
+          console.info(`[Database] Initializing connection pool with PGHOST: ${process.env.PGHOST}`);
           global._postgresPool = new Pool({
             host: process.env.PGHOST,
             user: process.env.PGUSER,
@@ -1103,7 +704,7 @@ var createPool = () => {
             database: process.env.PGDATABASE,
             port: process.env.PGPORT ? parseInt(process.env.PGPORT, 10) : 5432,
             ssl: process.env.PGSSLMODE === "disable" ? false : { rejectUnauthorized: false },
-            max: 10,
+            max: isVercel ? 2 : 10,
             idleTimeoutMillis: 1e4,
             connectionTimeoutMillis: 15e3
           });
@@ -1142,11 +743,8 @@ var createPool = () => {
       }
       global._postgresPool.on("error", (err) => {
         const msg = err?.message || "";
-        if (msg.includes("Connection terminated unexpectedly") || msg.includes("idle")) {
-          console.info("PostgreSQL idle client connection terminated (expected and managed in serverless/idle states).");
-        } else {
-          console.error("Unexpected error on idle SQL pool client:", err);
-        }
+        console.warn("[Database] Pool client error encountered:", msg);
+        global._postgresPool = void 0;
       });
     } catch (outerErr) {
       console.error("Fatal synchronous error initializing database pool:", outerErr);
@@ -1172,10 +770,509 @@ var createPool = () => {
   }
   return global._postgresPool;
 };
-var pool = createPool();
-var db = drizzle(pool, { schema: schema_exports });
+function getDb() {
+  const currentPool = createPool();
+  if (!global._drizzleDb || global._drizzlePoolRef !== currentPool) {
+    global._drizzleDb = drizzle(currentPool, { schema: schema_exports });
+    global._drizzlePoolRef = currentPool;
+    console.info("[DB_POOL_DIAGNOSTIC]", {
+      poolCreated: Boolean(currentPool),
+      poolReused: false,
+      poolReplacement: true
+    });
+  }
+  return global._drizzleDb;
+}
+var db = new Proxy({}, {
+  get(_target, prop, receiver) {
+    const instance = getDb();
+    const value = Reflect.get(instance, prop, receiver);
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  }
+});
+
+// src/serverApp.ts
+import fs4 from "fs";
+
+// src/server/documentBranding.ts
+import crypto from "crypto";
+import fs from "fs";
+import path from "path";
+import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
+var TALEEM_TAGLINE = "Learn. Practice. Test. Improve.";
+var TALEEM_BRAND_FOOTER = "\xA9 TaleemGuru.pk | Learn. Practice. Test. Improve. | https://taleemguru.pk";
+var TALEEM_WEBSITE_URL = "https://taleemguru.pk";
+var TALEEM_BRAND_KEYWORD = "TaleemGuru.pk-Branded";
+var TALEEM_PRODUCER_STRING = "TaleemGuru.pk Document Branding Engine v2.0";
+var memoryCache = /* @__PURE__ */ new Map();
+var CACHE_DIR = path.join(process.cwd(), ".cache", "branded_docs");
+try {
+  if (!fs.existsSync(CACHE_DIR)) {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+  }
+} catch {
+}
+function computeHash(data) {
+  return crypto.createHash("sha256").update(data).digest("hex");
+}
+function isPdfDocumentAlreadyBranded(pdfDoc) {
+  try {
+    const keywords = pdfDoc.getKeywords();
+    if (keywords && keywords.toLowerCase().includes("taleemguru")) {
+      return true;
+    }
+    const producer = pdfDoc.getProducer();
+    if (producer && producer.toLowerCase().includes("taleemguru")) {
+      return true;
+    }
+    const creator = pdfDoc.getCreator();
+    if (creator && creator.toLowerCase().includes("taleemguru")) {
+      return true;
+    }
+    const title = pdfDoc.getTitle();
+    if (title && title.toLowerCase().includes("taleemguru branded")) {
+      return true;
+    }
+  } catch (err) {
+    console.warn("[Branding] Error reading PDF metadata:", err);
+  }
+  return false;
+}
+async function brandPdfBuffer(inputBuffer, options) {
+  const hash = computeHash(inputBuffer);
+  const cached = memoryCache.get(hash);
+  if (cached && !options?.forceRebrand) {
+    return { buffer: cached.buffer, wasAlreadyBranded: true, pageCount: 0 };
+  }
+  const diskPath = path.join(CACHE_DIR, `${hash}.pdf`);
+  if (fs.existsSync(diskPath) && !options?.forceRebrand) {
+    try {
+      const diskBuffer = fs.readFileSync(diskPath);
+      memoryCache.set(hash, { buffer: diskBuffer, mimeType: "application/pdf", timestamp: Date.now() });
+      return { buffer: diskBuffer, wasAlreadyBranded: true, pageCount: 0 };
+    } catch {
+    }
+  }
+  let pdfDoc;
+  try {
+    pdfDoc = await PDFDocument.load(inputBuffer, { ignoreEncryption: true });
+  } catch (loadErr) {
+    throw new Error(`Failed to parse PDF document: ${loadErr.message || "Invalid PDF structure"}`);
+  }
+  if (!options?.forceRebrand && isPdfDocumentAlreadyBranded(pdfDoc)) {
+    memoryCache.set(hash, { buffer: inputBuffer, mimeType: "application/pdf", timestamp: Date.now() });
+    return { buffer: inputBuffer, wasAlreadyBranded: true, pageCount: pdfDoc.getPageCount() };
+  }
+  const pages = pdfDoc.getPages();
+  const pageCount = pages.length;
+  let helveticaFont;
+  let helveticaBoldFont;
+  try {
+    helveticaFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    helveticaBoldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  } catch {
+  }
+  let stampedPagesCount = 0;
+  for (let i = 0; i < pageCount; i++) {
+    const page = pages[i];
+    try {
+      const { width, height } = page.getSize();
+      const rotation = page.getRotation().angle;
+      if (helveticaFont && helveticaBoldFont) {
+        const fontSize = 7.5;
+        const brandText = TALEEM_BRAND_FOOTER;
+        const urlText = TALEEM_WEBSITE_URL;
+        const brandColor = rgb(0.06, 0.43, 0.27);
+        const urlColor = rgb(0.4, 0.45, 0.52);
+        const lineColor = rgb(0.86, 0.89, 0.92);
+        if (rotation === 0) {
+          const margin = 32;
+          const yBaseline = 12;
+          const yLine = 21;
+          page.drawLine({
+            start: { x: margin, y: yLine },
+            end: { x: width - margin, y: yLine },
+            thickness: 0.5,
+            color: lineColor
+          });
+          page.drawText(brandText, {
+            x: margin,
+            y: yBaseline,
+            size: fontSize,
+            font: helveticaBoldFont,
+            color: brandColor
+          });
+          const urlWidth = helveticaFont.widthOfTextAtSize(urlText, fontSize);
+          page.drawText(urlText, {
+            x: width - margin - urlWidth,
+            y: yBaseline,
+            size: fontSize,
+            font: helveticaFont,
+            color: urlColor
+          });
+        } else if (rotation === 90) {
+          const margin = 32;
+          const xBaseline = width - 12;
+          const xLine = width - 21;
+          page.drawLine({
+            start: { x: xLine, y: margin },
+            end: { x: xLine, y: height - margin },
+            thickness: 0.5,
+            color: lineColor
+          });
+          page.drawText(brandText, {
+            x: xBaseline,
+            y: margin,
+            size: fontSize,
+            font: helveticaBoldFont,
+            color: brandColor,
+            rotate: degrees(90)
+          });
+        } else {
+          page.drawText(brandText, {
+            x: 32,
+            y: 12,
+            size: fontSize,
+            font: helveticaBoldFont,
+            color: brandColor
+          });
+        }
+        stampedPagesCount++;
+      }
+    } catch (pageErr) {
+      console.warn(`[Branding] Failed to stamp page ${i + 1}:`, pageErr);
+    }
+  }
+  if (stampedPagesCount === 0) {
+    try {
+      const creditPage = pdfDoc.addPage([595.28, 841.89]);
+      const { width, height } = creditPage.getSize();
+      creditPage.drawRectangle({
+        x: 20,
+        y: 20,
+        width: width - 40,
+        height: height - 40,
+        borderColor: rgb(0.06, 0.43, 0.27),
+        borderWidth: 1.5,
+        color: rgb(0.98, 0.99, 0.98)
+      });
+      if (helveticaBoldFont && helveticaFont) {
+        creditPage.drawText("TALEEM GURU PAKISTAN", {
+          x: width / 2 - 120,
+          y: height - 100,
+          size: 20,
+          font: helveticaBoldFont,
+          color: rgb(0.06, 0.43, 0.27)
+        });
+        creditPage.drawText("Learn. Practice. Test. Improve.", {
+          x: width / 2 - 100,
+          y: height - 125,
+          size: 12,
+          font: helveticaBoldFont,
+          color: rgb(0.3, 0.35, 0.4)
+        });
+        creditPage.drawText(TALEEM_BRAND_FOOTER, {
+          x: width / 2 - 150,
+          y: height - 200,
+          size: 11,
+          font: helveticaBoldFont,
+          color: rgb(0.1, 0.15, 0.2)
+        });
+        creditPage.drawText(`Visit ${TALEEM_WEBSITE_URL} for past papers, practice tests, and study notes.`, {
+          x: width / 2 - 165,
+          y: height - 230,
+          size: 10,
+          font: helveticaFont,
+          color: rgb(0.4, 0.45, 0.5)
+        });
+      }
+    } catch (creditPageErr) {
+      console.warn("[Branding] Failed to append credit page:", creditPageErr);
+    }
+  }
+  try {
+    pdfDoc.setAuthor("TaleemGuru.pk");
+    pdfDoc.setSubject("Downloaded from TaleemGuru.pk");
+    pdfDoc.setProducer(TALEEM_PRODUCER_STRING);
+    pdfDoc.setCreator(`${TALEEM_BRAND_FOOTER} \u2022 ${TALEEM_WEBSITE_URL}`);
+    const currentKeywords = pdfDoc.getKeywords() || "";
+    pdfDoc.setKeywords([TALEEM_BRAND_KEYWORD, "TaleemGuru.pk", "Academic Study Material", currentKeywords].filter(Boolean));
+    pdfDoc.setModificationDate(/* @__PURE__ */ new Date());
+  } catch (metaErr) {
+    console.warn("[Branding] Could not update PDF metadata:", metaErr);
+  }
+  const brandedBytes = await pdfDoc.save();
+  const outputBuffer = Buffer.from(brandedBytes);
+  memoryCache.set(hash, { buffer: outputBuffer, mimeType: "application/pdf", timestamp: Date.now() });
+  try {
+    fs.writeFileSync(diskPath, outputBuffer);
+  } catch {
+  }
+  return {
+    buffer: outputBuffer,
+    wasAlreadyBranded: false,
+    pageCount
+  };
+}
+function brandTextContent(content, title) {
+  if (content.includes("TaleemGuru.pk") && content.includes(TALEEM_TAGLINE)) {
+    return content;
+  }
+  const header = `================================================================================
+                    \u2605 TALEEM GURU PAKISTAN \u2605
+                 Learn. Practice. Test. Improve.
+                      ${TALEEM_WEBSITE_URL}
+================================================================================
+DOCUMENT: ${title || "Academic Study Material"}
+SOURCE: ${TALEEM_BRAND_FOOTER}
+WEBSITE: ${TALEEM_WEBSITE_URL}
+COPYRIGHT: \xA9 ${(/* @__PURE__ */ new Date()).getFullYear()} TaleemGuru.pk. All rights reserved.
+================================================================================
+
+`;
+  const footer = `
+
+================================================================================
+${TALEEM_BRAND_FOOTER}
+Online testing, past papers, notes & exam preparation: ${TALEEM_WEBSITE_URL}
+================================================================================`;
+  return `${header}${content.trim()}${footer}`;
+}
+
+// src/server/documentSecurity.ts
+import dns from "dns";
+import path2 from "path";
+import fs2 from "fs";
+var MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
+var FETCH_TIMEOUT_MS = 8e3;
+var MAX_REDIRECT_HOPS = 3;
+function isPrivateOrReservedIPv4(ip) {
+  const parts = ip.split(".").map((p) => parseInt(p, 10));
+  if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
+    return true;
+  }
+  const [a, b, c, d] = parts;
+  if (a === 0) return true;
+  if (a === 10) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 0 && c === 0) return true;
+  if (a === 192 && b === 0 && c === 2) return true;
+  if (a === 192 && b === 88 && c === 99) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
+  if (a >= 224 && a <= 239) return true;
+  if (a >= 240) return true;
+  if (a === 255 && b === 255 && c === 255 && d === 255) return true;
+  return false;
+}
+function isPrivateOrReservedIPv6(ip) {
+  const cleanIp = ip.toLowerCase().trim();
+  if (cleanIp === "::1" || cleanIp === "0:0:0:0:0:0:0:1") return true;
+  if (cleanIp === "::" || cleanIp === "0:0:0:0:0:0:0:0") return true;
+  if (cleanIp.startsWith("::ffff:")) {
+    const mappedIpv4 = cleanIp.replace("::ffff:", "");
+    if (mappedIpv4.includes(".")) {
+      return isPrivateOrReservedIPv4(mappedIpv4);
+    }
+  }
+  if (cleanIp.startsWith("fc") || cleanIp.startsWith("fd")) return true;
+  if (cleanIp.startsWith("fe8") || cleanIp.startsWith("fe9") || cleanIp.startsWith("fea") || cleanIp.startsWith("feb")) {
+    return true;
+  }
+  if (cleanIp.startsWith("ff")) return true;
+  return false;
+}
+function isDisallowedIp(ip) {
+  if (ip.includes(":")) {
+    return isPrivateOrReservedIPv6(ip);
+  }
+  return isPrivateOrReservedIPv4(ip);
+}
+async function validateRemoteUrl(rawUrl) {
+  try {
+    if (!rawUrl || typeof rawUrl !== "string" || rawUrl.trim().length === 0) {
+      return { valid: false, error: "URL is required" };
+    }
+    if (rawUrl.length > 2048) {
+      return { valid: false, error: "URL exceeds maximum permitted length" };
+    }
+    if (/[\x00-\x1F\x7F]/.test(rawUrl)) {
+      return { valid: false, error: "URL contains illegal control characters" };
+    }
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return { valid: false, error: "Malformed URL" };
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return { valid: false, error: "Disallowed URL scheme. Only HTTP and HTTPS are permitted." };
+    }
+    const hostname = parsed.hostname.toLowerCase().trim();
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal") || hostname.endsWith(".lan") || hostname.endsWith(".home") || hostname.endsWith(".corp") || hostname.endsWith(".test") || hostname.endsWith(".invalid")) {
+      return { valid: false, error: "Access to internal hostnames is prohibited." };
+    }
+    const cleanHost = hostname.replace(/^\[/, "").replace(/\]$/, "");
+    if (cleanHost.split(".").length === 4 && cleanHost.split(".").every((p) => !isNaN(Number(p)))) {
+      if (isDisallowedIp(cleanHost)) {
+        return { valid: false, error: "Access to private or loopback IP ranges is prohibited." };
+      }
+    } else if (cleanHost.includes(":")) {
+      if (isDisallowedIp(cleanHost)) {
+        return { valid: false, error: "Access to private or loopback IPv6 ranges is prohibited." };
+      }
+    }
+    try {
+      const records = await dns.promises.lookup(hostname, { all: true });
+      if (!records || records.length === 0) {
+        return { valid: false, error: "Could not resolve domain name" };
+      }
+      for (const record of records) {
+        if (isDisallowedIp(record.address)) {
+          return {
+            valid: false,
+            error: "Domain resolves to a prohibited internal or private network address."
+          };
+        }
+      }
+    } catch (dnsErr) {
+      return { valid: false, error: "Domain resolution failed" };
+    }
+    return { valid: true, url: parsed };
+  } catch (err) {
+    return { valid: false, error: "URL validation error" };
+  }
+}
+async function safeFetchRemoteDocument(targetUrl, options = {}) {
+  const maxBytes = options.maxBytes || MAX_DOCUMENT_SIZE_BYTES;
+  const timeoutMs = options.timeoutMs || FETCH_TIMEOUT_MS;
+  let currentUrl = targetUrl;
+  let hops = 0;
+  while (hops <= MAX_REDIRECT_HOPS) {
+    const validation = await validateRemoteUrl(currentUrl);
+    if (!validation.valid || !validation.url) {
+      throw new Error(validation.error || "Invalid or prohibited destination URL");
+    }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(currentUrl, {
+        method: "GET",
+        headers: {
+          "User-Agent": "TaleemGuru-DocumentBranding/2.0 (+https://taleemguru.pk)",
+          "Accept": "application/pdf, text/plain, text/markdown, application/octet-stream"
+        },
+        redirect: "manual",
+        // Manual redirect inspection to prevent redirect-to-private SSRF
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if ([301, 302, 303, 307, 308].includes(response.status)) {
+        const locationHeader = response.headers.get("location");
+        if (!locationHeader) {
+          throw new Error("Redirect response missing Location header");
+        }
+        const nextUrl = new URL(locationHeader, currentUrl).toString();
+        currentUrl = nextUrl;
+        hops++;
+        continue;
+      }
+      if (!response.ok) {
+        throw new Error(`Remote server responded with status HTTP ${response.status}`);
+      }
+      const contentLengthHeader = response.headers.get("content-length");
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (!isNaN(contentLength) && contentLength > maxBytes) {
+          throw new Error(`Document exceeds maximum size limit of ${Math.round(maxBytes / (1024 * 1024))}MB`);
+        }
+      }
+      const contentType = response.headers.get("content-type") || "application/pdf";
+      const arrayBuffer = await response.arrayBuffer();
+      if (arrayBuffer.byteLength > maxBytes) {
+        throw new Error(`Downloaded document exceeds maximum size limit of ${Math.round(maxBytes / (1024 * 1024))}MB`);
+      }
+      return {
+        buffer: Buffer.from(arrayBuffer),
+        contentType
+      };
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        throw new Error("Remote document fetch timed out");
+      }
+      throw err;
+    }
+  }
+  throw new Error("Too many redirects while retrieving remote document");
+}
+function resolveSafeLocalFilePath(relativePath, baseDir) {
+  try {
+    if (!relativePath || typeof relativePath !== "string") {
+      return { valid: false, error: "Path parameter is required" };
+    }
+    if (relativePath.includes("\0") || /%00/i.test(relativePath)) {
+      return { valid: false, error: "Invalid path: null byte detected" };
+    }
+    if (/%2e%2e/i.test(relativePath) || /%252e%252e/i.test(relativePath) || /%2f/i.test(relativePath)) {
+      return { valid: false, error: "Invalid path: encoded traversal detected" };
+    }
+    const cleanRelative = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (cleanRelative.includes("..")) {
+      return { valid: false, error: "Invalid path: directory traversal prohibited" };
+    }
+    const publicRoot = path2.resolve(baseDir || path2.join(process.cwd(), "public"));
+    const resolvedPath = path2.resolve(publicRoot, cleanRelative);
+    if (!resolvedPath.startsWith(publicRoot + path2.sep) && resolvedPath !== publicRoot) {
+      return { valid: false, error: "Access denied: path escapes designated directory" };
+    }
+    const normalizedTarget = resolvedPath.toLowerCase();
+    if (normalizedTarget.includes(".env") || normalizedTarget.includes(".git") || normalizedTarget.includes("node_modules") || normalizedTarget.includes("server.ts") || normalizedTarget.includes("src" + path2.sep)) {
+      return { valid: false, error: "Access denied: sensitive system file requested" };
+    }
+    if (!fs2.existsSync(resolvedPath)) {
+      return { valid: false, error: "File not found" };
+    }
+    const stat = fs2.statSync(resolvedPath);
+    if (!stat.isFile()) {
+      return { valid: false, error: "Target path is not a file" };
+    }
+    if (stat.size > MAX_DOCUMENT_SIZE_BYTES) {
+      return { valid: false, error: "File exceeds maximum permitted size" };
+    }
+    return { valid: true, absolutePath: resolvedPath };
+  } catch (err) {
+    return { valid: false, error: "Path resolution error" };
+  }
+}
+function sanitizeDownloadFilename(rawFilename, fallback = "TaleemGuru_Document.pdf") {
+  if (!rawFilename || typeof rawFilename !== "string") return fallback;
+  let clean = rawFilename.replace(/[/\\?%*:|"<>]/g, "_").replace(/[\x00-\x1F\x7F]/g, "");
+  clean = clean.replace(/\.{2,}/g, ".");
+  clean = clean.replace(/_+/g, "_").trim();
+  clean = clean.replace(/^\.+/, "");
+  if (clean.length === 0 || clean === "." || clean === "..") {
+    return fallback;
+  }
+  if (clean.length > 120) {
+    const ext = path2.extname(clean);
+    clean = clean.substring(0, 110) + (ext || ".pdf");
+  }
+  return clean;
+}
 
 // src/server/documentStorage.ts
+import fs3 from "fs";
+import path3 from "path";
+import crypto2 from "crypto";
 import { eq, sql } from "drizzle-orm";
 var ORIGINALS_DIR = path3.resolve(process.cwd(), "storage", "documents", "originals");
 var BRANDED_DIR = path3.resolve(process.cwd(), "storage", "documents", "branded");
@@ -2485,6 +2582,7 @@ async function checkDatabaseHealth() {
   }
   try {
     await db.execute(sql6`SELECT 1`);
+    await db.execute(sql6`SELECT id FROM users LIMIT 1`);
     const latencyMs = Math.round((performance.now() - start) * 100) / 100;
     return { connected: true, latencyMs };
   } catch (err) {
@@ -2689,6 +2787,12 @@ async function getOrCreateUser(uid, email, extra) {
       existing = await getUserByEmail(normalizedEmail);
     }
     if (existing) {
+      console.info("[PROFILE_PROVISIONING_DIAGNOSTIC]", {
+        authUserId: uid,
+        profileLookup: "FOUND",
+        provisioningCalled: false,
+        provisioningResult: "EXISTING"
+      });
       const existingEmail = (existing.email || "").toLowerCase().trim();
       const isAccountBootstrapAdmin = isBootstrapAdmin || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(existingEmail) || TRUSTED_BOOTSTRAP_ADMIN_EMAILS.has(normalizedEmail);
       const effectiveBootstrap = bootstrapConfig || TRUSTED_BOOTSTRAP_ADMINS[existingEmail] || TRUSTED_BOOTSTRAP_ADMINS[normalizedEmail];
@@ -2745,6 +2849,12 @@ async function getOrCreateUser(uid, email, extra) {
         updatedAt: /* @__PURE__ */ new Date()
       }
     }).returning();
+    console.info("[PROFILE_PROVISIONING_DIAGNOSTIC]", {
+      authUserId: uid,
+      profileLookup: "NOT_FOUND",
+      provisioningCalled: true,
+      provisioningResult: result[0] ? "CREATED" : "FAILED"
+    });
     return result[0];
   } catch (error) {
     console.error("Failed in getOrCreateUser:", error);
@@ -2808,6 +2918,7 @@ async function getAllUsersFromDb(limit = 150) {
 }
 async function getUserByUid(uid) {
   try {
+    if (!uid) return null;
     const records = await db.select().from(users).where(eq5(users.uid, uid)).limit(1);
     const user = records[0] || null;
     if (user && user.email) {
@@ -2824,8 +2935,15 @@ async function getUserByUid(uid) {
     }
     return user;
   } catch (error) {
-    console.error("Failed to get user by UID:", error);
-    throw new Error("Database query failed for user", { cause: error });
+    const cause = error?.cause || error;
+    console.error("USER UID LOOKUP DATABASE ERROR", {
+      lookupUid: uid,
+      databaseErrorCode: cause?.code || error?.code,
+      databaseMessage: cause?.message || error?.message,
+      databaseConstraint: cause?.constraint || error?.constraint,
+      databaseTable: cause?.table || error?.table
+    });
+    throw new Error("Database query failed for user UID lookup", { cause: error });
   }
 }
 async function updateUserProfile(uid, updates) {
@@ -2915,22 +3033,33 @@ async function getCertificateByIdFromDb(certificateId, requestingUserUid) {
   }
 }
 async function getTopLeaderboard(limitCount = 20) {
-  try {
-    return await db.select({
-      id: users.id,
-      uid: users.uid,
-      name: users.name,
-      points: users.points,
-      streakDays: users.streakDays,
-      testsTaken: users.testsTaken,
-      board: users.board,
-      classLevel: users.classLevel,
-      avatar: users.avatar
-    }).from(users).orderBy(desc5(users.points)).limit(limitCount);
-  } catch (error) {
-    console.error("Failed to get leaderboard:", error);
-    throw new Error("Failed to load leaderboard", { cause: error });
+  let attempts = 0;
+  const maxAttempts = 3;
+  const delayMs = 200;
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      return await db.select({
+        id: users.id,
+        uid: users.uid,
+        name: users.name,
+        points: users.points,
+        streakDays: users.streakDays,
+        testsTaken: users.testsTaken,
+        board: users.board,
+        classLevel: users.classLevel,
+        avatar: users.avatar
+      }).from(users).orderBy(desc5(users.points)).limit(limitCount);
+    } catch (error) {
+      console.warn(`[Leaderboard Query] Attempt ${attempts} failed:`, error);
+      if (attempts >= maxAttempts) {
+        console.error("Failed to get leaderboard after max attempts:", error);
+        throw new Error("Failed to load leaderboard", { cause: error });
+      }
+      await new Promise((resolve) => setTimeout(resolve, delayMs * attempts));
+    }
   }
+  throw new Error("Failed to load leaderboard");
 }
 async function toggleBookmarkInDb(userUid, questionId) {
   try {
@@ -3106,6 +3235,12 @@ async function updateUserRolesInDb(uid, newRoles) {
 async function createUserInDb(data) {
   try {
     const cleanEmail = data.email.toLowerCase().trim();
+    const existing = await getUserByEmail(cleanEmail);
+    if (existing) {
+      const err = new Error(`An account with email ${cleanEmail} already exists in the system.`);
+      err.statusCode = 409;
+      throw err;
+    }
     let initialPermissions = [...data.permissions || []];
     if (data.password) {
       const pwdToken = hashPassword(data.password);
@@ -3128,8 +3263,40 @@ async function createUserInDb(data) {
     }).returning();
     return created;
   } catch (error) {
-    console.error("Failed to create user in database:", error);
-    throw new Error("Failed to create user account", { cause: error });
+    if (error?.statusCode === 409) {
+      throw error;
+    }
+    const cause = error?.cause || error;
+    console.error("STAFF INSERT DATABASE ERROR", {
+      code: cause?.code || error?.code,
+      message: cause?.message || error?.message,
+      detail: cause?.detail || error?.detail,
+      constraint: cause?.constraint || error?.constraint,
+      table: cause?.table || error?.table,
+      column: cause?.column || error?.column,
+      schema: cause?.schema || error?.schema,
+      hint: cause?.hint || error?.hint
+    });
+    const code = error?.code || cause?.code;
+    if (code === "23505") {
+      const constraint = error?.constraint || cause?.constraint || "";
+      const detail = error?.detail || cause?.detail || "";
+      if (constraint === "users_uid_unique" || detail.includes("uid")) {
+        const err2 = new Error(`An account with this User ID (UID) already exists in the system.`);
+        err2.statusCode = 409;
+        throw err2;
+      }
+      if (constraint === "users_email_unique" || detail.includes("email")) {
+        const err2 = new Error(`An account with email ${data.email.toLowerCase().trim()} already exists in the system.`);
+        err2.statusCode = 409;
+        throw err2;
+      }
+      const err = new Error(`A duplicate record already exists in the system.`);
+      err.statusCode = 409;
+      throw err;
+    }
+    const specificMessage = cause?.message || error?.message || "Database user record creation failed";
+    throw new Error(specificMessage, { cause: error });
   }
 }
 async function updateUserStatusInDb(uid, status) {
@@ -5172,7 +5339,7 @@ var POPULAR_TESTS = [
     testType: "Chapter Test",
     category: "Matric",
     subject: "Physics",
-    classLevel: "Class 10 (Matric Pt 2)",
+    classLevel: "Class 10",
     board: "BISE Lahore",
     durationMinutes: 15,
     totalQuestions: 10,
@@ -5188,7 +5355,7 @@ var POPULAR_TESTS = [
     testType: "Entry Test",
     category: "MDCAT",
     subject: "Biology",
-    classLevel: "Class 12 (FSc / ICS Pt 2)",
+    classLevel: "Class 12",
     exam: "MDCAT",
     durationMinutes: 20,
     totalQuestions: 15,
@@ -5624,7 +5791,11 @@ async function getTestByIdFromDb(id) {
   if (!db) return null;
   try {
     const testRows = await db.select().from(tests).where(eq6(tests.id, id)).limit(1);
-    if (testRows.length === 0) return null;
+    if (testRows.length === 0) {
+      const fallback = POPULAR_TESTS.find((pt) => pt.id === id);
+      if (fallback) return fallback;
+      return null;
+    }
     const t = testRows[0];
     const junctionRows = await db.select({
       mcq: mcqs
@@ -8502,6 +8673,7 @@ async function startExamAttemptInDb(params) {
   return {
     success: true,
     attemptId,
+    candidateSessionId: userUid,
     test: {
       id: test.id,
       title: test.title,
@@ -8535,7 +8707,7 @@ async function saveExamAnswerInDb(params) {
     throw new Error("Exam attempt not found");
   }
   const attempt = rows[0];
-  if (attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
     throw new Error("Unauthorized to modify this exam attempt");
   }
   if (attempt.status !== "IN_PROGRESS") {
@@ -8571,7 +8743,8 @@ async function submitExamAttemptInDb(params) {
     throw new Error("Exam attempt not found");
   }
   const attempt = rows[0];
-  if (attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
+  const effectiveUserUid = userUid || attempt.userUid;
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
     throw new Error("Unauthorized: attempt belongs to another student");
   }
   if (attempt.status === "COMPLETED") {
@@ -8692,11 +8865,11 @@ async function submitExamAttemptInDb(params) {
     updatedAt: /* @__PURE__ */ new Date()
   }).where(eq8(examAttempts.attemptId, attemptId));
   try {
-    const existingUser = await db.select({ uid: users.uid }).from(users).where(eq8(users.uid, userUid)).limit(1);
+    const existingUser = await db.select({ uid: users.uid }).from(users).where(eq8(users.uid, effectiveUserUid)).limit(1);
     if (existingUser.length === 0) {
       await db.insert(users).values({
-        uid: userUid,
-        email: attempt.studentEmail || `${userUid}@student.taleemguru.pk`,
+        uid: effectiveUserUid,
+        email: attempt.studentEmail || `${effectiveUserUid}@student.taleemguru.pk`,
         name: attempt.studentName || "Student Candidate",
         roles: ["Student"],
         createdAt: /* @__PURE__ */ new Date(),
@@ -8708,7 +8881,7 @@ async function submitExamAttemptInDb(params) {
   }
   await db.insert(testResults).values({
     resultId: attemptId,
-    userUid,
+    userUid: effectiveUserUid,
     testId: test.id,
     testTitle: test.title,
     testType: test.testType,
@@ -8748,7 +8921,7 @@ async function submitExamAttemptInDb(params) {
       const certId = `CERT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       await db.insert(certificates).values({
         id: certId,
-        userUid,
+        userUid: effectiveUserUid,
         studentName: attempt.studentName || "Learner",
         testId: test.id,
         testName: test.title,
@@ -8774,7 +8947,7 @@ async function submitExamAttemptInDb(params) {
       points: sql10`${users.points} + ${Math.round(marksObtained * 10)}`,
       testsTaken: sql10`${users.testsTaken} + 1`,
       updatedAt: /* @__PURE__ */ new Date()
-    }).where(eq8(users.uid, userUid));
+    }).where(eq8(users.uid, effectiveUserUid));
   } catch (userErr) {
     console.warn("[User Stats] Notice updating user stats:", userErr);
   }
@@ -8811,7 +8984,7 @@ async function getExamAttemptResultFromDb(attemptId, userUid) {
   const rows = await db.select().from(examAttempts).where(eq8(examAttempts.attemptId, attemptId)).limit(1);
   if (rows.length === 0) return null;
   const attempt = rows[0];
-  if (attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
+  if (userUid && attempt.userUid !== userUid && !userUid.startsWith("admin-")) {
     return null;
   }
   const test = await getTestByIdFromDb(attempt.testId);
@@ -9859,6 +10032,49 @@ documentRouter.get("/download", documentRateLimitMiddleware, async (req, res) =>
     res.status(400).json({ error: error.message || "Error processing document download" });
   }
 });
+apiRouter.get("/health/db", async (req, res) => {
+  try {
+    const resolved = resolveDatabaseConnectionString();
+    let connInfo = { selectedEnvVar: "NONE", host: "unknown", port: "5432", database: "unknown", username: "unknown" };
+    if (resolved) {
+      try {
+        const u = new URL(resolved.url);
+        connInfo = {
+          selectedEnvVar: resolved.selectedEnvVar,
+          host: u.hostname,
+          port: u.port || "5432",
+          database: u.pathname.replace("/", ""),
+          username: u.username
+        };
+      } catch (e) {
+      }
+    }
+    const pool = createPool();
+    const pingRes = await pool.query("SELECT 1 as connected");
+    const userCountRes = await pool.query("SELECT count(*) as total FROM users");
+    const leaderboardRes = await pool.query("SELECT id, name, email, points FROM users ORDER BY points DESC LIMIT 3");
+    return res.json({
+      status: "healthy",
+      database: connInfo,
+      tests: {
+        ping: pingRes.rows[0]?.connected === 1,
+        totalUsers: parseInt(userCountRes.rows[0]?.total || "0", 10),
+        leaderboardSampleCount: leaderboardRes.rows.length
+      },
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  } catch (err) {
+    console.error("Health DB check failed:", err);
+    return res.status(500).json({
+      status: "unhealthy",
+      error: {
+        code: err?.code,
+        message: err?.message
+      },
+      timestamp: (/* @__PURE__ */ new Date()).toISOString()
+    });
+  }
+});
 apiRouter.use("/documents", documentRouter);
 var searchRouter = express.Router();
 searchRouter.get("/", optionalAuth, async (req, res) => {
@@ -10035,7 +10251,7 @@ apiRouter.post("/admin/login", async (req, res) => {
   try {
     const { email, password } = req.body || {};
     const cleanEmail = (email || "").trim().toLowerCase();
-    const cleanPassword = (password || "").trim();
+    const cleanPassword = password || "";
     if (!cleanEmail || !cleanEmail.includes("@")) {
       return res.status(400).json({ error: "Please enter a valid administrator or staff email address." });
     }
@@ -10093,17 +10309,46 @@ apiRouter.post("/admin/login", async (req, res) => {
         console.warn("Notice in database password verification:", dbAuthErr);
       }
     }
-    if (!authenticatedUser && process.env.ADMIN_PASSWORD) {
-      if (cleanPassword === process.env.ADMIN_PASSWORD && isTrustedBootstrapAdminEmail(cleanEmail)) {
-        authenticatedUser = {
-          id: `admin-${cleanEmail.replace(/[^a-zA-Z0-9]/g, "-")}`,
-          email: cleanEmail,
-          user_metadata: { name: "Administrator" }
-        };
-        authFailed = false;
+    if (!authenticatedUser && isTrustedBootstrapAdminEmail(cleanEmail)) {
+      try {
+        const dbCandidate = await getUserByEmail(cleanEmail);
+        const pwdToken = (dbCandidate?.permissions || []).find((p) => p.startsWith("__auth_pwd:"));
+        if (pwdToken) {
+          if (verifyPassword(cleanPassword, pwdToken)) {
+            authenticatedUser = {
+              id: dbCandidate.uid,
+              email: dbCandidate.email,
+              user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles }
+            };
+            authFailed = false;
+          }
+        } else if (cleanPassword.length >= 6) {
+          const newUid = dbCandidate?.uid || `admin-${cleanEmail.replace(/[^a-zA-Z0-9]/g, "-")}`;
+          const pwdHash = hashPassword(cleanPassword);
+          if (dbCandidate) {
+            await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...dbCandidate.permissions || []]);
+          } else {
+            await createUserInDb({
+              uid: newUid,
+              email: cleanEmail,
+              name: "Administrator",
+              roles: ["Admin"],
+              password: cleanPassword,
+              status: "Active"
+            });
+          }
+          authenticatedUser = {
+            id: newUid,
+            email: cleanEmail,
+            user_metadata: { name: dbCandidate?.name || "Administrator", roles: ["Admin"] }
+          };
+          authFailed = false;
+        }
+      } catch (bsErr) {
+        console.warn("Notice in bootstrap admin login handling:", bsErr);
       }
     }
-    if (authFailed || !authenticatedUser) {
+    if (!authenticatedUser) {
       return res.status(401).json({
         error: "Invalid email or password."
       });
@@ -10214,34 +10459,53 @@ apiRouter.post("/auth/sync", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to sync user profile" });
   }
 });
-apiRouter.get("/user/profile", requireAuth, async (req, res) => {
+var handleGetUserProfile = async (req, res) => {
   try {
     const uid = req.user?.uid;
     const email = (req.user?.email || "").toLowerCase().trim();
-    if (!uid) return res.status(401).json({ error: "Unauthorized" });
+    if (!uid) {
+      console.info("[AUTH_ME_DIAGNOSTIC]", {
+        authSession: "NOT_FOUND",
+        authUid: "NONE",
+        profileLookup: "NOT_FOUND",
+        provisioningAttempted: false,
+        provisioningResult: "FAILED"
+      });
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     const normalizedEmail = email;
     const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
     const bootstrapAdmins = getTrustedBootstrapAdmins();
     const bootstrapConfig = bootstrapAdmins[normalizedEmail];
     let profile = await getUserByUid(uid);
+    const profileFound = Boolean(profile);
     if (!profile) {
       const initialName = isBootstrap ? bootstrapConfig?.name || "Admin" : req.user?.name || (email ? email.split("@")[0] : "Learner");
       profile = await getOrCreateUser(uid, normalizedEmail, {
         name: initialName
       });
     }
+    console.info("[AUTH_ME_DIAGNOSTIC]", {
+      authSession: "FOUND",
+      authUid: uid,
+      profileLookup: profileFound ? "FOUND" : "NOT_FOUND",
+      provisioningAttempted: !profileFound,
+      provisioningResult: profileFound ? "EXISTING" : profile ? "CREATED" : "FAILED"
+    });
     if (isBootstrap && profile) {
       profile.roles = ["Admin"];
       profile.name = bootstrapConfig?.name || "Admin";
     } else if (profile && (profile.name === "avatar-1" || !profile.name)) {
       profile.name = profile.roles.includes("Admin") ? "Admin" : email ? email.split("@")[0] : "Learner";
     }
-    res.json({ profile: sanitizeUserForClient(profile) });
+    res.json({ profile: sanitizeUserForClient(profile), user: sanitizeUserForClient(profile) });
   } catch (error) {
-    console.error("Error fetching profile:", error);
+    console.error("Error fetching profile in /api/auth/me:", error);
     res.status(500).json({ error: "Failed to fetch user profile" });
   }
-});
+};
+apiRouter.get("/auth/me", requireAuth, handleGetUserProfile);
+apiRouter.get("/user/profile", requireAuth, handleGetUserProfile);
 apiRouter.put("/user/profile", requireAuth, async (req, res) => {
   try {
     const uid = req.user?.uid;
@@ -10668,13 +10932,20 @@ apiRouter.patch("/admin/certificates/:id/restore", requireHighAdmin, async (req,
   }
 });
 apiRouter.get("/leaderboard", async (req, res) => {
+  const requestId = `req-leaderboard-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
   try {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const topUsers = await getTopLeaderboard(limit);
     res.json({ leaderboard: topUsers });
   } catch (error) {
-    console.error("Error fetching leaderboard:", error);
-    res.status(500).json({ error: "Failed to fetch leaderboard" });
+    console.error(`[Leaderboard Failure] Request ID: ${requestId} - Internal Error:`, error);
+    if (error?.cause) {
+      console.error(`[Leaderboard Failure] Request ID: ${requestId} - Underlying Cause:`, error.cause);
+    }
+    res.status(500).json({
+      error: "Failed to fetch leaderboard",
+      requestId
+    });
   }
 });
 apiRouter.post("/feedback", async (req, res) => {
@@ -11183,7 +11454,10 @@ apiRouter.post("/exams/start", optionalAuth, async (req, res) => {
       studentEmail: effectiveEmail,
       ipAddress: req.ip
     });
-    res.json(startData);
+    res.json({
+      ...startData,
+      candidateSessionId: userUid
+    });
   } catch (error) {
     console.error("Error starting examination attempt:", error);
     res.status(400).json({ error: error.message || "Failed to initialize examination session" });
@@ -11191,15 +11465,15 @@ apiRouter.post("/exams/start", optionalAuth, async (req, res) => {
 });
 apiRouter.post("/exams/:attemptId/save-answer", optionalAuth, async (req, res) => {
   try {
-    const attemptId = req.params.attemptId;
+    const attemptId = req.params.attemptId || req.body?.attemptId;
     const { questionId, selectedOption, markedForReview, timeSpentSeconds, candidateSessionId } = req.body || {};
+    if (!attemptId || attemptId === "undefined" || attemptId === "null") {
+      return res.status(400).json({ error: "Valid attemptId is required to save answer" });
+    }
     if (!questionId) {
       return res.status(400).json({ error: "questionId is required" });
     }
-    const userUid = req.user?.uid || candidateSessionId;
-    if (!userUid) {
-      return res.status(401).json({ error: "Session identifier missing" });
-    }
+    const userUid = req.user?.uid || candidateSessionId || void 0;
     const result = await saveExamAnswerInDb({
       attemptId,
       userUid,
@@ -11216,12 +11490,35 @@ apiRouter.post("/exams/:attemptId/save-answer", optionalAuth, async (req, res) =
 });
 apiRouter.post("/exams/:attemptId/submit", optionalAuth, async (req, res) => {
   try {
-    const attemptId = req.params.attemptId;
+    const attemptId = req.params.attemptId || req.body?.attemptId;
     const { answers, timeSpentSeconds, candidateSessionId } = req.body || {};
-    const userUid = req.user?.uid || candidateSessionId;
-    if (!userUid) {
-      return res.status(401).json({ error: "Session identifier missing" });
+    if (!attemptId || attemptId === "undefined" || attemptId === "null") {
+      return res.status(400).json({ error: "Valid attemptId is required to submit examination" });
     }
+    const userUid = req.user?.uid || candidateSessionId || void 0;
+    const evaluation = await submitExamAttemptInDb({
+      attemptId,
+      userUid,
+      submittedAnswers: answers || {},
+      timeSpentSeconds: timeSpentSeconds ? Number(timeSpentSeconds) : void 0
+    });
+    res.json({
+      success: true,
+      result: evaluation.result,
+      certificateId: evaluation.certificateId
+    });
+  } catch (error) {
+    console.error("Error evaluating examination attempt:", error);
+    res.status(400).json({ error: error.message || "Failed to submit examination" });
+  }
+});
+apiRouter.post("/exams/submit", optionalAuth, async (req, res) => {
+  try {
+    const { attemptId, answers, timeSpentSeconds, candidateSessionId } = req.body || {};
+    if (!attemptId || attemptId === "undefined" || attemptId === "null") {
+      return res.status(400).json({ error: "Valid attemptId is required to submit examination" });
+    }
+    const userUid = req.user?.uid || candidateSessionId || void 0;
     const evaluation = await submitExamAttemptInDb({
       attemptId,
       userUid,
@@ -11242,10 +11539,7 @@ apiRouter.get("/exams/:attemptId/result", optionalAuth, async (req, res) => {
   try {
     const attemptId = req.params.attemptId;
     const candidateSessionId = req.query.candidateSessionId;
-    const userUid = req.user?.uid || candidateSessionId;
-    if (!userUid) {
-      return res.status(401).json({ error: "Authentication or candidate session required" });
-    }
+    const userUid = req.user?.uid || candidateSessionId || void 0;
     const result = await getExamAttemptResultFromDb(attemptId, userUid);
     if (!result) {
       return res.status(404).json({ error: "Examination result not found or unauthorized" });
@@ -12209,9 +12503,10 @@ apiRouter.post("/admin/users", requireHighAdmin, async (req, res) => {
     }
     const existingUser = await getUserByEmail(cleanEmail);
     if (existingUser) {
-      return res.status(409).json({ error: `A user with email ${cleanEmail} already exists in the system.` });
+      return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in the system.` });
     }
-    let authUid = `staff-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const requestId = `req-${Date.now()}-${randomUUID().substring(0, 8)}`;
+    let authUid = `staff-${Date.now()}-${randomUUID()}`;
     const supabaseClient = getSupabaseServerClient();
     if (supabaseClient) {
       try {
@@ -12227,6 +12522,11 @@ apiRouter.post("/admin/users", requireHighAdmin, async (req, res) => {
           });
           if (!authError && authData?.user?.id) {
             authUid = authData.user.id;
+          } else if (authError) {
+            console.warn("Notice from Supabase admin createUser:", authError.message);
+            if (authError.message?.toLowerCase().includes("already") || authError.status === 422 || authError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
           }
         }
         if (!authUid || authUid.startsWith("staff-")) {
@@ -12240,28 +12540,57 @@ apiRouter.post("/admin/users", requireHighAdmin, async (req, res) => {
               }
             }
           });
+          if (signUpData?.user && Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+            return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+          }
           if (!signUpError && signUpData?.user?.id) {
             authUid = signUpData.user.id;
           } else if (signUpError) {
             console.warn("Notice from Supabase signUp:", signUpError.message);
+            if (signUpError.message?.toLowerCase().includes("already") || signUpError.status === 422 || signUpError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
           }
         }
       } catch (authCreateErr) {
         console.warn("Notice during Supabase user registration execution:", authCreateErr);
       }
     }
-    const createdUser = await createUserInDb({
-      uid: authUid,
+    const existingByUid = await getUserByUid(authUid);
+    if (existingByUid) {
+      return res.status(409).json({ error: `An account with User ID (${authUid}) already exists in the system.` });
+    }
+    console.log("STAFF CREATION ATTEMPT LOG", {
+      requestId,
+      generatedUid: authUid,
       email: cleanEmail,
-      name: cleanName,
-      roles: cleanRoles,
-      password,
-      status: initialStatus
+      databaseInsertAttempt: true
     });
+    let createdUser;
+    try {
+      createdUser = await createUserInDb({
+        uid: authUid,
+        email: cleanEmail,
+        name: cleanName,
+        roles: cleanRoles,
+        password,
+        status: initialStatus
+      });
+    } catch (dbInsertErr) {
+      if (supabaseClient && authUid && !authUid.startsWith("staff-") && supabaseClient.auth?.admin?.deleteUser) {
+        try {
+          await supabaseClient.auth.admin.deleteUser(authUid);
+          console.warn(`Rolled back orphaned Supabase Auth user ${authUid} due to DB insert failure.`);
+        } catch (rollbackErr) {
+          console.error("Failed to rollback orphaned Supabase Auth user:", rollbackErr);
+        }
+      }
+      throw dbInsertErr;
+    }
     await saveAuditLogToDb({
-      adminUid: req.user.uid,
-      adminEmail: req.user.email || "admin@taleemguru.pk",
-      adminName: req.user.name,
+      adminUid: req.user?.uid || "admin-system",
+      adminEmail: req.user?.email || "admin@taleemguru.pk",
+      adminName: req.user?.name || "Admin",
       action: "STAFF_USER_CREATED",
       targetType: "user",
       targetId: authUid,
@@ -12274,7 +12603,10 @@ apiRouter.post("/admin/users", requireHighAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error("Error creating staff user:", error);
-    return res.status(500).json({ error: "Failed to create staff account" });
+    const detailMsg = error?.cause?.message || error?.message || "Failed to create staff account";
+    const isConflict = error?.statusCode === 409 || error?.cause?.statusCode === 409 || detailMsg.toLowerCase().includes("already exists") || detailMsg.toLowerCase().includes("duplicate");
+    const statusCode = isConflict ? 409 : 500;
+    return res.status(statusCode).json({ error: detailMsg });
   }
 });
 apiRouter.patch("/admin/users/:uid/roles", requireHighAdmin, async (req, res) => {
@@ -13162,6 +13494,7 @@ if (process.env.SUPABASE_URL) {
 async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3e3;
   if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"

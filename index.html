@@ -25,6 +25,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+    <script>
+      // Early runtime polyfills to prevent "Buffer is not defined" reference errors
+      if (typeof window !== 'undefined') {
+        window.global = window;
+        if (typeof window.Buffer === 'undefined') {
+          // A minimal safe stub that gets overridden with the real Buffer once src/main.tsx executes
+          // This must be an ES6 class constructor to support modern class inheritance before the real Buffer is loaded
+          class DummyBuffer extends Uint8Array {}
+          DummyBuffer.isBuffer = function(b) { return b instanceof Uint8Array; };
+          DummyBuffer.from = function() { return new Uint8Array(); };
+          DummyBuffer.alloc = function(s) { return new Uint8Array(s || 0); };
+          DummyBuffer.concat = function() { return new Uint8Array(); };
+          window.Buffer = DummyBuffer;
+        }
+        if (typeof window.process === 'undefined') {
+          window.process = { env: { NODE_ENV: 'development' }, browser: true };
+        }
+      }
+    </script>
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-emerald-500 selection:text-white">
     <div id="root"></div>
