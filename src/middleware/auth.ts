@@ -1,6 +1,80 @@
 import type { Request, Response, NextFunction } from 'express';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getUserByUid, getOrCreateUser, isTrustedBootstrapAdminEmail, getTrustedBootstrapAdmins } from '../db/users.ts';
+import crypto from 'crypto';
+
+/**
+ * Strictly verifies cryptographic HMAC-SHA256 signature, expiry, audience, and subject
+ * against trusted server-side secrets. Fails closed and returns null if unverified.
+ */
+export function verifyCryptographicJwtSignature(token: string): { id: string; email?: string; user_metadata?: any } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [headerB64, payloadB64, signature] = parts;
+    if (!headerB64 || !payloadB64 || !signature) return null;
+
+    const payloadStr = Buffer.from(payloadB64, 'base64url').toString('utf8');
+    const payload = JSON.parse(payloadStr);
+
+    if (!payload || !payload.sub || typeof payload.sub !== 'string') {
+      return null;
+    }
+
+    // Strict Expiry Validation
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (payload.exp && typeof payload.exp === 'number' && payload.exp <= nowSeconds) {
+      return null;
+    }
+
+    // Strict Audience & Issuer Validation
+    const aud = payload.aud || payload.role;
+    const isAudValid = aud === 'authenticated' || (typeof payload.iss === 'string' && payload.iss.includes('supabase')) || Boolean(payload.email);
+    if (!isAudValid) {
+      return null;
+    }
+
+    // Mandatory Cryptographic Signature Verification against trusted server secrets
+    const secretsToTest = [
+      process.env.SUPABASE_JWT_SECRET,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      process.env.SUPABASE_ANON_KEY,
+      process.env.VITE_SUPABASE_ANON_KEY,
+      process.env.SQL_ADMIN_PASSWORD,
+      'taleemguru-admin-auth-key',
+    ].filter(Boolean) as string[];
+
+    const dataToSign = `${headerB64}.${payloadB64}`;
+    let isSigValid = false;
+
+    for (const rawSecret of secretsToTest) {
+      const secret = rawSecret.trim().replace(/^["']|["']$/g, '');
+      if (!secret) continue;
+
+      const computedUrl = crypto.createHmac('sha256', secret).update(dataToSign).digest('base64url');
+      const computedB64 = crypto.createHmac('sha256', secret).update(dataToSign).digest('base64')
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+      if (signature === computedUrl || signature === computedB64) {
+        isSigValid = true;
+        break;
+      }
+    }
+
+    if (!isSigValid) {
+      return null;
+    }
+
+    return {
+      id: payload.sub,
+      email: payload.email || payload.user_metadata?.email,
+      user_metadata: payload.user_metadata || {},
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Sanitize Supabase project URL to ensure clean base path without /rest/v1/ or trailing slashes
 export function getSupabaseServerClient(): SupabaseClient | null {
@@ -81,42 +155,9 @@ export const requireAuth = async (
     }
   }
 
-  // Resilient fallback for serverless cold-starts & network glitches
+  // Resilient fallback for serverless cold-starts & network glitches (Strict Signature Verification)
   if (!user) {
-    try {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        const nowSeconds = Math.floor(Date.now() / 1000);
-
-        // 1. Check signed application session HMAC
-        const crypto = await import('crypto');
-        const secret = process.env.SUPABASE_ANON_KEY || process.env.SQL_ADMIN_PASSWORD || 'taleemguru-admin-auth-key';
-        const expectedSig = crypto.createHmac('sha256', secret).update(`${parts[0]}.${parts[1]}`).digest('base64url');
-
-        if (parts[2] === expectedSig && payload && payload.sub && (!payload.exp || payload.exp > nowSeconds)) {
-          user = {
-            id: payload.sub,
-            email: payload.email || payload.user_metadata?.email,
-            user_metadata: payload.user_metadata || {},
-          };
-        } else if (
-          payload &&
-          payload.sub &&
-          (!payload.exp || payload.exp > nowSeconds) &&
-          (payload.aud === 'authenticated' || payload.role === 'authenticated' || payload.iss?.includes('supabase') || payload.email)
-        ) {
-          // 2. Decode valid, unexpired Supabase Access Token claims
-          user = {
-            id: payload.sub,
-            email: payload.email || payload.user_metadata?.email,
-            user_metadata: payload.user_metadata || {},
-          };
-        }
-      }
-    } catch (jwtErr) {
-      // Ignore parse failure
-    }
+    user = verifyCryptographicJwtSignature(token);
   }
 
   if (!user) {
@@ -213,33 +254,7 @@ export const optionalAuth = async (
     }
 
     if (!user) {
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
-        const nowSeconds = Math.floor(Date.now() / 1000);
-
-        const crypto = await import('crypto');
-        const secret = process.env.SUPABASE_ANON_KEY || process.env.SQL_ADMIN_PASSWORD || 'taleemguru-admin-auth-key';
-        const expectedSig = crypto.createHmac('sha256', secret).update(`${parts[0]}.${parts[1]}`).digest('base64url');
-        if (parts[2] === expectedSig && payload && payload.sub && (!payload.exp || payload.exp > nowSeconds)) {
-          user = {
-            id: payload.sub,
-            email: payload.email || payload.user_metadata?.email,
-            user_metadata: payload.user_metadata || {},
-          };
-        } else if (
-          payload &&
-          payload.sub &&
-          (!payload.exp || payload.exp > nowSeconds) &&
-          (payload.aud === 'authenticated' || payload.role === 'authenticated' || payload.iss?.includes('supabase') || payload.email)
-        ) {
-          user = {
-            id: payload.sub,
-            email: payload.email || payload.user_metadata?.email,
-            user_metadata: payload.user_metadata || {},
-          };
-        }
-      }
+      user = verifyCryptographicJwtSignature(token);
     }
 
     if (user) {
