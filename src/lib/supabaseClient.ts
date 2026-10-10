@@ -7,14 +7,29 @@ const rawSupabaseUrl = (
   (typeof process !== 'undefined' && (process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL)) ||
   ''
 ).trim();
-const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+function sanitizeSupabaseUrl(raw: string): string {
+  let s = (raw || '').trim().replace(/^["']|["']$/g, '');
+  if (!s) return '';
+  s = s.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  if (!s.startsWith('http://') && !s.startsWith('https://')) {
+    s = `https://${s}`;
+  }
+  return s;
+}
 
-const supabaseAnonKey = (
+function sanitizeSupabaseKey(raw: string): string {
+  return (raw || '').trim().replace(/^["']|["']$/g, '');
+}
+
+const rawSupabaseAnonKey = (
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY) ||
   (typeof window !== 'undefined' && (window as any).__SUPABASE_ANON_KEY__) ||
   (typeof process !== 'undefined' && (process.env?.VITE_SUPABASE_ANON_KEY || process.env?.SUPABASE_ANON_KEY)) ||
   ''
 ).trim();
+
+const supabaseUrl = sanitizeSupabaseUrl(rawSupabaseUrl);
+const supabaseAnonKey = sanitizeSupabaseKey(rawSupabaseAnonKey);
 
 /**
  * Validates whether Supabase environment variables are present and well-formed.
