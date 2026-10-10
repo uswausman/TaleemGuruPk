@@ -78,28 +78,6 @@ export function resolveDatabaseConnectionString(): { url: string; selectedEnvVar
     if (candidate.val && typeof candidate.val === 'string' && candidate.val.trim().length > 0) {
       const rawUrl = candidate.val.trim();
       
-      // If we are on Vercel or in Production, check if candidate points to Supabase.
-      if (isVercel || isProd) {
-        try {
-          const host = new URL(rawUrl).host.toLowerCase();
-          if (host.includes('supabase')) {
-            const sanitized = sanitizeSupabaseConnectionString(rawUrl);
-            return { url: sanitized, selectedEnvVar: candidate.name };
-          } else {
-            console.warn(`[Database] WARNING: Skipping non-Supabase database candidate ${candidate.name} (host: ${host}) in production to prevent silent override of authoritative Supabase database.`);
-            continue;
-          }
-        } catch (e) {
-          if (rawUrl.toLowerCase().includes('supabase')) {
-            const sanitized = sanitizeSupabaseConnectionString(rawUrl);
-            return { url: sanitized, selectedEnvVar: candidate.name };
-          } else {
-            console.warn(`[Database] WARNING: Skipping unparseable non-Supabase candidate ${candidate.name} in production.`);
-            continue;
-          }
-        }
-      }
-
       const sanitized = sanitizeSupabaseConnectionString(rawUrl);
       return { url: sanitized, selectedEnvVar: candidate.name };
     }
