@@ -129,19 +129,27 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
         setTimeout(() => {
           triggerLoginSuccess(adminData);
         }, 600);
+      } else if (verifyResult.isTransient) {
+        setErrorMsg('Network connection to verification server failed. Please check your internet connection and try again.');
       } else {
         await logoutUser().catch(() => {});
         setErrorMsg('Access Denied: You do not have permission to access the Admin Control Panel.');
       }
     } catch (err: any) {
       try {
-        await logoutUser();
+        await logoutUser().catch(() => {});
       } catch {}
-      const msg = err?.message || '';
-      if (msg.includes('confirm your account')) {
+      const msg = String(err?.message || err || '');
+      if (msg.toLowerCase().includes('confirm your account')) {
         setErrorMsg('Please check your email to confirm your account before signing in.');
+      } else if (
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('connection')
+      ) {
+        setErrorMsg('Network connection failed. Please check your internet connection.');
       } else {
-        setErrorMsg('Invalid email or password.');
+        setErrorMsg(formatAuthErrorMessage(err));
       }
     } finally {
       setIsLoading(false);
