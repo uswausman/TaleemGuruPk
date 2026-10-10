@@ -16,16 +16,30 @@ export default defineConfig(({ mode }) => {
     ''
   ).trim();
 
-  // Clean URL of any accidental /rest/v1/ or trailing slash
-  const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  function sanitizeSupabaseUrl(raw: string): string {
+    let s = (raw || '').trim().replace(/^["']|["']$/g, '');
+    if (!s) return '';
+    s = s.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+    if (!s.startsWith('http://') && !s.startsWith('https://')) {
+      s = `https://${s}`;
+    }
+    return s;
+  }
 
-  const supabaseAnonKey = (
+  function sanitizeSupabaseKey(raw: string): string {
+    return (raw || '').trim().replace(/^["']|["']$/g, '');
+  }
+
+  const rawSupabaseAnonKey = (
     env.VITE_SUPABASE_ANON_KEY ||
     process.env.VITE_SUPABASE_ANON_KEY ||
     env.SUPABASE_ANON_KEY ||
     process.env.SUPABASE_ANON_KEY ||
     ''
   ).trim();
+
+  const supabaseUrl = sanitizeSupabaseUrl(rawSupabaseUrl);
+  const supabaseAnonKey = sanitizeSupabaseKey(rawSupabaseAnonKey);
 
   return {
     plugins: [react(), tailwindcss()],
