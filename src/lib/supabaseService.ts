@@ -68,21 +68,21 @@ export function formatAuthErrorMessage(error: any): string {
   ) {
     return 'Please enter a valid email address.';
   }
-  if (message.includes('Password should be at least') || message.includes('weak_password')) {
+  if (lower.includes('password should be at least') || lower.includes('weak_password')) {
     return 'Password is too weak. Please use at least 6 characters.';
   }
-  if (message.includes('Email not confirmed') || message.includes('email_not_confirmed')) {
+  if (lower.includes('email not confirmed') || lower.includes('email_not_confirmed')) {
     return 'Please check your email to confirm your account before signing in.';
   }
   if (
-    message.includes('User is banned') ||
-    message.includes('user_banned') ||
-    message.includes('User disabled') ||
-    message.includes('user_disabled')
+    lower.includes('user is banned') ||
+    lower.includes('user_banned') ||
+    lower.includes('user disabled') ||
+    lower.includes('user_disabled')
   ) {
     return 'This account has been disabled or suspended. Please contact support.';
   }
-  if (message.includes('User not found') || message.includes('user_not_found')) {
+  if (lower.includes('user not found') || lower.includes('user_not_found')) {
     return 'No account found with this email. Please check your credentials or register a new account.';
   }
   if (
@@ -98,13 +98,22 @@ export function formatAuthErrorMessage(error: any): string {
   ) {
     return 'Password reset email was requested recently. For security purposes, please wait 60 seconds before requesting another email.';
   }
-  if (message.includes('network') || message.includes('Failed to fetch') || message.includes('NetworkError')) {
+  if (
+    lower.includes('network') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('networkerror') ||
+    lower.includes('fetch failed') ||
+    lower.includes('connection failed') ||
+    lower.includes('econnrefused') ||
+    lower.includes('etimedout') ||
+    lower.includes('abort')
+  ) {
     return 'Network connection failed. Please check your internet connection.';
   }
-  if (message.includes('unauthorized-domain') || message.includes('unauthorized_domain')) {
+  if (lower.includes('unauthorized-domain') || lower.includes('unauthorized_domain')) {
     return 'Domain is not authorized for authentication redirects. Please add this domain to your Supabase Auth redirect URLs.';
   }
-  if (message.includes('JWT') || message.includes('token is expired') || message.includes('session_expired')) {
+  if (lower.includes('jwt') || lower.includes('token is expired') || lower.includes('session_expired')) {
     return 'Your session has expired. Please sign in again.';
   }
 
