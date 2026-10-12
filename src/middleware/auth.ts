@@ -63,6 +63,7 @@ export function verifyCryptographicJwtSignature(token: string): { id: string; em
     }
 
     if (!isSigValid) {
+      console.log('[Auth Diagnostic] JWT signature verification failed');
       return null;
     }
 
@@ -71,7 +72,8 @@ export function verifyCryptographicJwtSignature(token: string): { id: string; em
       email: payload.email || payload.user_metadata?.email,
       user_metadata: payload.user_metadata || {},
     };
-  } catch {
+  } catch (e) {
+    console.log('[Auth Diagnostic] JWT parsing/verification error:', e);
     return null;
   }
 }
@@ -151,6 +153,7 @@ export const requireAuth = async (
         user = data.user;
       }
     } catch (apiErr) {
+      console.log('[Auth Diagnostic] Supabase auth.getUser error:', apiErr);
       console.warn('Notice in Supabase auth.getUser:', apiErr);
     }
   }
@@ -161,6 +164,10 @@ export const requireAuth = async (
   }
 
   if (!user) {
+    console.log('[Auth Diagnostic] Authentication failed in requireAuth:', {
+      hasToken: !!token,
+      tokenPreview: token ? `${token.substring(0, 10)}...` : 'none',
+    });
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired authentication token' });
   }
 
