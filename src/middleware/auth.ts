@@ -160,6 +160,7 @@ export const requireAuth = async (
 
   // Resilient fallback for serverless cold-starts & network glitches (Strict Signature Verification)
   if (!user) {
+    console.log('[Auth Diagnostic] Supabase getUser failed, attempting JWT verification...');
     user = verifyCryptographicJwtSignature(token);
   }
 
