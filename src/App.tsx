@@ -310,6 +310,7 @@ export default function App() {
   useEffect(() => {
     let unsubscribe: any;
     subscribeToAuthState(async (authUser, session, event) => {
+      console.log('[DEBUG-AUTH] App.tsx authState change:', { event, hasAuthUser: !!authUser });
       if (authUser && event !== 'SIGNED_OUT') {
         const token = session?.access_token;
         const normalizedAuthEmail = (authUser.email || '').toLowerCase().trim();
