@@ -109,6 +109,14 @@ function isLocalHost(host?: string): boolean {
   return clean === 'localhost' || clean === '127.0.0.1' || clean === '::1';
 }
 
+function logPoolStats(pool: Pool, context: string) {
+  console.error(`[Database Pool Diagnostics] ${context}`, {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+  });
+}
+
 export const createPool = (): Pool => {
   if (!global._postgresPool) {
     try {
@@ -218,6 +226,7 @@ export const createPool = (): Pool => {
       global._postgresPool.on('error', (err) => {
         const msg = err?.message || '';
         console.warn('[Database] Pool client error encountered:', msg);
+        logPoolStats(global._postgresPool!, 'Error event');
         // Clear global pool so the next query re-initializes a fresh connection pool
         global._postgresPool = undefined;
       });
