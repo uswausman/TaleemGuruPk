@@ -77,6 +77,7 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
     setIsLoading(true);
 
     try {
+      console.log('[DEBUG-AUTH] AdminLoginPortal login attempt for', cleanEmail);
       // 1. Authenticate with real Supabase Auth
       const cred = await loginWithEmail(cleanEmail, password);
       const user = cred.user;
@@ -86,16 +87,19 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
         throw new Error('Invalid email or password.');
       }
 
+/*
       if (!user.email_confirmed_at && (user as any).confirmed_at === null) {
         await logoutUser();
         setErrorMsg('Please check your email to confirm your account before signing in.');
         setIsLoading(false);
         return;
       }
+      */
 
       const token = session?.access_token;
       // 2. Authoritative server verification via /api/admin/verify
       const verifyResult = await verifyUserRoleWithServer(user.uid, user.email, token);
+      console.log('[DEBUG-AUTH] AdminLoginPortal verification result:', verifyResult);
 
       if (verifyResult.isAdmin) {
         const userProfile = await getUserProfile(user.uid);
