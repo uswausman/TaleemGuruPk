@@ -117,6 +117,62 @@ function logPoolStats(pool: Pool, context: string) {
   });
 }
 
+function wrapPool(pool: Pool): Pool {
+  const originalQuery = pool.query.bind(pool);
+  const originalConnect = pool.connect.bind(pool);
+
+  function isAcquisitionTimeout(err: any): boolean {
+    if (!err) return false;
+    const msg = (err.message || '').toLowerCase();
+    // Connection acquisition timeouts in pg-pool often include this specific phrase
+    return msg.includes('connection acquisition timeout');
+  }
+
+  pool.query = function (...args: any[]): any {
+    const callback = args.length > 0 && typeof args[args.length - 1] === 'function' ? args[args.length - 1] : undefined;
+
+    if (callback) {
+      args[args.length - 1] = function (err: any, res: any) {
+        if (err && isAcquisitionTimeout(err)) {
+          logPoolStats(pool, 'Pool.query acquisition timeout (callback)');
+        }
+        callback(err, res);
+      };
+      return originalQuery(...args);
+    }
+
+    return originalQuery(...args).catch((err: any) => {
+      if (isAcquisitionTimeout(err)) {
+        logPoolStats(pool, 'Pool.query acquisition timeout (promise)');
+      }
+      throw err;
+    });
+  };
+
+  pool.connect = function (...args: any[]): any {
+    const callback = args.length > 0 && typeof args[0] === 'function' ? args[0] : undefined;
+
+    if (callback) {
+      args[0] = function (err: any, client: any, done: any) {
+        if (err && isAcquisitionTimeout(err)) {
+          logPoolStats(pool, 'Pool.connect acquisition timeout (callback)');
+        }
+        callback(err, client, done);
+      };
+      return originalConnect(...args);
+    }
+
+    return originalConnect(...args).catch((err: any) => {
+      if (isAcquisitionTimeout(err)) {
+        logPoolStats(pool, 'Pool.connect acquisition timeout (promise)');
+      }
+      throw err;
+    });
+  };
+
+  return pool;
+}
+
 export const createPool = (): Pool => {
   if (!global._postgresPool) {
     try {
@@ -129,7 +185,7 @@ export const createPool = (): Pool => {
       if (process.env.SQL_HOST) {
         const isUnixSocket = process.env.SQL_HOST.startsWith('/');
         console.info(`[Database] Initializing connection pool with SQL_HOST: ${process.env.SQL_HOST}`);
-        global._postgresPool = new Pool({
+        global._postgresPool = wrapPool(new Pool({
           host: process.env.SQL_HOST,
           user: process.env.SQL_USER,
           password: process.env.SQL_PASSWORD,
@@ -138,7 +194,7 @@ export const createPool = (): Pool => {
           max: 10,
           idleTimeoutMillis: 10000,
           connectionTimeoutMillis: 15000,
-        });
+        }));
       }
       // 2. Authoritative Database / Postgres URL (Vercel, Supabase, Neon, Cloud SQL TCP)
       else {
@@ -152,18 +208,18 @@ export const createPool = (): Pool => {
           const redacted = redactConnectionString(connectionString);
           console.info(`[Database] Initializing connection pool via ${resolved.selectedEnvVar}: ${redacted}`);
 
-          global._postgresPool = new Pool({
+          global._postgresPool = wrapPool(new Pool({
             connectionString,
             ssl: isLocal || hasSslDisabled ? false : { rejectUnauthorized: false },
             max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
-          });
+          }));
         }
         // 3. Discrete Remote Parameters (POSTGRES_HOST / PGHOST)
         else if (process.env.POSTGRES_HOST && !isLocalHost(process.env.POSTGRES_HOST)) {
           console.info(`[Database] Initializing connection pool with POSTGRES_HOST: ${process.env.POSTGRES_HOST}`);
-          global._postgresPool = new Pool({
+          global._postgresPool = wrapPool(new Pool({
             host: process.env.POSTGRES_HOST,
             user: process.env.POSTGRES_USER,
             password: process.env.POSTGRES_PASSWORD,
@@ -173,10 +229,10 @@ export const createPool = (): Pool => {
             max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
-          });
+          }));
         } else if (process.env.PGHOST && !isLocalHost(process.env.PGHOST)) {
           console.info(`[Database] Initializing connection pool with PGHOST: ${process.env.PGHOST}`);
-          global._postgresPool = new Pool({
+          global._postgresPool = wrapPool(new Pool({
             host: process.env.PGHOST,
             user: process.env.PGUSER,
             password: process.env.PGPASSWORD,
@@ -186,7 +242,7 @@ export const createPool = (): Pool => {
             max: isVercel ? 2 : 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
-          });
+          }));
         }
         // 4. Production Protection: NEVER silently fallback to localhost:5432 in production
         else if (isProduction) {
@@ -210,7 +266,7 @@ export const createPool = (): Pool => {
         }
         // 5. Local Development Fallback only
         else {
-          global._postgresPool = new Pool({
+          global._postgresPool = wrapPool(new Pool({
             host: process.env.PGHOST || 'localhost',
             user: process.env.PGUSER || 'postgres',
             password: process.env.PGPASSWORD,
@@ -219,7 +275,7 @@ export const createPool = (): Pool => {
             max: 10,
             idleTimeoutMillis: 10000,
             connectionTimeoutMillis: 15000,
-          });
+          }));
         }
       }
 
