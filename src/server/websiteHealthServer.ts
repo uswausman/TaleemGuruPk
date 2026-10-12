@@ -1056,6 +1056,7 @@ export async function runDatabaseHealthCheck(): Promise<DatabaseHealthResult> {
     'test_results',
     'audit_logs',
     'site_settings',
+    'website_error_incidents',
   ];
 
   const tableStatuses: DatabaseHealthResult['requiredTablesStatus'] = [];
