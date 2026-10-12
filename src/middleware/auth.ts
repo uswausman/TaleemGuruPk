@@ -27,7 +27,15 @@ export function getSupabaseServerClient(): SupabaseClient | null {
     !supabaseUrl.includes('placeholder')
   );
 
-  if (!isConfigured) return null;
+  if (!isConfigured) {
+    console.log('[Auth Diagnostic] getSupabaseServerClient not configured:', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseKey,
+      urlPrefixOk: supabaseUrl.startsWith('https://'),
+      urlHasPlaceholder: supabaseUrl.includes('placeholder'),
+    });
+    return null;
+  }
 
   return createClient(supabaseUrl, supabaseKey, {
     auth: {
