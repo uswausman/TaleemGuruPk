@@ -97,15 +97,22 @@ function createMockReqRes(options: {
   };
 }
 
+if (!process.env.SERVER_JWT_SECRET) {
+  process.env.SERVER_JWT_SECRET = 'taleemguru-dev-server-jwt-secret-key-32bytes';
+}
+
 // Generate signed bearer token recognized by TaleemGuru requireAuth fallback
 function createSignedToken(uid: string, email: string): string {
-  const secret = process.env.SUPABASE_ANON_KEY || process.env.SQL_ADMIN_PASSWORD || 'taleemguru-admin-auth-key';
+  const secret = process.env.SERVER_JWT_SECRET!;
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const payload = Buffer.from(
     JSON.stringify({
       sub: uid,
       email: email,
+      iss: 'taleemguru-backend',
+      aud: 'taleemguru-admin',
       exp: Math.floor(Date.now() / 1000) + 3600,
+      nbf: Math.floor(Date.now() / 1000) - 10,
     })
   ).toString('base64url');
   const signature = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
