@@ -24,7 +24,7 @@ async function runTestDataClassificationAudit() {
       u.roles?.some(r => r.toLowerCase().includes('test'))
     );
     const unclassifiedUsers = allUsers.filter(u => 
-      !testUsers.includes(u) && (!u.lastLoginAt && !u.createdAt)
+      !testUsers.includes(u) && !u.createdAt
     );
     const verifiedUsers = totalUsers - testUsers.length - unclassifiedUsers.length;
 
@@ -71,11 +71,9 @@ async function runTestDataClassificationAudit() {
     // 4. Submissions / Test Results Audit & Classification
     const allResults = await db.select().from(testResults);
     const totalResults = allResults.length;
-    // Test submissions identified by test score patterns, test user IDs, or automated run flags
     const testSubmissions = allResults.filter(r => 
-      r.score === 0 || 
-      r.score === 100 && r.totalQuestions === 0 ||
-      testUsers.some(u => u.id === r.userId)
+      r.percentage === 0 || 
+      testUsers.some(u => u.uid === r.userUid)
     );
     const verifiedResults = totalResults - testSubmissions.length;
 
