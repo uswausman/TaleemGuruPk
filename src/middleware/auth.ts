@@ -211,49 +211,7 @@ export interface AuthRequest extends Request {
     name?: string;
     roles: string[];
   };
-}
 
-export function getServerJwtSecret(): string {
-  const secret =
-    process.env.SERVER_JWT_SECRET ||
-    process.env.JWT_SECRET ||
-    process.env.SUPABASE_JWT_SECRET ||
-    process.env.VITE_SERVER_JWT_SECRET ||
-    process.env.VITE_JWT_SECRET;
-  if (secret && typeof secret === 'string' && secret.trim().length > 0) {
-    return secret.trim();
-  }
-
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  if (serviceKey && typeof serviceKey === 'string' && serviceKey.trim().length >= 16) {
-    return `taleemguru-derived-jwt-${serviceKey.trim().substring(0, 32)}`;
-  }
-
-  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (dbUrl && typeof dbUrl === 'string' && dbUrl.trim().length >= 16) {
-    return `taleemguru-db-jwt-${dbUrl.trim().substring(0, 32)}`;
-  }
-
-  return 'taleemguru-production-server-jwt-secret-key-32bytes';
-}
-
-export function isServerJwtCandidate(token?: string | null): boolean {
-  if (!token || typeof token !== 'string') return false;
-  const parts = token.trim().split('.');
-  if (parts.length !== 3) return false;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return payload?.iss === 'taleemguru-backend' || payload?.aud === 'taleemguru-admin';
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Verifies a server-signed HMAC-SHA256 JWT using dedicated SERVER_JWT_SECRET.
- * Requires alg HS256, iss 'taleemguru-backend', aud 'taleemguru-admin', valid exp/nbf, and valid sub.
- */
-export function verifyServerSignedToken(token?: string | null): {
   valid: boolean;
   user?: {
     id: string;
