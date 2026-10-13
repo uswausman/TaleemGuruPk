@@ -77,54 +77,34 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
     setIsLoading(true);
 
     try {
-      console.log('[DEBUG-AUTH] AdminLoginPortal login attempt for', cleanEmail);
-      // 1. Authenticate with real Supabase Auth
-      const cred = await loginWithEmail(cleanEmail, password);
-      const user = cred.user;
-      const session = cred.session;
+      console.log('[DEBUG-AUTH] AdminLoginPortal submitting to /api/admin/login for', cleanEmail);
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, password }),
+      });
 
-      if (!user) {
-        throw new Error('Invalid email or password.');
-      }
+      const data = await res.json().catch(() => ({}));
 
-/*
-      if (!user.email_confirmed_at && (user as any).confirmed_at === null) {
-        await logoutUser();
-        setErrorMsg('Please check your email to confirm your account before signing in.');
-        setIsLoading(false);
-        return;
-      }
-      */
-
-      const token = session?.access_token;
-      // 2. Authoritative server verification via /api/admin/verify
-      const verifyResult = await verifyUserRoleWithServer(user.uid, user.email, token);
-      console.log('[DEBUG-AUTH] AdminLoginPortal verification result:', verifyResult);
-
-      if (verifyResult.isAdmin) {
-        const userProfile = await getUserProfile(user.uid);
-        const verifiedRoles = (userProfile?.roles || []).map(r => r.toLowerCase().trim());
-        const roleDisplay = verifiedRoles.includes('teacher') ? 'Teacher' : 'Admin';
-        const resolvedRoles: any = Array.isArray(userProfile?.roles) && userProfile.roles.length > 0
-          ? userProfile.roles
-          : (roleDisplay === 'Teacher' ? ['Teacher'] : ['Admin']);
+      if (res.ok && data.success && data.user && data.token) {
+        const resolvedRoles: any = Array.isArray(data.user.roles) && data.user.roles.length > 0
+          ? data.user.roles
+          : [data.user.role || 'Admin'];
 
         const adminData: AdminUser = {
-          id: user.uid,
-          name: userProfile?.name || user.displayName || 'Administrator',
-          email: (user.email || cleanEmail).trim().toLowerCase(),
+          id: data.user.uid,
+          name: data.user.name || 'Administrator',
+          email: (data.user.email || cleanEmail).trim().toLowerCase(),
           roles: resolvedRoles,
-          status: 'Active',
-          testsCompleted: userProfile?.testsTaken ?? 0,
-          points: userProfile?.points ?? 0,
-          joinedDate: (userProfile as any)?.createdAt ? new Date((userProfile as any).createdAt).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB'),
+          status: data.user.status || 'Active',
+          testsCompleted: 0,
+          points: 9999,
+          joinedDate: new Date().toLocaleDateString('en-GB'),
         };
 
-        if (token) {
-          try {
-            localStorage.setItem('taleemguru_admin_token', token);
-          } catch {}
-        }
+        try {
+          localStorage.setItem('taleemguru_admin_token', data.token);
+        } catch {}
         try {
           localStorage.setItem('taleemguru_admin_profile', JSON.stringify(adminData));
         } catch {}
@@ -133,28 +113,13 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
         setTimeout(() => {
           triggerLoginSuccess(adminData);
         }, 600);
-      } else if (verifyResult.isTransient) {
-        setErrorMsg('Network connection to verification server failed. Please check your internet connection and try again.');
       } else {
-        await logoutUser().catch(() => {});
-        setErrorMsg('Access Denied: You do not have permission to access the Admin Control Panel.');
+        const errMsg = data.error || data.message || 'Invalid email or password.';
+        setErrorMsg(errMsg);
       }
     } catch (err: any) {
-      try {
-        await logoutUser().catch(() => {});
-      } catch {}
-      const msg = String(err?.message || err || '');
-      if (msg.toLowerCase().includes('confirm your account')) {
-        setErrorMsg('Please check your email to confirm your account before signing in.');
-      } else if (
-        msg.toLowerCase().includes('failed to fetch') ||
-        msg.toLowerCase().includes('network') ||
-        msg.toLowerCase().includes('connection')
-      ) {
-        setErrorMsg('Network connection failed. Please check your internet connection.');
-      } else {
-        setErrorMsg(formatAuthErrorMessage(err));
-      }
+      console.error('Error in AdminLoginPortal submit:', err);
+      setErrorMsg('Network connection failed. Please check your internet connection.');
     } finally {
       setIsLoading(false);
     }
