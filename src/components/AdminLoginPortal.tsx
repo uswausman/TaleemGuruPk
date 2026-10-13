@@ -23,6 +23,7 @@ import {
   isUserAdminInCloud,
   getUserProfile,
   verifyUserRoleWithServer,
+  isSupabaseConfigured,
 } from '../lib/supabaseService';
 import { getAuthRedirectUrl } from '../lib/config';
 import { useSiteSettings } from '../context/SiteSettingsContext';
