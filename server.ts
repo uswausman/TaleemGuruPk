@@ -2,12 +2,23 @@ import fs from 'fs';
 import path from 'path';
 import express from 'express';
 
-// Normalize Supabase URLs at process boot to prevent /rest/v1/ suffix issues
+// Normalize Supabase URLs at process boot to strip accidental wrapping quotes and /rest/v1/ suffix issues
+const normalizeBootUrl = (val?: string) => {
+  if (!val || typeof val !== 'string') return val;
+  let s = val.trim().replace(/^\uFEFF/, '').trim();
+  while (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+};
 if (process.env.VITE_SUPABASE_URL) {
-  process.env.VITE_SUPABASE_URL = process.env.VITE_SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  process.env.VITE_SUPABASE_URL = normalizeBootUrl(process.env.VITE_SUPABASE_URL);
 }
 if (process.env.SUPABASE_URL) {
-  process.env.SUPABASE_URL = process.env.SUPABASE_URL.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  process.env.SUPABASE_URL = normalizeBootUrl(process.env.SUPABASE_URL);
 }
 
 import app from './src/serverApp.ts';
