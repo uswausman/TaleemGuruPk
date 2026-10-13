@@ -3,8 +3,6 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getUserByUid, getOrCreateUser, isTrustedBootstrapAdminEmail, getTrustedBootstrapAdmins } from '../db/users.ts';
 import crypto from 'crypto';
 
-
-
 // Cached server client singleton to prevent overhead across incoming requests
 let cachedServerClient: SupabaseClient | null = null;
 let cachedConfigKey = '';
@@ -99,9 +97,6 @@ export function resolveSupabaseServerConfig(): {
     urlHasPlaceholder: boolean;
   };
 } {
-  // Candidate URLs in priority order:
-  // 1. SUPABASE_URL (server-side explicit)
-  // 2. VITE_SUPABASE_URL (shared/client environment variable)
   const urlCandidates: Array<{ name: string; val: string | undefined }> = [
     { name: 'SUPABASE_URL', val: process.env.SUPABASE_URL },
     { name: 'VITE_SUPABASE_URL', val: process.env.VITE_SUPABASE_URL },
@@ -138,10 +133,6 @@ export function resolveSupabaseServerConfig(): {
     }
   }
 
-  // Candidate Keys in priority order:
-  // 1. SUPABASE_SERVICE_ROLE_KEY (preferred for backend auth token verification)
-  // 2. SUPABASE_ANON_KEY (server-side anon key)
-  // 3. VITE_SUPABASE_ANON_KEY (shared client anon key)
   const keyCandidates: Array<{ name: string; val: string | undefined }> = [
     { name: 'SUPABASE_SERVICE_ROLE_KEY', val: process.env.SUPABASE_SERVICE_ROLE_KEY },
     { name: 'SUPABASE_ANON_KEY', val: process.env.SUPABASE_ANON_KEY },
@@ -211,7 +202,49 @@ export interface AuthRequest extends Request {
     name?: string;
     roles: string[];
   };
+}
 
+/**
+ * Returns the server JWT secret strictly from server environment variables process.env.SERVER_JWT_SECRET or process.env.JWT_SECRET.
+ * Never reads from VITE_* variables.
+ * Never derives from DATABASE_URL, Supabase service-role keys, or other credentials.
+ * Fails closed by returning null in production if unconfigured or empty.
+ */
+export function getServerJwtSecret(): string | null {
+  const secret = process.env.SERVER_JWT_SECRET || process.env.JWT_SECRET;
+  if (secret && typeof secret === 'string' && secret.trim().length > 0) {
+    return secret.trim();
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  if (isProduction) {
+    return null;
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    return 'taleemguru-dev-server-jwt-secret-key-32bytes';
+  }
+
+  return null;
+}
+
+export function isServerJwtCandidate(token?: string | null): boolean {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.trim().split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return payload?.iss === 'taleemguru-backend' || payload?.aud === 'taleemguru-admin';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verifies a server-signed HMAC-SHA256 JWT using dedicated SERVER_JWT_SECRET.
+ * Requires alg HS256, iss 'taleemguru-backend', aud 'taleemguru-admin', valid exp/nbf, and valid sub.
+ */
+export function verifyServerSignedToken(token?: string | null): {
   valid: boolean;
   user?: {
     id: string;
@@ -312,7 +345,6 @@ export const requireAuth = async (
   res: Response,
   next: NextFunction
 ) => {
-  // If user identity is already verified on the request, proceed directly
   if (req.user && req.user.uid) {
     return next();
   }
@@ -329,7 +361,7 @@ export const requireAuth = async (
 
   let user: any = null;
 
-  // 1. First verify against server-signed JWT tokens (e.g. /api/admin/login sessions or test suites)
+  // 1. First verify against server-signed JWT tokens
   const serverTokenVerification = verifyServerSignedToken(token);
   if (serverTokenVerification.valid && serverTokenVerification.user) {
     user = serverTokenVerification.user;
@@ -355,10 +387,6 @@ export const requireAuth = async (
   }
 
   if (!user) {
-    console.log('[Auth Diagnostic] Authentication failed in requireAuth:', {
-      hasToken: !!token,
-      tokenPreview: token ? `${token.substring(0, 10)}...` : 'none',
-    });
     return res.status(401).json({ error: 'Unauthorized: Invalid or expired authentication token' });
   }
 
@@ -392,28 +420,13 @@ export const requireAuth = async (
       return res.status(503).json({ error: 'Service Unavailable: Database error during identity authorization' });
     }
 
-    // Role resolution:
-    // Database records dictate roles. If a verified bootstrap admin email is used, bootstrapConfig roles are used if dbUser has no roles.
-    // NOTE: user.user_metadata.roles fallback is intentionally REMOVED for security hardening.
     let authoritativeRoles = ['Student'];
     if (dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0) {
       authoritativeRoles = dbUser.roles;
     } else if (isBootstrap && dbUser) {
       authoritativeRoles = bootstrapConfig?.roles || ['Admin'];
     } else if (dbUser?.role) {
-      authoritativeRoles = [dbUser.role]; // Backward compatibility
-    }
-
-    // Server-only non-sensitive diagnostic logging for trusted admin
-    if (isBootstrap) {
-      console.log('[Auth Diagnostic]', {
-        normalizedEmail,
-        tokenVerificationSuccess: true,
-        trustedAdminMatch: isBootstrap,
-        dbProfileRoles: dbUser?.roles || [],
-        authoritativeRoles,
-        isAdmin: authoritativeRoles.some(r => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase())),
-      });
+      authoritativeRoles = [dbUser.role];
     }
 
     req.user = {
@@ -449,13 +462,11 @@ export const optionalAuth = async (
   try {
     let user: any = null;
 
-    // 1. First check server-signed JWT tokens
     const serverTokenResult = verifyServerSignedToken(token);
     if (serverTokenResult.valid && serverTokenResult.user) {
       user = serverTokenResult.user;
     }
 
-    // 2. Fall back to Supabase client
     if (!user && !isServerJwtCandidate(token)) {
       const client = getSupabaseServerClient();
       if (client) {
@@ -502,9 +513,8 @@ export const optionalAuth = async (
 };
 
 /**
- * Middleware: Requires an authenticated Supabase user whose role in the
+ * Middleware: Requires an authenticated user whose role in the
  * authoritative database is explicitly verified as an Administrator.
- * Fails closed on any error, missing user, or non-admin role.
  */
 export const requireAdmin = async (
   req: AuthRequest,
@@ -521,7 +531,6 @@ export const requireAdmin = async (
 
       const normalizedEmail = (email || '').toLowerCase().trim();
 
-      // Query database directly to ensure freshest authoritative verification for the authenticated UID
       let dbUser = null;
       try {
         dbUser = await getUserByUid(uid);
@@ -567,12 +576,10 @@ export const requireAdmin = async (
         });
       }
 
-      // Authoritative role confirmed
       req.user!.roles = dbUser.roles || [dbUser.role];
       return next();
     } catch (err) {
       console.error('requireAdmin verification failed:', err);
-      // Fail closed
       return res.status(403).json({
         error: 'Forbidden: Admin security verification failed',
       });
@@ -581,7 +588,7 @@ export const requireAdmin = async (
 };
 
 /**
- * Middleware: Requires an authenticated Supabase user whose role in the
+ * Middleware: Requires an authenticated user whose role in the
  * authoritative database includes ContentManager or is an Administrator.
  */
 export const requireContentManager = async (
@@ -599,7 +606,6 @@ export const requireContentManager = async (
 
       const normalizedEmail = (email || '').toLowerCase().trim();
 
-      // Query database directly to ensure freshest authoritative verification for the authenticated UID
       let dbUser = null;
       try {
         dbUser = await getUserByUid(uid);
@@ -637,9 +643,6 @@ export const requireContentManager = async (
 
 /**
  * Middleware: Requires an authoritative high-level administrator
- * (admin, superadmin, super_admin, administrator) for sensitive operations
- * such as user role delegation and staff account creation.
- * Teachers, Editors, ContentManagers, Moderators, and Students are strictly blocked with HTTP 403 Forbidden.
  */
 export const requireHighAdmin = async (
   req: AuthRequest,
@@ -672,7 +675,7 @@ export const requireHighAdmin = async (
 };
 
 /**
- * Middleware: Requires permission to curate/manage MCQs (Admin, Teacher, Editor, ContentManager)
+ * Middleware: Requires permission to curate/manage MCQs
  */
 export const requireMCQCurator = async (
   req: AuthRequest,
@@ -712,7 +715,7 @@ export const requireMCQCurator = async (
 };
 
 /**
- * Middleware: Requires permission to create/manage tests and quizzes (Admin, Teacher, ContentManager)
+ * Middleware: Requires permission to create/manage tests and quizzes
  */
 export const requireQuizCreator = async (
   req: AuthRequest,
@@ -751,7 +754,7 @@ export const requireQuizCreator = async (
 };
 
 /**
- * Middleware: Requires permission to manage Past Papers and Study Notes (Admin, ContentManager, Editor, Teacher)
+ * Middleware: Requires permission to manage Past Papers and Study Notes
  */
 export const requireContentCurator = async (
   req: AuthRequest,
@@ -791,7 +794,7 @@ export const requireContentCurator = async (
 };
 
 /**
- * Middleware: Requires permission to access Teacher portal (Admin, Teacher, ContentManager, SuperAdmin)
+ * Middleware: Requires permission to access Teacher portal
  */
 export const requireTeacher = async (
   req: AuthRequest,
@@ -830,5 +833,3 @@ export const requireTeacher = async (
     }
   });
 };
-
-
