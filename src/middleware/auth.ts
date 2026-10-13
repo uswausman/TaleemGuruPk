@@ -213,8 +213,127 @@ export interface AuthRequest extends Request {
   };
 }
 
+export function getServerJwtSecret(): string | null {
+  const secret = process.env.SERVER_JWT_SECRET;
+  if (secret && typeof secret === 'string' && secret.trim().length > 0) {
+    return secret.trim();
+  }
+  if (process.env.NODE_ENV === 'development') {
+    return 'taleemguru-dev-server-jwt-secret-key-32bytes';
+  }
+  return null;
+}
+
+export function isServerJwtCandidate(token?: string | null): boolean {
+  if (!token || typeof token !== 'string') return false;
+  const parts = token.trim().split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    return payload?.iss === 'taleemguru-backend' || payload?.aud === 'taleemguru-admin';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Middleware: Strictly requires a valid Supabase bearer token.
+ * Verifies a server-signed HMAC-SHA256 JWT using dedicated SERVER_JWT_SECRET.
+ * Requires alg HS256, iss 'taleemguru-backend', aud 'taleemguru-admin', valid exp/nbf, and valid sub.
+ */
+export function verifyServerSignedToken(token?: string | null): {
+  valid: boolean;
+  user?: {
+    id: string;
+    email?: string;
+    role: string;
+    user_metadata: Record<string, any>;
+    app_metadata: Record<string, any>;
+  };
+  error?: string;
+} {
+  if (!token || typeof token !== 'string') {
+    return { valid: false, error: 'Empty token' };
+  }
+
+  const secret = getServerJwtSecret();
+  if (!secret) {
+    return { valid: false, error: 'SERVER_JWT_SECRET is not configured' };
+  }
+
+  const parts = token.trim().split('.');
+  if (parts.length !== 3) {
+    return { valid: false, error: 'Malformed token structure' };
+  }
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+  let header: any;
+  let payload: any;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    return { valid: false, error: 'Invalid base64url JSON in token' };
+  }
+
+  if (!header || header.alg !== 'HS256') {
+    return { valid: false, error: `Unsupported or missing algorithm: ${header?.alg}` };
+  }
+
+  if (payload?.iss !== 'taleemguru-backend') {
+    return { valid: false, error: 'Invalid token issuer' };
+  }
+
+  if (payload?.aud !== 'taleemguru-admin') {
+    return { valid: false, error: 'Invalid token audience' };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+
+  if (payload?.exp && typeof payload.exp === 'number') {
+    if (payload.exp < now) {
+      return { valid: false, error: 'Token expired' };
+    }
+  }
+
+  if (payload?.nbf && typeof payload.nbf === 'number') {
+    if (payload.nbf > now) {
+      return { valid: false, error: 'Token not yet active' };
+    }
+  }
+
+  const uid = payload.sub || payload.uid || payload.id;
+  if (!uid || typeof uid !== 'string' || uid.trim().length === 0) {
+    return { valid: false, error: 'Missing subject identifier in token' };
+  }
+
+  const dataToVerify = `${headerB64}.${payloadB64}`;
+  const sigBuf = Buffer.from(signatureB64, 'base64url');
+
+  try {
+    const hmac = crypto.createHmac('sha256', secret);
+    hmac.update(dataToVerify);
+    const expectedDigest = hmac.digest();
+    if (sigBuf.length !== expectedDigest.length || !crypto.timingSafeEqual(sigBuf, expectedDigest)) {
+      return { valid: false, error: 'Invalid token signature' };
+    }
+  } catch {
+    return { valid: false, error: 'Signature verification error' };
+  }
+
+  return {
+    valid: true,
+    user: {
+      id: String(uid).trim(),
+      email: payload.email ? String(payload.email) : undefined,
+      role: payload.role || 'authenticated',
+      user_metadata: (payload.user_metadata && typeof payload.user_metadata === 'object') ? payload.user_metadata : {},
+      app_metadata: (payload.app_metadata && typeof payload.app_metadata === 'object') ? payload.app_metadata : {},
+    },
+  };
+}
+
+/**
+ * Middleware: Strictly requires a valid Supabase bearer token or server-signed JWT.
  * Authoritatively populates user identity and role from the database.
  */
 export const requireAuth = async (
@@ -237,22 +356,31 @@ export const requireAuth = async (
     return res.status(401).json({ error: 'Unauthorized: Empty token provided' });
   }
 
-  const client = getSupabaseServerClient();
   let user: any = null;
-  
-  if (client) {
-    try {
-      const { data, error } = await client.auth.getUser(token);
-      if (error) {
-        console.log('[Auth Diagnostic] Supabase client.auth.getUser error:', error.message);
-      } else if (data?.user) {
-        user = data.user;
+
+  // 1. First verify against server-signed JWT tokens (e.g. /api/admin/login sessions or test suites)
+  const serverTokenVerification = verifyServerSignedToken(token);
+  if (serverTokenVerification.valid && serverTokenVerification.user) {
+    user = serverTokenVerification.user;
+  }
+
+  // 2. If not a valid server-signed JWT and not a candidate server JWT, verify against Supabase Auth
+  if (!user && !isServerJwtCandidate(token)) {
+    const client = getSupabaseServerClient();
+    if (client) {
+      try {
+        const { data, error } = await client.auth.getUser(token);
+        if (error) {
+          console.log('[Auth Diagnostic] Supabase client.auth.getUser error:', error.message);
+        } else if (data?.user) {
+          user = data.user;
+        }
+      } catch (apiErr) {
+        console.log('[Auth Diagnostic] Supabase auth.getUser exception:', apiErr);
       }
-    } catch (apiErr) {
-      console.log('[Auth Diagnostic] Supabase auth.getUser exception:', apiErr);
+    } else {
+      console.log('[Auth Diagnostic] Supabase client not initialized in requireAuth');
     }
-  } else {
-    console.log('[Auth Diagnostic] Supabase client not initialized in requireAuth');
   }
 
   if (!user) {
@@ -271,30 +399,36 @@ export const requireAuth = async (
 
     // Query trusted database for authoritative role and details
     let dbUser = null;
+    let dbError = false;
     try {
       dbUser = await getUserByUid(user.id);
+      const hasStaffRole = dbUser?.roles && dbUser.roles.some((r: string) => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase()));
       if (!dbUser && normalizedEmail) {
         dbUser = await getOrCreateUser(user.id, normalizedEmail, {
           name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : (user.user_metadata?.name || user.user_metadata?.full_name),
         });
-      } else if (dbUser && isBootstrap && (!dbUser.roles || !dbUser.roles.includes('Admin') || dbUser.name !== (bootstrapConfig?.name || 'Admin'))) {
+      } else if (dbUser && isBootstrap && (!dbUser.roles || dbUser.roles.length === 0 || !hasStaffRole)) {
         dbUser = await getOrCreateUser(user.id, normalizedEmail, {
           name: bootstrapConfig?.name || 'Admin',
         });
       }
     } catch (dbErr) {
-      console.warn('Notice: Unable to query or initialize database user in requireAuth:', dbErr);
+      console.error('Error querying database in requireAuth:', dbErr);
+      dbError = true;
+    }
+
+    if (dbError) {
+      return res.status(503).json({ error: 'Service Unavailable: Database error during identity authorization' });
     }
 
     // Role resolution:
-    // If user is a verified bootstrap admin email, canonical role MUST be 'Admin'.
-    // If dbUser exists, use dbUser.roles.
-    // Otherwise default to ['Student'].
+    // Database records dictate roles. If a verified bootstrap admin email is used, bootstrapConfig roles are used if dbUser has no roles.
+    // NOTE: user.user_metadata.roles fallback is intentionally REMOVED for security hardening.
     let authoritativeRoles = ['Student'];
-    if (isBootstrap) {
-      authoritativeRoles = ['Admin'];
-    } else if (dbUser?.roles && Array.isArray(dbUser.roles)) {
+    if (dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0) {
       authoritativeRoles = dbUser.roles;
+    } else if (isBootstrap && dbUser) {
+      authoritativeRoles = bootstrapConfig?.roles || ['Admin'];
     } else if (dbUser?.role) {
       authoritativeRoles = [dbUser.role]; // Backward compatibility
     }
@@ -307,7 +441,7 @@ export const requireAuth = async (
         trustedAdminMatch: isBootstrap,
         dbProfileRoles: dbUser?.roles || [],
         authoritativeRoles,
-        isAdmin: authoritativeRoles.includes('Admin'),
+        isAdmin: authoritativeRoles.some(r => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase())),
       });
     }
 
@@ -342,14 +476,23 @@ export const optionalAuth = async (
   if (!token) return next();
 
   try {
-    const client = getSupabaseServerClient();
     let user: any = null;
 
-    if (client) {
-      try {
-        const { data } = await client.auth.getUser(token);
-        if (data?.user) user = data.user;
-      } catch {}
+    // 1. First check server-signed JWT tokens
+    const serverTokenResult = verifyServerSignedToken(token);
+    if (serverTokenResult.valid && serverTokenResult.user) {
+      user = serverTokenResult.user;
+    }
+
+    // 2. Fall back to Supabase client
+    if (!user && !isServerJwtCandidate(token)) {
+      const client = getSupabaseServerClient();
+      if (client) {
+        try {
+          const { data } = await client.auth.getUser(token);
+          if (data?.user) user = data.user;
+        } catch {}
+      }
     }
 
     if (user) {
@@ -363,8 +506,15 @@ export const optionalAuth = async (
       } catch {}
 
       let authoritativeRoles = ['Student'];
-      if (isBootstrap) authoritativeRoles = ['Admin'];
-      else if (dbUser?.roles && Array.isArray(dbUser.roles)) authoritativeRoles = dbUser.roles;
+      if (dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0) {
+        authoritativeRoles = dbUser.roles;
+      } else if (isBootstrap) {
+        authoritativeRoles = bootstrapConfig?.roles || ['Admin'];
+      } else if (dbUser?.role) {
+        authoritativeRoles = [dbUser.role];
+      } else if (user.user_metadata?.roles && Array.isArray(user.user_metadata.roles)) {
+        authoritativeRoles = user.user_metadata.roles;
+      }
 
       req.user = {
         uid: user.id,
@@ -399,15 +549,8 @@ export const requireAdmin = async (
       }
 
       const normalizedEmail = (email || '').toLowerCase().trim();
-      const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
 
-      // If user is a verified trusted bootstrap admin, grant admin access immediately
-      if (isBootstrap) {
-        req.user!.roles = ['Admin'];
-        return next();
-      }
-
-      // Query database directly to ensure freshest authoritative verification
+      // Query database directly to ensure freshest authoritative verification for the authenticated UID
       let dbUser = null;
       try {
         dbUser = await getUserByUid(uid);
@@ -484,17 +627,14 @@ export const requireContentManager = async (
       }
 
       const normalizedEmail = (email || '').toLowerCase().trim();
-      const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
 
-      // If user is a verified trusted bootstrap admin, grant access immediately
-      if (isBootstrap) {
-        return next();
-      }
-
-      // Query database directly
+      // Query database directly to ensure freshest authoritative verification for the authenticated UID
       let dbUser = null;
       try {
         dbUser = await getUserByUid(uid);
+        if (!dbUser && normalizedEmail) {
+          dbUser = await getOrCreateUser(uid, normalizedEmail);
+        }
       } catch (dbErr) {
         console.warn('Notice in requireContentManager database lookup:', dbErr);
       }

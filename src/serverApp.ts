@@ -105,6 +105,7 @@ import {
   requireContentCurator,
   requireTeacher,
   getSupabaseServerClient,
+  getServerJwtSecret,
   type AuthRequest,
 } from './middleware/auth.ts';
 import { isAcademicAssignmentAllowed } from './lib/permissions.ts';
@@ -2500,7 +2501,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       (authenticatedUser.user_metadata?.full_name && authenticatedUser.user_metadata?.full_name !== 'avatar-1' ? authenticatedUser.user_metadata?.full_name : null) ||
       'Admin';
 
-    // 3. Generate secure signed standard 7-day administrative session JWT
+    // 3. Generate secure signed standard 7-day administrative session JWT using dedicated SERVER_JWT_SECRET
     const nowSeconds = Math.floor(Date.now() / 1000);
     const expSeconds = nowSeconds + 60 * 60 * 24 * 7;
 
@@ -2509,9 +2510,11 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       sub: userId,
       email: userEmail,
       role: authoritativeRole,
-      aud: 'authenticated',
+      iss: 'taleemguru-backend',
+      aud: 'taleemguru-admin',
       exp: expSeconds,
       iat: nowSeconds,
+      nbf: nowSeconds,
       user_metadata: {
         name: adminName,
         role: authoritativeRole,
@@ -2519,7 +2522,13 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
     })).toString('base64url');
 
     const crypto = await import('crypto');
-    const secret = process.env.SUPABASE_ANON_KEY || process.env.SQL_ADMIN_PASSWORD || 'taleemguru-admin-auth-key';
+    const secret = getServerJwtSecret();
+    if (!secret) {
+      console.error('[Admin Login Error] SERVER_JWT_SECRET is missing or invalid in server environment.');
+      return res.status(500).json({
+        error: 'Authentication service configuration error. Please contact the administrator.',
+      });
+    }
     const signature = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
     const token = `${header}.${payload}.${signature}`;
 
@@ -6338,11 +6347,12 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
     let dbUser = null;
     try {
       dbUser = await getUserByUid(uid);
+      const hasAdminRole = dbUser?.roles && dbUser.roles.some((r: string) => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase()));
       if (!dbUser && normalizedEmail) {
         dbUser = await getOrCreateUser(uid, normalizedEmail, {
           name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : req.user?.name,
         });
-      } else if (dbUser && isBootstrap && (!dbUser.roles || !dbUser.roles.includes('Admin') || dbUser.name !== (bootstrapConfig?.name || 'Admin'))) {
+      } else if (dbUser && isBootstrap && !hasAdminRole) {
         dbUser = await getOrCreateUser(uid, normalizedEmail, {
           name: bootstrapConfig?.name || 'Admin',
         });
@@ -6354,7 +6364,7 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
     const userRoles = dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0
       ? dbUser.roles
       : (dbUser?.role ? [dbUser.role] : (isBootstrap ? ['Admin'] : ['Student']));
-    const primaryRole = isBootstrap ? 'Admin' : (userRoles[0] || 'Student');
+    const primaryRole = (dbUser?.roles && dbUser.roles.length > 0) ? dbUser.roles[0] : (isBootstrap ? 'Admin' : (userRoles[0] || 'Student'));
 
     const staffRolesToCheck = [
       'admin',
@@ -6376,14 +6386,15 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
         tokenVerificationSuccess: true,
         trustedAdminMatch: true,
         dbProfileRoles: dbUser?.roles || [],
-        finalAuthoritativeRole: 'Admin',
+        finalAuthoritativeRole: primaryRole,
         finalIsAdminBoolean: true,
       });
 
       return res.json({
         authorized: true,
         uid: dbUser?.uid || uid,
-        role: 'Admin',
+        role: primaryRole,
+        roles: userRoles,
         name: dbUser?.name || bootstrapConfig?.name || 'Admin',
         email: dbUser?.email || normalizedEmail,
       });
