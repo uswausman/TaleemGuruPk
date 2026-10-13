@@ -78,13 +78,34 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
 
     try {
       console.log('[DEBUG-AUTH] AdminLoginPortal submitting to /api/admin/login for', cleanEmail);
-      const res = await fetch('/api/admin/login', {
+      let res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: cleanEmail, password }),
       });
 
-      const data = await res.json().catch(() => ({}));
+      let data = await res.json().catch(() => ({}));
+
+      // If direct server authentication returned 401 and Supabase client is configured,
+      // attempt client-side Supabase Auth to obtain a session token, then re-verify server RBAC
+      if (!res.ok && res.status === 401 && isSupabaseConfigured) {
+        try {
+          const cred = await loginWithEmail(cleanEmail, password);
+          if (cred?.session?.access_token) {
+            res = await fetch('/api/admin/login', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${cred.session.access_token}`,
+              },
+              body: JSON.stringify({ email: cleanEmail, token: cred.session.access_token }),
+            });
+            data = await res.json().catch(() => ({}));
+          }
+        } catch (sbErr: any) {
+          console.warn('[AdminLoginPortal] Supabase client auth fallback notice:', sbErr?.message || sbErr);
+        }
+      }
 
       if (res.ok && data.success && data.user && data.token) {
         const resolvedRoles: any = Array.isArray(data.user.roles) && data.user.roles.length > 0
