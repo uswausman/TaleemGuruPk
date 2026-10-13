@@ -560,10 +560,13 @@ export async function verifyUserRoleWithServer(
   _email?: string | null,
   accessTokenOverride?: string
 ): Promise<{ isAdmin: boolean; role: 'Admin' | 'Student'; serverUser?: any; status?: number; isTransient?: boolean }> {
-  if (!uid || !isSupabaseConfigured) return { isAdmin: false, role: 'Student' };
+  if (!uid) return { isAdmin: false, role: 'Student' };
 
-  let token = accessTokenOverride;
+  let token = typeof window !== 'undefined' ? localStorage.getItem('taleemguru_admin_token') || undefined : undefined;
   if (!token) {
+    token = accessTokenOverride;
+  }
+  if (!token && isSupabaseConfigured) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       token = session?.access_token;
