@@ -5,44 +5,203 @@ import crypto from 'crypto';
 
 
 
-// Sanitize Supabase project URL to ensure clean base path without /rest/v1/ or trailing slashes
+// Cached server client singleton to prevent overhead across incoming requests
+let cachedServerClient: SupabaseClient | null = null;
+let cachedConfigKey = '';
+
+export function sanitizeEnvValue(val?: string | null): string {
+  if (!val || typeof val !== 'string') return '';
+  let s = val.trim().replace(/^\uFEFF/, '').trim();
+  while (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  if (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') {
+    return '';
+  }
+  return s;
+}
+
+export function validateAndNormalizeSupabaseUrl(raw?: string | null): {
+  url: string | null;
+  isValid: boolean;
+  urlPrefixOk: boolean;
+  urlHasPlaceholder: boolean;
+  error?: string;
+} {
+  const sanitized = sanitizeEnvValue(raw);
+  if (!sanitized) {
+    return { url: null, isValid: false, urlPrefixOk: false, urlHasPlaceholder: false, error: 'Empty URL' };
+  }
+
+  const cleanPath = sanitized.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(cleanPath);
+  } catch {
+    return {
+      url: null,
+      isValid: false,
+      urlPrefixOk: false,
+      urlHasPlaceholder: cleanPath.toLowerCase().includes('placeholder'),
+      error: 'Unparseable URL syntax',
+    };
+  }
+
+  const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
+  const isHttps = parsed.protocol === 'https:';
+  const isLocalHttp = !isProduction && parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+  const urlPrefixOk = isHttps || isLocalHttp;
+  const urlHasPlaceholder = parsed.hostname.toLowerCase().includes('placeholder') || cleanPath.toLowerCase().includes('placeholder');
+
+  if (!urlPrefixOk) {
+    return {
+      url: null,
+      isValid: false,
+      urlPrefixOk: false,
+      urlHasPlaceholder,
+      error: `Protocol must be https: (got ${parsed.protocol})`,
+    };
+  }
+
+  if (urlHasPlaceholder) {
+    return {
+      url: null,
+      isValid: false,
+      urlPrefixOk: true,
+      urlHasPlaceholder: true,
+      error: 'URL contains placeholder string',
+    };
+  }
+
+  const normalizedUrl = `${parsed.protocol}//${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`.replace(/\/+$/, '');
+
+  return {
+    url: normalizedUrl,
+    isValid: true,
+    urlPrefixOk: true,
+    urlHasPlaceholder: false,
+  };
+}
+
+export function resolveSupabaseServerConfig(): {
+  url: string | null;
+  key: string | null;
+  urlSource: string | null;
+  keySource: string | null;
+  diagnostics: {
+    hasUrl: boolean;
+    hasKey: boolean;
+    urlPrefixOk: boolean;
+    urlHasPlaceholder: boolean;
+  };
+} {
+  // Candidate URLs in priority order:
+  // 1. SUPABASE_URL (server-side explicit)
+  // 2. VITE_SUPABASE_URL (shared/client environment variable)
+  const urlCandidates: Array<{ name: string; val: string | undefined }> = [
+    { name: 'SUPABASE_URL', val: process.env.SUPABASE_URL },
+    { name: 'VITE_SUPABASE_URL', val: process.env.VITE_SUPABASE_URL },
+  ];
+
+  let selectedUrl: string | null = null;
+  let selectedUrlSource: string | null = null;
+  let diag = {
+    hasUrl: false,
+    hasKey: false,
+    urlPrefixOk: false,
+    urlHasPlaceholder: false,
+  };
+
+  for (const candidate of urlCandidates) {
+    const rawVal = candidate.val;
+    const sanitizedVal = sanitizeEnvValue(rawVal);
+    if (!sanitizedVal) continue;
+
+    diag.hasUrl = true;
+    const validation = validateAndNormalizeSupabaseUrl(rawVal);
+
+    if (validation.isValid && validation.url) {
+      selectedUrl = validation.url;
+      selectedUrlSource = candidate.name;
+      diag.urlPrefixOk = true;
+      diag.urlHasPlaceholder = false;
+      break;
+    } else {
+      if (!selectedUrl) {
+        diag.urlPrefixOk = validation.urlPrefixOk;
+        diag.urlHasPlaceholder = validation.urlHasPlaceholder;
+      }
+    }
+  }
+
+  // Candidate Keys in priority order:
+  // 1. SUPABASE_SERVICE_ROLE_KEY (preferred for backend auth token verification)
+  // 2. SUPABASE_ANON_KEY (server-side anon key)
+  // 3. VITE_SUPABASE_ANON_KEY (shared client anon key)
+  const keyCandidates: Array<{ name: string; val: string | undefined }> = [
+    { name: 'SUPABASE_SERVICE_ROLE_KEY', val: process.env.SUPABASE_SERVICE_ROLE_KEY },
+    { name: 'SUPABASE_ANON_KEY', val: process.env.SUPABASE_ANON_KEY },
+    { name: 'VITE_SUPABASE_ANON_KEY', val: process.env.VITE_SUPABASE_ANON_KEY },
+  ];
+
+  let selectedKey: string | null = null;
+  let selectedKeySource: string | null = null;
+
+  for (const candidate of keyCandidates) {
+    const sanitized = sanitizeEnvValue(candidate.val);
+    if (sanitized && !sanitized.toLowerCase().includes('placeholder')) {
+      selectedKey = sanitized;
+      selectedKeySource = candidate.name;
+      break;
+    }
+  }
+
+  diag.hasKey = Boolean(selectedKey);
+
+  return {
+    url: selectedUrl,
+    key: selectedKey,
+    urlSource: selectedUrlSource,
+    keySource: selectedKeySource,
+    diagnostics: diag,
+  };
+}
+
 export function getSupabaseServerClient(): SupabaseClient | null {
-  const rawSupabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '')
-    .trim()
-    .replace(/^["']|["']$/g, '');
-  const supabaseUrl = rawSupabaseUrl.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
-  const supabaseKey = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    ''
-  )
-    .trim()
-    .replace(/^["']|["']$/g, '');
+  const config = resolveSupabaseServerConfig();
 
-  const isConfigured = Boolean(
-    supabaseUrl &&
-    supabaseKey &&
-    supabaseUrl.startsWith('https://') &&
-    !supabaseUrl.includes('placeholder')
-  );
-
-  if (!isConfigured) {
-    console.log('[Auth Diagnostic] getSupabaseServerClient not configured:', {
-      hasUrl: !!supabaseUrl,
-      hasKey: !!supabaseKey,
-      urlPrefixOk: supabaseUrl.startsWith('https://'),
-      urlHasPlaceholder: supabaseUrl.includes('placeholder'),
+  if (!config.url || !config.key) {
+    console.error('[Auth Diagnostic] Supabase initialization failed:', {
+      hasUrl: config.diagnostics.hasUrl,
+      hasKey: config.diagnostics.hasKey,
+      urlPrefixOk: config.diagnostics.urlPrefixOk,
+      urlHasPlaceholder: config.diagnostics.urlHasPlaceholder,
     });
     return null;
   }
 
-  return createClient(supabaseUrl, supabaseKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  const currentConfigKey = `${config.url}::${config.key}`;
+  if (cachedServerClient && cachedConfigKey === currentConfigKey) {
+    return cachedServerClient;
+  }
+
+  try {
+    cachedServerClient = createClient(config.url, config.key, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+    cachedConfigKey = currentConfigKey;
+    return cachedServerClient;
+  } catch (err: any) {
+    console.error('[Auth Diagnostic] Error creating Supabase server client:', err?.message || err);
+    return null;
+  }
 }
 
 export interface AuthRequest extends Request {
