@@ -1,876 +1,7602 @@
-import type { Request, Response, NextFunction } from 'express';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { getUserByUid, getOrCreateUser, isTrustedBootstrapAdminEmail, getTrustedBootstrapAdmins } from './db/users.ts';
-import crypto from 'crypto';
+import express, { Request, Response, NextFunction } from 'express';
+import { randomUUID } from 'node:crypto';
+import { resolveDatabaseConnectionString, createPool } from './db/index.ts';
+import fs from 'fs';
+import path from 'path';
+import {
+  brandPdfBuffer,
+  brandTextContent,
+  computeHash,
+  TALEEM_BRAND_FOOTER,
+  TALEEM_WEBSITE_URL,
+} from './server/documentBranding.ts';
+import {
+  safeFetchRemoteDocument,
+  resolveSafeLocalFilePath,
+  sanitizeDownloadFilename,
+  MAX_DOCUMENT_SIZE_BYTES,
+} from './server/documentSecurity.ts';
+import {
+  processAndStoreDocument,
+  createDocumentVersion,
+  rebrandDocument,
+  recordDocumentDownload,
+  getSafeBrandedPath,
+  getSafeOriginalPath,
+  validateMagicBytes,
+} from './server/documentStorage.ts';
+import {
+  executeUnifiedSearch,
+  getQuickSearchSuggestions,
+  getDynamicSearchFilters,
+} from './server/unifiedSearch.ts';
+import {
+  getAdminAnalytics,
+  getTeacherAnalytics,
+  getStudentAnalytics,
+  type AnalyticsDateFilter,
+} from './db/analytics.ts';
+import {
+  createNotification,
+  getNotificationsForUser,
+  markNotificationRead,
+  markAllNotificationsRead,
+  getUnreadNotificationCount,
+} from './db/notifications.ts';
+import {
+  runDatabaseIntegrityCheck,
+  generateSystemBackupExport,
+} from './db/integrityBackup.ts';
+import {
+  getSystemHealthReport,
+  checkDatabaseHealth,
+} from './server/productionReliability.ts';
+import {
+  getWebsiteCommandCenterSummary,
+  executeSeoAudit,
+  getPerformanceMetrics,
+  getLiveErrorLogs,
+  updateErrorStatus,
+  executeBrokenLinkScan,
+  runApiHealthCheck,
+  runDatabaseHealthCheck,
+  getTrafficAnalyticsData,
+  runAiDoctorDiagnosis,
+  getFixProposals,
+  approveAndApplyFix,
+  rejectFixProposal,
+  getCommandHistory,
+  getCommandCenterSettings,
+  updateCommandCenterSettings,
+  recordLiveError,
+  getSearchConsoleData,
+  getSearchConsoleSeoIntelligence,
+  runPageSpeedAudit,
+  getPerformanceHistorySnapshots,
+  verifyDeploymentAndCompare,
+  rollbackLastDeployment,
+  getSystemAlerts,
+  updateAlertStatus,
+  investigateErrorIncident,
+} from './server/websiteHealthServer.ts';
+import {
+  generateDynamicSitemap,
+  generateRobotsTxt,
+  getDynamicSeoMetadata,
+} from './server/seoServer.ts';
+import {
+  getDocumentsFromDb,
+  getDocumentByIdFromDb,
+  updateDocumentMetadataInDb,
+  bulkUpdateDocumentMetadataInDb,
+  bulkUpdateDocumentStatusInDb,
+  deleteDocumentFromDb,
+  getDocumentVersionsFromDb,
+  getDocumentDownloadEventsFromDb,
+} from './db/documents.ts';
+import {
+  requireAuth,
+  optionalAuth,
+  requireAdmin,
+  requireHighAdmin,
+  requireContentManager,
+  requireMCQCurator,
+  requireQuizCreator,
+  requireContentCurator,
+  requireTeacher,
+  getSupabaseServerClient,
+  getServerJwtSecret,
+  type AuthRequest,
+} from './middleware/auth.ts';
+import { isAcademicAssignmentAllowed } from './lib/permissions.ts';
+import {
+  initExamSystemTables,
+  startExamAttemptInDb,
+  saveExamAnswerInDb,
+  submitExamAttemptInDb,
+  getExamAttemptResultFromDb,
+  getUserExamHistoryFromDb,
+  getAllExamAttemptsFromDb,
+  getUserActiveExamAttempt,
+  getStudentDashboardStats,
+  getStudentPerformanceAnalytics,
+  getTeacherDashboardStats,
+} from './db/exams.ts';
+import {
+  getOrCreateUser,
+  getUserByUid,
+  updateUserProfile,
+  sanitizeUserForClient,
+  saveTestResultToDb,
+  getUserTestResultsFromDb,
+  getTopLeaderboard,
+  toggleBookmarkInDb,
+  getUserBookmarksFromDb,
+  getAllUsersFromDb,
+  saveCertificateToDb,
+  getUserCertificatesFromDb,
+  getCertificateByIdFromDb,
+  getPlatformPublicStats,
+  getAllTestResultsFromDb,
+  saveContentReportToDb,
+  getAllContentReportsFromDb,
+  updateContentReportStatusInDb,
+  saveAuditLogToDb,
+  getAllAuditLogsFromDb,
+  updateUserRolesInDb,
+  createUserInDb,
+  updateUserStatusInDb,
+  updateUserPermissionsInDb,
+  getStaffAssignmentsFromDb,
+  addStaffAssignmentToDb,
+  deleteStaffAssignmentFromDb,
+  getSyllabusFromDb,
+  addSyllabusToDb,
+  updateSyllabusInDb,
+  deleteSyllabusFromDb,
+  getAdminComprehensiveStats,
+  getAllCertificatesFromDb,
+  revokeCertificateInDb,
+  restoreCertificateInDb,
+  syncBootstrapAdmins,
+  isTrustedBootstrapAdminEmail,
+  getTrustedBootstrapAdmins,
+  getUserByEmail,
+  verifyPassword,
+  hashPassword,
+  setUserPasswordInDb,
+} from './db/users.ts';
+import {
+  addSubscriber,
+  getSubscribers,
+  updateSubscriberStatus,
+  removeSubscriber,
+  createCampaign,
+  getCampaigns,
+  logNewsletterAttempt,
+} from './db/newsletter.ts';
+import {
+  createOrUpdateChangeRequest,
+  getApprovalRequests,
+  getApprovalStats,
+  approveChangeRequest,
+  rejectChangeRequest,
+  getMySubmissions,
+  createChangeRequest,
+  getPendingRequests,
+  updateRequestStatus,
+  getRequestById,
+} from './db/approvals.ts';
+import {
+  getAllSettingsFromDb,
+  getPublicSettingsFromDb,
+  updateSettingsInDb,
+} from './db/settings.ts';
+import {
+  getMCQsFromDb,
+  getMCQByIdFromDb,
+  createMCQInDb,
+  updateMCQInDb,
+  deleteMCQInDb,
+  bulkInsertMCQsInDb,
+  bulkUpdateMCQStatusInDb,
+  bulkDeleteMCQsInDb,
+  bulkCreateMCQsBatchInDb,
+  getTestsFromDb,
+  getTestByIdFromDb,
+  createTestInDb,
+  updateTestInDb,
+  deleteTestInDb,
+  bulkInsertTestsInDb,
+  bulkUpdateTestStatusInDb,
+  bulkDeleteTestsInDb,
+  getPastPapersFromDb,
+  getPastPaperByIdFromDb,
+  createPastPaperInDb,
+  updatePastPaperInDb,
+  deletePastPaperInDb,
+  bulkInsertPastPapersInDb,
+  bulkUpdatePastPaperStatusInDb,
+  bulkDeletePastPapersInDb,
+  getStudyNotesFromDb,
+  getStudyNoteByIdFromDb,
+  createStudyNoteInDb,
+  updateStudyNoteInDb,
+  deleteStudyNoteInDb,
+  bulkInsertStudyNotesInDb,
+  bulkUpdateStudyNoteStatusInDb,
+  bulkDeleteStudyNotesInDb,
+  getComprehensiveStatsFromDb,
+  seedInitialEducationalContent,
+  seedInitialHierarchy,
+  getBoardsFromDb as getHierarchyBoards,
+  createBoardInDb as createHierarchyBoard,
+  updateBoardInDb as updateHierarchyBoard,
+  deleteBoardInDb as deleteHierarchyBoard,
+  getClassesFromDb as getHierarchyClasses,
+  createClassInDb as createHierarchyClass,
+  updateClassInDb as updateHierarchyClass,
+  deleteClassInDb as deleteHierarchyClass,
+  getSubjectsFromDb as getHierarchySubjects,
+  createSubjectInDb as createHierarchySubject,
+  updateSubjectInDb as updateHierarchySubject,
+  deleteSubjectInDb as deleteHierarchySubject,
+  getChaptersFromDb as getHierarchyChapters,
+  createChapterInDb as createHierarchyChapter,
+  updateChapterInDb as updateHierarchyChapter,
+  deleteChapterInDb as deleteHierarchyChapter,
+  moderateContentItemInDb,
+  bulkModerateContentInDb,
+  getContentVersionHistoryFromDb,
+} from './db/content.ts';
+import {
+  getAllBoardsFromDb,
+  getBoardByIdFromDb,
+  createBoardInDb,
+  updateBoardInDb,
+  deleteBoardFromDb,
+  checkBoardDependencies,
+  getAllClassesFromDb,
+  getClassByIdFromDb,
+  createClassInDb,
+  updateClassInDb,
+  deleteClassFromDb,
+  checkClassDependencies,
+  getAllSubjectsFromDb,
+  getSubjectByIdFromDb,
+  createSubjectInDb,
+  updateSubjectInDb,
+  deleteSubjectFromDb,
+  checkSubjectDependencies,
+  getAllChaptersFromDb,
+  getChapterByIdFromDb,
+  createChapterInDb,
+  updateChapterInDb,
+  deleteChapterFromDb,
+  checkChapterDependencies,
+  getAllEntryTestCategoriesFromDb,
+  getEntryTestCategoryByIdFromDb,
+  createEntryTestCategoryInDb,
+  updateEntryTestCategoryInDb,
+  deleteEntryTestCategoryFromDb,
+  checkEntryTestCategoryDependencies,
+  getAllEntryTestSubcategoriesFromDb,
+  getEntryTestSubcategoryByIdFromDb,
+  createEntryTestSubcategoryInDb,
+  updateEntryTestSubcategoryInDb,
+  deleteEntryTestSubcategoryFromDb,
+  checkEntryTestSubcategoryDependencies,
+} from './db/academic.ts';
 
+const app = express();
 
-
-// Cached server client singleton to prevent overhead across incoming requests
-let cachedServerClient: SupabaseClient | null = null;
-let cachedConfigKey = '';
-
-export function sanitizeEnvValue(val?: string | null): string {
-  if (!val || typeof val !== 'string') return '';
-  let s = val.trim().replace(/^\uFEFF/, '').trim();
-  while (
-    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
-    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
-  ) {
-    s = s.slice(1, -1).trim();
-  }
-  if (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') {
-    return '';
-  }
-  return s;
+if (!process.env.VERCEL) {
+  // Authoritatively synchronize configured administrative identities and initial educational content
+  syncBootstrapAdmins().catch((err) => {
+    console.warn('[Server] Initial admin bootstrap sync notice:', err);
+  });
+  initExamSystemTables().catch((err) => {
+    console.warn('[Server] Initial exam tables notice:', err);
+  });
+  seedInitialEducationalContent().catch((err) => {
+    console.warn('[Server] Initial educational content seeding notice:', err);
+  });
+  seedInitialHierarchy().catch((err) => {
+    console.warn('[Server] Initial hierarchy seeding notice:', err);
+  });
 }
 
-export function validateAndNormalizeSupabaseUrl(raw?: string | null): {
-  url: string | null;
-  isValid: boolean;
-  urlPrefixOk: boolean;
-  urlHasPlaceholder: boolean;
-  error?: string;
-} {
-  const sanitized = sanitizeEnvValue(raw);
-  if (!sanitized) {
-    return { url: null, isValid: false, urlPrefixOk: false, urlHasPlaceholder: false, error: 'Empty URL' };
+// Security Headers for API responses
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.path.startsWith('/api') || req.path === '/api') {
+    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   }
+  next();
+});
 
-  const cleanPath = sanitized.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+// CORS Middleware with origin validation (No wildcards for authenticated production APIs)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  const configuredOrigin = process.env.VITE_SITE_URL || process.env.SITE_URL;
+  const allowedOrigins = [
+    configuredOrigin,
+    'https://www.taleemguru.pk',
+    'https://taleemguru.pk',
+  ].filter(Boolean) as string[];
 
-  let parsed: URL;
-  try {
-    parsed = new URL(cleanPath);
-  } catch {
-    return {
-      url: null,
-      isValid: false,
-      urlPrefixOk: false,
-      urlHasPlaceholder: cleanPath.toLowerCase().includes('placeholder'),
-      error: 'Unparseable URL syntax',
-    };
-  }
+  if (origin) {
+    const isLocalDev =
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.includes('.run.app') ||
+      origin.includes('.vercel.app');
 
-  const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.VERCEL);
-  const isHttps = parsed.protocol === 'https:';
-  const isLocalHttp = !isProduction && parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
-  const urlPrefixOk = isHttps || isLocalHttp;
-  const urlHasPlaceholder = parsed.hostname.toLowerCase().includes('placeholder') || cleanPath.toLowerCase().includes('placeholder');
-
-  if (!urlPrefixOk) {
-    return {
-      url: null,
-      isValid: false,
-      urlPrefixOk: false,
-      urlHasPlaceholder,
-      error: `Protocol must be https: (got ${parsed.protocol})`,
-    };
-  }
-
-  if (urlHasPlaceholder) {
-    return {
-      url: null,
-      isValid: false,
-      urlPrefixOk: true,
-      urlHasPlaceholder: true,
-      error: 'URL contains placeholder string',
-    };
-  }
-
-  const normalizedUrl = `${parsed.protocol}//${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`.replace(/\/+$/, '');
-
-  return {
-    url: normalizedUrl,
-    isValid: true,
-    urlPrefixOk: true,
-    urlHasPlaceholder: false,
-  };
-}
-
-export function resolveSupabaseServerConfig(): {
-  url: string | null;
-  key: string | null;
-  urlSource: string | null;
-  keySource: string | null;
-  diagnostics: {
-    hasUrl: boolean;
-    hasKey: boolean;
-    urlPrefixOk: boolean;
-    urlHasPlaceholder: boolean;
-  };
-} {
-  // Candidate URLs in priority order:
-  // 1. SUPABASE_URL (server-side explicit)
-  // 2. VITE_SUPABASE_URL (shared/client environment variable)
-  const urlCandidates: Array<{ name: string; val: string | undefined }> = [
-    { name: 'SUPABASE_URL', val: process.env.SUPABASE_URL },
-    { name: 'VITE_SUPABASE_URL', val: process.env.VITE_SUPABASE_URL },
-  ];
-
-  let selectedUrl: string | null = null;
-  let selectedUrlSource: string | null = null;
-  let diag = {
-    hasUrl: false,
-    hasKey: false,
-    urlPrefixOk: false,
-    urlHasPlaceholder: false,
-  };
-
-  for (const candidate of urlCandidates) {
-    const rawVal = candidate.val;
-    const sanitizedVal = sanitizeEnvValue(rawVal);
-    if (!sanitizedVal) continue;
-
-    diag.hasUrl = true;
-    const validation = validateAndNormalizeSupabaseUrl(rawVal);
-
-    if (validation.isValid && validation.url) {
-      selectedUrl = validation.url;
-      selectedUrlSource = candidate.name;
-      diag.urlPrefixOk = true;
-      diag.urlHasPlaceholder = false;
-      break;
-    } else {
-      if (!selectedUrl) {
-        diag.urlPrefixOk = validation.urlPrefixOk;
-        diag.urlHasPlaceholder = validation.urlHasPlaceholder;
-      }
+    if (isLocalDev || allowedOrigins.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
   }
 
-  // Candidate Keys in priority order:
-  // 1. SUPABASE_SERVICE_ROLE_KEY (preferred for backend auth token verification)
-  // 2. SUPABASE_ANON_KEY (server-side anon key)
-  // 3. VITE_SUPABASE_ANON_KEY (shared client anon key)
-  const keyCandidates: Array<{ name: string; val: string | undefined }> = [
-    { name: 'SUPABASE_SERVICE_ROLE_KEY', val: process.env.SUPABASE_SERVICE_ROLE_KEY },
-    { name: 'SUPABASE_ANON_KEY', val: process.env.SUPABASE_ANON_KEY },
-    { name: 'VITE_SUPABASE_ANON_KEY', val: process.env.VITE_SUPABASE_ANON_KEY },
-  ];
-
-  let selectedKey: string | null = null;
-  let selectedKeySource: string | null = null;
-
-  for (const candidate of keyCandidates) {
-    const sanitized = sanitizeEnvValue(candidate.val);
-    if (sanitized && !sanitized.toLowerCase().includes('placeholder')) {
-      selectedKey = sanitized;
-      selectedKeySource = candidate.name;
-      break;
-    }
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
   }
 
-  diag.hasKey = Boolean(selectedKey);
+  next();
+});
 
-  return {
-    url: selectedUrl,
-    key: selectedKey,
-    urlSource: selectedUrlSource,
-    keySource: selectedKeySource,
-    diagnostics: diag,
-  };
-}
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-export function getSupabaseServerClient(): SupabaseClient | null {
-  const config = resolveSupabaseServerConfig();
+// Router for all /api endpoints
+const apiRouter = express.Router();
 
-  if (!config.url || !config.key) {
-    console.error('[Auth Diagnostic] Supabase initialization failed:', {
-      hasUrl: config.diagnostics.hasUrl,
-      hasKey: config.diagnostics.hasKey,
-      urlPrefixOk: config.diagnostics.urlPrefixOk,
-      urlHasPlaceholder: config.diagnostics.urlHasPlaceholder,
-    });
-    return null;
-  }
-
-  const currentConfigKey = `${config.url}::${config.key}`;
-  if (cachedServerClient && cachedConfigKey === currentConfigKey) {
-    return cachedServerClient;
-  }
-
+// 1. Production Health & Readiness Endpoints
+apiRouter.get('/health', async (req: Request, res: Response) => {
   try {
-    cachedServerClient = createClient(config.url, config.key, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
-    cachedConfigKey = currentConfigKey;
-    return cachedServerClient;
+    const report = await getSystemHealthReport();
+    res.status(report.status === 'unhealthy' ? 503 : 200).json(report);
+  } catch (error: any) {
+    res.status(500).json({ status: 'unhealthy', timestamp: new Date().toISOString(), error: 'Health check failed' });
+  }
+});
+
+apiRouter.get('/readiness', async (req: Request, res: Response) => {
+  try {
+    const dbHealth = await checkDatabaseHealth();
+    res.json({ status: 'ready', database: dbHealth, timestamp: new Date().toISOString() });
+  } catch (error: any) {
+    res.json({ status: 'ready', timestamp: new Date().toISOString() });
+  }
+});
+
+apiRouter.get('/db-health', async (req: Request, res: Response) => {
+  try {
+    const dbHealth = await checkDatabaseHealth();
+    res.status(200).json(dbHealth);
+  } catch (error: any) {
+    res.status(200).json({ connected: false, latencyMs: 0, error: 'Database health check failed' });
+  }
+});
+
+// Live Error & Performance Capture Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const startMs = performance.now();
+  res.on('finish', () => {
+    const durationMs = Math.round(performance.now() - startMs);
+    const code = res.statusCode;
+    if (code >= 400 || durationMs > 1500) {
+      const severity = code >= 500 ? 'CRITICAL' : code >= 400 ? 'WARN' : 'INFO';
+      const category = req.path.startsWith('/api')
+        ? req.path.includes('/auth') ? 'Authentication' : 'API'
+        : 'Runtime';
+
+      recordLiveError({
+        severity,
+        category,
+        statusCode: code,
+        route: req.path,
+        errorMessage: code >= 500 ? `Server Error (${code})` : code === 404 ? 'Resource Not Found' : `HTTP ${code} Response`,
+      });
+    }
+  });
+  next();
+});
+
+// Website Command Center Admin API Endpoints
+apiRouter.get('/admin/website-health', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const summary = await getWebsiteCommandCenterSummary();
+    res.json(summary);
   } catch (err: any) {
-    console.error('[Auth Diagnostic] Error creating Supabase server client:', err?.message || err);
-    return null;
+    res.status(500).json({ error: err.message || 'Failed to generate website command center summary' });
   }
-}
+});
 
-export interface AuthRequest extends Request {
-  user?: {
-    uid: string;
-    email?: string;
-    name?: string;
-    roles: string[];
-  };
-}
-
-export function getServerJwtSecret(): string {
-  const secret =
-    process.env.SERVER_JWT_SECRET ||
-    process.env.JWT_SECRET ||
-    process.env.SUPABASE_JWT_SECRET ||
-    process.env.VITE_SERVER_JWT_SECRET ||
-    process.env.VITE_JWT_SECRET;
-  if (secret && typeof secret === 'string' && secret.trim().length > 0) {
-    return secret.trim();
-  }
-
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  if (serviceKey && typeof serviceKey === 'string' && serviceKey.trim().length >= 16) {
-    return `taleemguru-derived-jwt-${serviceKey.trim().substring(0, 32)}`;
-  }
-
-  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (dbUrl && typeof dbUrl === 'string' && dbUrl.trim().length >= 16) {
-    return `taleemguru-db-jwt-${dbUrl.trim().substring(0, 32)}`;
-  }
-
-  return 'taleemguru-production-server-jwt-secret-key-32bytes';
-}
-
-export function isServerJwtCandidate(token?: string | null): boolean {
-  if (!token || typeof token !== 'string') return false;
-  const parts = token.trim().split('.');
-  if (parts.length !== 3) return false;
+apiRouter.post('/admin/website-health/scan', requireHighAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return payload?.iss === 'taleemguru-backend' || payload?.aud === 'taleemguru-admin';
-  } catch {
-    return false;
+    const seo = await executeSeoAudit();
+    const apis = await runApiHealthCheck();
+    const dbH = await runDatabaseHealthCheck();
+    const links = await executeBrokenLinkScan();
+    const aiDiag = await runAiDoctorDiagnosis();
+    const summary = await getWebsiteCommandCenterSummary();
+    res.json({ success: true, summary, seo, apis, dbH, links, aiDiag });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Website scan failed' });
   }
-}
+});
 
-/**
- * Verifies a server-signed HMAC-SHA256 JWT using dedicated SERVER_JWT_SECRET.
- * Requires alg HS256, iss 'taleemguru-backend', aud 'taleemguru-admin', valid exp/nbf, and valid sub.
- */
-export function verifyServerSignedToken(token?: string | null): {
-  valid: boolean;
-  user?: {
-    id: string;
-    email?: string;
-    role: string;
-    user_metadata: Record<string, any>;
-    app_metadata: Record<string, any>;
-  };
-  error?: string;
-} {
-  if (!token || typeof token !== 'string') {
-    return { valid: false, error: 'Empty token' };
-  }
-
-  const secret = getServerJwtSecret();
-  if (!secret) {
-    return { valid: false, error: 'SERVER_JWT_SECRET is not configured' };
-  }
-
-  const parts = token.trim().split('.');
-  if (parts.length !== 3) {
-    return { valid: false, error: 'Malformed token structure' };
-  }
-
-  const [headerB64, payloadB64, signatureB64] = parts;
-  let header: any;
-  let payload: any;
+apiRouter.get('/admin/website-health/seo', requireHighAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
-    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-  } catch {
-    return { valid: false, error: 'Invalid base64url JSON in token' };
+    const targetUrl = (req.query.url as string) || undefined;
+    const report = await executeSeoAudit(targetUrl);
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'SEO audit failed' });
   }
+});
 
-  if (!header || header.alg !== 'HS256') {
-    return { valid: false, error: `Unsupported or missing algorithm: ${header?.alg}` };
-  }
-
-  if (payload?.iss !== 'taleemguru-backend') {
-    return { valid: false, error: 'Invalid token issuer' };
-  }
-
-  if (payload?.aud !== 'taleemguru-admin') {
-    return { valid: false, error: 'Invalid token audience' };
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-
-  if (payload?.exp && typeof payload.exp === 'number') {
-    if (payload.exp < now) {
-      return { valid: false, error: 'Token expired' };
-    }
-  }
-
-  if (payload?.nbf && typeof payload.nbf === 'number') {
-    if (payload.nbf > now) {
-      return { valid: false, error: 'Token not yet active' };
-    }
-  }
-
-  const uid = payload.sub || payload.uid || payload.id;
-  if (!uid || typeof uid !== 'string' || uid.trim().length === 0) {
-    return { valid: false, error: 'Missing subject identifier in token' };
-  }
-
-  const dataToVerify = `${headerB64}.${payloadB64}`;
-  const sigBuf = Buffer.from(signatureB64, 'base64url');
-
+apiRouter.get('/admin/website-health/performance', requireHighAdmin, async (req: AuthRequest, res: Response) => {
   try {
-    const hmac = crypto.createHmac('sha256', secret);
-    hmac.update(dataToVerify);
-    const expectedDigest = hmac.digest();
-    if (sigBuf.length !== expectedDigest.length || !crypto.timingSafeEqual(sigBuf, expectedDigest)) {
-      return { valid: false, error: 'Invalid token signature' };
-    }
-  } catch {
-    return { valid: false, error: 'Signature verification error' };
+    const perf = getPerformanceMetrics();
+    res.json(perf);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Performance metrics retrieval failed' });
   }
+});
 
-  return {
-    valid: true,
-    user: {
-      id: String(uid).trim(),
-      email: payload.email ? String(payload.email) : undefined,
-      role: payload.role || 'authenticated',
-      user_metadata: (payload.user_metadata && typeof payload.user_metadata === 'object') ? payload.user_metadata : {},
-      app_metadata: (payload.app_metadata && typeof payload.app_metadata === 'object') ? payload.app_metadata : {},
-    },
-  };
-}
+apiRouter.get('/admin/website-health/errors', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const category = req.query.category as string;
+    const severity = req.query.severity as string;
+    const status = req.query.status as string;
+    const logs = getLiveErrorLogs({ category, severity, status });
+    res.json({ logs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch error logs' });
+  }
+});
 
-/**
- * Middleware: Strictly requires a valid Supabase bearer token or server-signed JWT.
- * Authoritatively populates user identity and role from the database.
- */
-export const requireAuth = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  // If user identity is already verified on the request, proceed directly
-  if (req.user && req.user.uid) {
+apiRouter.post('/admin/website-health/errors/status', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, status } = req.body || {};
+    if (!id || !status) return res.status(400).json({ error: 'id and status required' });
+    const ok = updateErrorStatus(id, status);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update error status' });
+  }
+});
+
+apiRouter.post('/admin/website-health/errors/:id/investigate', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id || req.body.id;
+    if (!id) return res.status(400).json({ error: 'Incident ID is required' });
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const report = await investigateErrorIncident(id, adminEmail);
+    res.json({ success: true, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to run incident investigation' });
+  }
+});
+
+apiRouter.get('/admin/website-health/links', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const report = await executeBrokenLinkScan();
+    res.json(report);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Broken link scan failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/apis', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const results = await runApiHealthCheck();
+    res.json({ results });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'API health check failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/database', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const dbRes = await runDatabaseHealthCheck();
+    res.json(dbRes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Database health check failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/analytics', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const range = (req.query.timeRange as any) || '30 Days';
+    const data = await getTrafficAnalyticsData(range);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch analytics' });
+  }
+});
+
+apiRouter.post('/admin/website-health/ai/diagnose', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const diagnoses = await runAiDoctorDiagnosis();
+    res.json({ diagnoses });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'AI diagnosis failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/fixes', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const proposals = getFixProposals();
+    res.json({ proposals });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch fix proposals' });
+  }
+});
+
+apiRouter.post('/admin/website-health/fixes/approve', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fixId } = req.body || {};
+    if (!fixId) return res.status(400).json({ error: 'fixId is required' });
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = await approveAndApplyFix(fixId, adminEmail);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to approve fix' });
+  }
+});
+
+apiRouter.post('/admin/website-health/fixes/reject', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fixId } = req.body || {};
+    if (!fixId) return res.status(400).json({ error: 'fixId is required' });
+    const ok = rejectFixProposal(fixId);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to reject fix' });
+  }
+});
+
+apiRouter.get('/admin/website-health/history', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const history = getCommandHistory();
+    res.json({ history });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch audit history' });
+  }
+});
+
+apiRouter.get('/admin/website-health/settings', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const settings = getCommandCenterSettings();
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch command center settings' });
+  }
+});
+
+apiRouter.put('/admin/website-health/settings', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const updated = updateCommandCenterSettings(req.body || {});
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update settings' });
+  }
+});
+
+apiRouter.get('/admin/website-health/search-console', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const range = (req.query.timeRange as string) || '28 Days';
+    const gsc = await getSearchConsoleData(range);
+    res.json(gsc);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch Search Console data' });
+  }
+});
+
+apiRouter.get('/admin/website-health/search-console/intelligence', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const intel = await getSearchConsoleSeoIntelligence();
+    res.json({ recommendations: intel });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate Search Console intelligence' });
+  }
+});
+
+apiRouter.get('/admin/website-health/pagespeed', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const route = (req.query.route as string) || '/';
+    const strategy = (req.query.strategy as any) || 'mobile';
+    const psi = await runPageSpeedAudit(route, strategy);
+    res.json(psi);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'PageSpeed Insights audit failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/pagespeed/history', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const snapshots = getPerformanceHistorySnapshots();
+    res.json({ snapshots });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch PageSpeed history' });
+  }
+});
+
+apiRouter.post('/admin/website-health/deploy/verify', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const verified = await verifyDeploymentAndCompare();
+    res.json(verified);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Deployment verification failed' });
+  }
+});
+
+apiRouter.post('/admin/website-health/deploy/rollback', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = rollbackLastDeployment(adminEmail);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Rollback failed' });
+  }
+});
+
+apiRouter.get('/admin/website-health/alerts', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const alerts = getSystemAlerts();
+    res.json({ alerts });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch alerts' });
+  }
+});
+
+apiRouter.post('/admin/website-health/alerts/status', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id, status } = req.body || {};
+    if (!id || !status) return res.status(400).json({ error: 'id and status required' });
+    const ok = updateAlertStatus(id, status);
+    res.json({ success: ok });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to update alert status' });
+  }
+});
+
+// Rate limiter for Document Branding and Protected Downloads (60 requests / minute per client IP)
+const docRateLimitMap = new Map<string, { count: number; firstSeen: number }>();
+function documentRateLimitMiddleware(req: Request, res: Response, next: NextFunction) {
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'ip';
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxRequests = 60;
+
+  const record = docRateLimitMap.get(clientIp);
+  if (!record || now - record.firstSeen > windowMs) {
+    docRateLimitMap.set(clientIp, { count: 1, firstSeen: now });
     return next();
   }
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or malformed authorization token' });
-  }
-
-  const token = authHeader.split('Bearer ')[1]?.trim();
-  if (!token) {
-    return res.status(401).json({ error: 'Unauthorized: Empty token provided' });
-  }
-
-  let user: any = null;
-
-  // 1. First verify against server-signed JWT tokens (e.g. /api/admin/login sessions or test suites)
-  const serverTokenVerification = verifyServerSignedToken(token);
-  if (serverTokenVerification.valid && serverTokenVerification.user) {
-    user = serverTokenVerification.user;
-  }
-
-  // 2. If not a valid server-signed JWT and not a candidate server JWT, verify against Supabase Auth
-  if (!user && !isServerJwtCandidate(token)) {
-    const client = getSupabaseServerClient();
-    if (client) {
-      try {
-        const { data, error } = await client.auth.getUser(token);
-        if (error) {
-          console.log('[Auth Diagnostic] Supabase client.auth.getUser error:', error.message);
-        } else if (data?.user) {
-          user = data.user;
-        }
-      } catch (apiErr) {
-        console.log('[Auth Diagnostic] Supabase auth.getUser exception:', apiErr);
-      }
-    } else {
-      console.log('[Auth Diagnostic] Supabase client not initialized in requireAuth');
-    }
-  }
-
-  if (!user) {
-    console.log('[Auth Diagnostic] Authentication failed in requireAuth:', {
-      hasToken: !!token,
-      tokenPreview: token ? `${token.substring(0, 10)}...` : 'none',
+  record.count += 1;
+  if (record.count > maxRequests) {
+    res.setHeader('Retry-After', '60');
+    return res.status(429).json({
+      error: 'Too many document requests. Please wait a minute before trying again.',
     });
-    return res.status(401).json({ error: 'Unauthorized: Invalid or expired authentication token' });
   }
 
+  next();
+}
+
+// Helper functions to authoritatively check staff access on server
+function isStaffUser(user?: AuthRequest['user']): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  if (isTrustedBootstrapAdminEmail(email)) return true;
+  const staffRoles = ['admin', 'superadmin', 'super_admin', 'administrator', 'teacher', 'editor', 'contentmanager', 'content_manager', 'moderator'];
+  const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+  return userRoles.some(r => staffRoles.includes(r));
+}
+
+function isAdminOrContentManager(user?: AuthRequest['user']): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  if (isTrustedBootstrapAdminEmail(email)) return true;
+  const privilegedRoles = ['admin', 'superadmin', 'super_admin', 'administrator', 'contentmanager', 'content_manager'];
+  const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+  return userRoles.some(r => privilegedRoles.includes(r));
+}
+
+function isModeratorOrEditorOrAdmin(user?: AuthRequest['user']): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  if (isTrustedBootstrapAdminEmail(email)) return true;
+  const modRoles = ['admin', 'superadmin', 'super_admin', 'administrator', 'editor', 'moderator', 'contentmanager', 'content_manager'];
+  const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+  return userRoles.some(r => modRoles.includes(r));
+}
+
+function isDirectPublisherAdmin(user?: AuthRequest['user']): boolean {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase().trim();
+  if (isTrustedBootstrapAdminEmail(email)) return true;
+  const adminRoles = ['admin', 'superadmin', 'super_admin', 'administrator'];
+  const userRoles = (user.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+  return userRoles.some(r => adminRoles.includes(r));
+}
+
+// Centralized Document Branding & Protected Download Router
+const documentRouter = express.Router();
+
+documentRouter.get('/status', (req: Request, res: Response) => {
+  res.json({
+    status: 'active',
+    brandingVersion: '2.0',
+    brandingFooter: TALEEM_BRAND_FOOTER,
+    website: TALEEM_WEBSITE_URL,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// List documents with strict status access control
+documentRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response) => {
   try {
-    const normalizedEmail = (user.email || '').toLowerCase().trim();
-    const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
-    const bootstrapAdmins = getTrustedBootstrapAdmins();
-    const bootstrapConfig = bootstrapAdmins[normalizedEmail];
-
-    // Query trusted database for authoritative role and details
-    let dbUser = null;
-    let dbError = false;
-    try {
-      dbUser = await getUserByUid(user.id);
-      const hasStaffRole = dbUser?.roles && dbUser.roles.some((r: string) => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase()));
-      if (!dbUser && normalizedEmail) {
-        dbUser = await getOrCreateUser(user.id, normalizedEmail, {
-          name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : (user.user_metadata?.name || user.user_metadata?.full_name),
-        });
-      } else if (dbUser && isBootstrap && (!dbUser.roles || dbUser.roles.length === 0 || !hasStaffRole)) {
-        dbUser = await getOrCreateUser(user.id, normalizedEmail, {
-          name: bootstrapConfig?.name || 'Admin',
-        });
-      }
-    } catch (dbErr) {
-      console.error('Error querying database in requireAuth:', dbErr);
-      dbError = true;
-    }
-
-    if (dbError) {
-      return res.status(503).json({ error: 'Service Unavailable: Database error during identity authorization' });
-    }
-
-    // Role resolution:
-    // Database records dictate roles. If a verified bootstrap admin email is used, bootstrapConfig roles are used if dbUser has no roles.
-    // NOTE: user.user_metadata.roles fallback is intentionally REMOVED for security hardening.
-    let authoritativeRoles = ['Student'];
-    if (dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0) {
-      authoritativeRoles = dbUser.roles;
-    } else if (isBootstrap && dbUser) {
-      authoritativeRoles = bootstrapConfig?.roles || ['Admin'];
-    } else if (dbUser?.role) {
-      authoritativeRoles = [dbUser.role]; // Backward compatibility
-    }
-
-    // Server-only non-sensitive diagnostic logging for trusted admin
-    if (isBootstrap) {
-      console.log('[Auth Diagnostic]', {
-        normalizedEmail,
-        tokenVerificationSuccess: true,
-        trustedAdminMatch: isBootstrap,
-        dbProfileRoles: dbUser?.roles || [],
-        authoritativeRoles,
-        isAdmin: authoritativeRoles.some(r => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase())),
-      });
-    }
-
-    req.user = {
-      uid: user.id,
-      email: normalizedEmail,
-      name: (isBootstrap ? (bootstrapConfig?.name || 'Admin') : dbUser?.name) || user.user_metadata?.name || user.user_metadata?.full_name || normalizedEmail.split('@')[0],
-      roles: authoritativeRoles,
+    const isStaff = isStaffUser(req.user);
+    const filters = {
+      status: req.query.status as string,
+      documentType: req.query.documentType as string,
+      board: req.query.board as string,
+      classLevel: req.query.classLevel as string,
+      subject: req.query.subject as string,
+      chapter: req.query.chapter as string,
+      year: req.query.year ? parseInt(req.query.year as string, 10) : undefined,
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(200, parseInt(req.query.limit as string, 10)) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : 0,
     };
-    return next();
-  } catch (error) {
-    console.error('Error verifying authentication token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Failed to authenticate token' });
-  }
-};
 
-/**
- * Middleware: Optionally populates user if valid bearer token is provided,
- * but does not reject request if unauthenticated.
- */
-export const optionalAuth = async (
-  req: AuthRequest,
-  _res: Response,
-  next: NextFunction
-) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return next();
+    const { items, total } = await getDocumentsFromDb(filters, isStaff);
+    res.json({ documents: items, total });
+  } catch (error: any) {
+    console.error('Error fetching documents:', error);
+    res.status(500).json({ error: 'Failed to retrieve documents' });
   }
+});
 
-  const token = authHeader.split('Bearer ')[1]?.trim();
-  if (!token) return next();
+// Single document metadata by ID
+documentRouter.get('/:id', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const doc = await getDocumentByIdFromDb(req.params.id, isStaff);
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found or access restricted' });
+    }
+    res.json({ document: doc });
+  } catch (error: any) {
+    console.error('Error fetching document by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve document' });
+  }
+});
+
+// Upload and automatically brand document
+documentRouter.post('/upload', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    let inputBuffer: Buffer;
+    const body = req.body || {};
+    const rawFilename = body.filename || req.query.filename as string || 'document.pdf';
+    const originalFilename = typeof rawFilename === 'string' ? rawFilename : 'document.pdf';
+
+    if (Buffer.isBuffer(req.body)) {
+      inputBuffer = req.body;
+    } else if (body.fileBase64) {
+      if (typeof body.fileBase64 !== 'string') {
+        return res.status(400).json({ error: 'fileBase64 must be a string' });
+      }
+      inputBuffer = Buffer.from(body.fileBase64, 'base64');
+    } else {
+      return res.status(400).json({ error: 'No document file data provided' });
+    }
+
+    if (inputBuffer.length > MAX_DOCUMENT_SIZE_BYTES) {
+      return res.status(400).json({ error: 'Uploaded file exceeds maximum limit of 25MB' });
+    }
+
+    const isDirectAdmin = isDirectPublisherAdmin(req.user);
+    const options = {
+      title: body.title,
+      documentType: body.documentType,
+      board: body.board,
+      classLevel: body.classLevel,
+      subject: body.subject,
+      chapter: body.chapter,
+      topic: body.topic,
+      year: body.year ? parseInt(body.year, 10) : undefined,
+      language: body.language || 'English',
+      status: isDirectAdmin ? (body.status || 'Published') : 'Draft',
+      associatedEntityId: body.associatedEntityId,
+      allowDuplicate: Boolean(body.allowDuplicate),
+    };
+
+    const result = await processAndStoreDocument(inputBuffer, originalFilename, options, req.user?.uid);
+
+    if (!result.success) {
+      if (result.isDuplicate) {
+        return res.status(409).json({
+          error: result.error,
+          isDuplicate: true,
+          existingDocumentId: result.existingDocumentId,
+        });
+      }
+      return res.status(400).json({ error: result.error || 'Failed to process document' });
+    }
+
+    if (!isDirectAdmin) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: result.document!.id,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: result.document!.title || 'New Document',
+        proposedData: { ...result.document, status: 'Published' },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Document will be reviewed before becoming publicly available.',
+        document: result.document,
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPLOAD_DOCUMENT',
+      targetType: 'DOCUMENT',
+      targetId: result.document!.id,
+      details: `Uploaded document: "${result.document!.title}" (${result.document!.originalFilename}, ${result.document!.documentType})`,
+      subject: result.document!.subject,
+      classLevel: result.document!.classLevel,
+      board: result.document!.board,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, document: result.document });
+  } catch (error: any) {
+    console.error('Error uploading document:', error);
+    res.status(500).json({ error: error.message || 'Error processing document upload' });
+  }
+});
+
+// Bulk upload documents
+documentRouter.post('/bulk-upload', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const files = req.body?.files;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'files array is required' });
+    }
+
+    const uploaded = [];
+    const duplicates = [];
+    const errors = [];
+
+    for (const item of files) {
+      try {
+        if (!item.fileBase64 || !item.filename) {
+          errors.push({ filename: item.filename || 'unknown', error: 'Missing base64 data or filename' });
+          continue;
+        }
+
+        const buffer = Buffer.from(item.fileBase64, 'base64');
+        const isDirectAdmin = isDirectPublisherAdmin(req.user);
+        const resObj = await processAndStoreDocument(
+          buffer,
+          item.filename,
+          {
+            title: item.title,
+            documentType: item.metadata?.documentType || 'Document',
+            board: item.metadata?.board,
+            classLevel: item.metadata?.classLevel,
+            subject: item.metadata?.subject,
+            chapter: item.metadata?.chapter,
+            year: item.metadata?.year,
+            language: item.metadata?.language || 'English',
+            status: isDirectAdmin ? (item.metadata?.status || 'Published') : 'Draft',
+            allowDuplicate: Boolean(item.metadata?.allowDuplicate),
+          },
+          req.user?.uid
+        );
+
+        if (resObj.success && resObj.document) {
+          uploaded.push(resObj.document);
+        } else if (resObj.isDuplicate) {
+          duplicates.push({ filename: item.filename, existingDocumentId: resObj.existingDocumentId });
+        } else {
+          errors.push({ filename: item.filename, error: resObj.error || 'Failed' });
+        }
+      } catch (itemErr: any) {
+        errors.push({ filename: item.filename, error: itemErr.message });
+      }
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const doc of uploaded) {
+        const cr = await createOrUpdateChangeRequest({
+          entityType: 'documents',
+          entityId: doc.id,
+          action: 'CREATE',
+          submittedBy: req.user!.uid,
+          submitterName: req.user!.name,
+          submitterEmail: req.user!.email,
+          submitterRoles: req.user!.roles,
+          title: doc.title || 'New Document',
+          proposedData: { ...doc, status: 'Published' },
+          previousData: null,
+        });
+        changeRequests.push(cr);
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: `${changeRequests.length} documents uploaded and submitted for Admin Approval.`,
+        uploadedCount: uploaded.length,
+        duplicateCount: duplicates.length,
+        errorCount: errors.length,
+        uploaded,
+        duplicates,
+        errors,
+        changeRequests,
+      });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_UPLOAD_DOCUMENTS',
+      targetType: 'DOCUMENT_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk uploaded ${uploaded.length} documents (${duplicates.length} duplicates, ${errors.length} errors)`,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      uploadedCount: uploaded.length,
+      duplicateCount: duplicates.length,
+      errorCount: errors.length,
+      uploaded,
+      duplicates,
+      errors,
+    });
+  } catch (error: any) {
+    console.error('Error in bulk upload:', error);
+    res.status(500).json({ error: error.message || 'Failed to process bulk upload' });
+  }
+});
+
+// Bulk update metadata
+documentRouter.post('/bulk-metadata', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, metadata } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!metadata || typeof metadata !== 'object') {
+      return res.status(400).json({ error: 'metadata object is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const id of ids) {
+        const existing = await getDocumentByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'documents',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Update Metadata: ${existing.title}`,
+            proposedData: { ...existing, ...metadata },
+            previousData: existing,
+          });
+          changeRequests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: changeRequests.length,
+        message: `${changeRequests.length} document metadata updates submitted for Admin Approval.`,
+        changeRequests,
+      });
+    }
+
+    const count = await bulkUpdateDocumentMetadataInDb(ids, metadata, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_UPDATE_DOCUMENT_METADATA',
+      targetType: 'DOCUMENT_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated metadata on ${count} documents`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error in bulk metadata update:', error);
+    res.status(500).json({ error: 'Failed to update metadata' });
+  }
+});
+
+// Bulk update status
+documentRouter.post('/bulk-status', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!['Published', 'Draft', 'Archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeRequests = [];
+      for (const id of ids) {
+        const existing = await getDocumentByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'documents',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          changeRequests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: changeRequests.length,
+        message: `${changeRequests.length} document status updates submitted for Admin Approval.`,
+        changeRequests,
+      });
+    }
+
+    const count = await bulkUpdateDocumentStatusInDb(ids, status, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_STATUS_DOCUMENTS',
+      targetType: 'DOCUMENT_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated status to "${status}" on ${count} documents`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error in bulk status update:', error);
+    res.status(500).json({ error: 'Failed to update document status' });
+  }
+});
+
+// Update document metadata
+documentRouter.put('/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await getDocumentByIdFromDb(req.params.id, true);
+    if (!existing) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: req.body.title || existing.title,
+        proposedData: { ...existing, ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Document changes will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateDocumentMetadataInDb(req.params.id, req.body, req.user?.uid);
+    if (!updated) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPDATE_DOCUMENT',
+      targetType: 'DOCUMENT',
+      targetId: req.params.id,
+      details: `Updated document: ${updated.title}`,
+      subject: updated.subject,
+      classLevel: updated.classLevel,
+      board: updated.board,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, document: updated });
+  } catch (error: any) {
+    console.error('Error updating document:', error);
+    res.status(500).json({ error: error.message || 'Failed to update document' });
+  }
+});
+
+// Upload new version of document
+documentRouter.post('/:id/version', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fileBase64, filename, changeNotes } = req.body || {};
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+      return res.status(400).json({ error: 'fileBase64 string is required' });
+    }
+
+    const buffer = Buffer.from(fileBase64, 'base64');
+    const result = await createDocumentVersion(req.params.id, buffer, filename || 'updated.pdf', changeNotes, req.user?.uid);
+
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to create new document version' });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'NEW_DOCUMENT_VERSION',
+      targetType: 'DOCUMENT',
+      targetId: req.params.id,
+      details: `Created version ${result.document?.version} for "${result.document?.title}"`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, document: result.document });
+  } catch (error: any) {
+    console.error('Error creating document version:', error);
+    res.status(500).json({ error: error.message || 'Failed to create document version' });
+  }
+});
+
+// Re-brand document copy from immutable original
+documentRouter.post('/:id/rebrand', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await rebrandDocument(req.params.id);
+    if (!result.success) {
+      return res.status(400).json({ error: result.error || 'Failed to rebrand document' });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'REBRAND_DOCUMENT',
+      targetType: 'DOCUMENT',
+      targetId: req.params.id,
+      details: `Rebranded document ${req.params.id} (new hash: ${result.brandedHash?.substring(0, 12)}...)`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, brandedHash: result.brandedHash });
+  } catch (error: any) {
+    console.error('Error rebranding document:', error);
+    res.status(500).json({ error: error.message || 'Failed to rebrand document' });
+  }
+});
+
+// Document versions history
+documentRouter.get('/:id/versions', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const versions = await getDocumentVersionsFromDb(req.params.id);
+    res.json({ versions });
+  } catch (error: any) {
+    console.error('Error fetching document versions:', error);
+    res.status(500).json({ error: 'Failed to retrieve document versions' });
+  }
+});
+
+// Real download events log
+documentRouter.get('/:id/downloads', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const events = await getDocumentDownloadEventsFromDb(req.params.id);
+    res.json({ events, count: events.length });
+  } catch (error: any) {
+    console.error('Error fetching document downloads:', error);
+    res.status(500).json({ error: 'Failed to retrieve download records' });
+  }
+});
+
+// Delete document
+documentRouter.delete('/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const existing = await getDocumentByIdFromDb(req.params.id, true);
+    if (!existing) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'documents',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Document: ${existing.title}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Document deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const success = await deleteDocumentFromDb(req.params.id);
+    if (!success) {
+      return res.status(400).json({ error: 'Failed to delete document' });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'DELETE_DOCUMENT',
+      targetType: 'DOCUMENT',
+      targetId: req.params.id,
+      details: `Deleted document ${req.params.id}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Document deleted' });
+  } catch (error: any) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
+// Secure, Authoritative Document Download Endpoint
+documentRouter.get('/:id/download', documentRateLimitMiddleware, optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const docId = req.params.id;
+    const doc = await getDocumentByIdFromDb(docId, true);
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Role-enforced access check: Draft and Archived documents are strictly restricted to staff
+    const isStaff = isStaffUser(req.user);
+    if (doc.status !== 'Published' && !isStaff) {
+      return res.status(403).json({ error: 'Access denied: Document is not published' });
+    }
+
+    // Original file download check: ONLY Admins or ContentManagers can request the unbranded original
+    const requestOriginal = req.query.original === 'true';
+    let fileInfo: { valid: boolean; filePath?: string; error?: string };
+
+    if (requestOriginal) {
+      if (!isAdminOrContentManager(req.user)) {
+        return res.status(403).json({ error: 'Access denied: Administrative privileges required to download unbranded original' });
+      }
+      fileInfo = getSafeOriginalPath(doc);
+    } else {
+      fileInfo = getSafeBrandedPath(doc);
+    }
+
+    if (!fileInfo.valid || !fileInfo.filePath) {
+      return res.status(404).json({ error: fileInfo.error || 'Document file unavailable on storage' });
+    }
+
+    // Asynchronously record real download event
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    const userAgent = req.headers['user-agent']?.substring(0, 500);
+    const sessionId = (req.headers['x-session-id'] as string) || req.cookies?.tg_session_id;
+
+    recordDocumentDownload(doc.id, {
+      documentType: doc.documentType,
+      userUid: req.user?.uid,
+      anonymousSessionId: sessionId,
+      ipAddress: clientIp,
+      userAgent,
+      version: doc.version,
+    }).catch((recErr) => console.warn('Failed to record download event:', recErr));
+
+    // Send the file with secure headers
+    res.setHeader('Content-Type', doc.mimeType || 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${doc.sanitizedFilename}"`);
+    res.setHeader('X-TaleemGuru-Branded', (!requestOriginal && doc.brandingStatus === 'Completed') ? 'true' : 'false');
+    res.setHeader('X-TaleemGuru-Doc-Id', doc.id);
+    res.setHeader('X-TaleemGuru-Version', doc.version.toString());
+
+    const fileStream = fs.createReadStream(fileInfo.filePath);
+    fileStream.pipe(res);
+  } catch (error: any) {
+    console.error('Error in document download:', error);
+    res.status(500).json({ error: 'Failed to process document download' });
+  }
+});
+
+// Secure Document Preview Endpoint (serves PDF inline)
+documentRouter.get('/:id/preview', documentRateLimitMiddleware, optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const docId = req.params.id;
+    const doc = await getDocumentByIdFromDb(docId, true);
+    if (!doc) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    const isStaff = isStaffUser(req.user);
+    if (doc.status !== 'Published' && !isStaff) {
+      return res.status(403).json({ error: 'Access denied: Document is not published' });
+    }
+
+    const fileInfo = getSafeBrandedPath(doc);
+    if (!fileInfo.valid || !fileInfo.filePath) {
+      return res.status(404).json({ error: fileInfo.error || 'Preview file unavailable' });
+    }
+
+    res.setHeader('Content-Type', doc.mimeType || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${doc.sanitizedFilename}"`);
+    const fileStream = fs.createReadStream(fileInfo.filePath);
+    fileStream.pipe(res);
+  } catch (error: any) {
+    console.error('Error in document preview:', error);
+    res.status(500).json({ error: 'Failed to stream document preview' });
+  }
+});
+
+// Reprocess all existing documents (Admin only)
+documentRouter.post('/reprocess-all', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { items } = await getDocumentsFromDb({ limit: 500 }, true);
+    let reprocessed = 0;
+    const errors = [];
+
+    for (const doc of items) {
+      if (doc.mimeType === 'application/pdf' && doc.brandingStatus !== 'Completed') {
+        const rebrandResult = await rebrandDocument(doc.id);
+        if (rebrandResult.success) {
+          reprocessed++;
+        } else {
+          errors.push({ id: doc.id, error: rebrandResult.error });
+        }
+      }
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'REPROCESS_DOCUMENTS',
+      targetType: 'DOCUMENT_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Reprocessed ${reprocessed} documents (${errors.length} errors)`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, reprocessed, errorsCount: errors.length, errors });
+  } catch (error: any) {
+    console.error('Error reprocessing documents:', error);
+    res.status(500).json({ error: 'Failed to reprocess documents' });
+  }
+});
+
+// Legacy Branding & Protected Download Routes (Preserved for compatibility)
+documentRouter.post('/brand', documentRateLimitMiddleware, async (req: Request, res: Response) => {
+  try {
+    let inputBuffer: Buffer;
+    const rawFilename = (req.query.filename as string) || req.body?.filename || 'document.pdf';
+    const rawTitle = (req.query.title as string) || req.body?.title || 'Study Document';
+    const filename = sanitizeDownloadFilename(rawFilename, 'document.pdf');
+    const title = typeof rawTitle === 'string' ? rawTitle.substring(0, 256) : 'Study Document';
+
+    if (Buffer.isBuffer(req.body)) {
+      if (req.body.length > MAX_DOCUMENT_SIZE_BYTES) {
+        return res.status(400).json({ error: 'Uploaded document exceeds maximum size limit (25MB)' });
+      }
+      inputBuffer = req.body;
+    } else if (req.body?.fileBase64) {
+      if (typeof req.body.fileBase64 !== 'string') {
+        return res.status(400).json({ error: 'fileBase64 must be a valid base64 string' });
+      }
+      if (req.body.fileBase64.length > MAX_DOCUMENT_SIZE_BYTES * 1.4) {
+        return res.status(400).json({ error: 'Document exceeds maximum size limit (25MB)' });
+      }
+      inputBuffer = Buffer.from(req.body.fileBase64, 'base64');
+      if (inputBuffer.length > MAX_DOCUMENT_SIZE_BYTES) {
+        return res.status(400).json({ error: 'Decoded document exceeds maximum size limit (25MB)' });
+      }
+    } else if (req.body?.url) {
+      const urlStr = String(req.body.url);
+      const fetched = await safeFetchRemoteDocument(urlStr);
+      inputBuffer = fetched.buffer;
+    } else {
+      return res.status(400).json({ error: 'Missing valid fileBase64, url, or binary payload' });
+    }
+
+    const result = await brandPdfBuffer(inputBuffer, { title });
+    res.json({
+      success: true,
+      filename: filename.endsWith('.pdf') ? filename : `${filename}_TaleemGuru.pdf`,
+      brandedBase64: result.buffer.toString('base64'),
+      wasAlreadyBranded: result.wasAlreadyBranded,
+      pageCount: result.pageCount,
+      hash: computeHash(result.buffer),
+    });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Failed to process and brand document' });
+  }
+});
+
+documentRouter.get('/download', documentRateLimitMiddleware, async (req: Request, res: Response) => {
+  try {
+    const rawUrl = (req.query.url as string || req.query.fileId as string || '').trim();
+    const rawFilename = (req.query.filename as string) || 'TaleemGuru_Document.pdf';
+    const rawTitle = (req.query.title as string) || 'TaleemGuru Study Resource';
+
+    if (!rawUrl) {
+      return res.status(400).json({ error: 'Missing required document url or fileId parameter' });
+    }
+
+    if (rawUrl.length > 2048) {
+      return res.status(400).json({ error: 'URL parameter exceeds maximum allowed length' });
+    }
+
+    const filename = sanitizeDownloadFilename(rawFilename, 'TaleemGuru_Document.pdf');
+    const title = typeof rawTitle === 'string' ? rawTitle.substring(0, 256) : 'TaleemGuru Study Resource';
+
+    let inputBuffer: Buffer;
+    let contentType = 'application/pdf';
+
+    if (rawUrl.startsWith('/')) {
+      const localResolution = resolveSafeLocalFilePath(rawUrl);
+      if (!localResolution.valid || !localResolution.absolutePath) {
+        return res.status(403).json({ error: localResolution.error || 'Access denied' });
+      }
+      inputBuffer = fs.readFileSync(localResolution.absolutePath);
+      if (rawUrl.endsWith('.txt')) contentType = 'text/plain';
+      else if (rawUrl.endsWith('.md')) contentType = 'text/markdown';
+    } else {
+      const fetched = await safeFetchRemoteDocument(rawUrl);
+      inputBuffer = fetched.buffer;
+      contentType = fetched.contentType;
+    }
+
+    if (contentType.includes('pdf') || rawUrl.toLowerCase().endsWith('.pdf') || filename.toLowerCase().endsWith('.pdf')) {
+      const brandedResult = await brandPdfBuffer(inputBuffer, { title });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename.endsWith('.pdf') ? filename : `${filename}_TaleemGuru.pdf`}"`);
+      res.setHeader('X-TaleemGuru-Branded', 'true');
+      res.setHeader('X-TaleemGuru-Was-Already-Branded', brandedResult.wasAlreadyBranded.toString());
+      return res.send(brandedResult.buffer);
+    }
+
+    if (contentType.includes('text') || contentType.includes('markdown')) {
+      const brandedText = brandTextContent(inputBuffer.toString('utf-8'), title);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(brandedText);
+    }
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(inputBuffer);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || 'Error processing document download' });
+  }
+});
+
+apiRouter.get('/health/db', async (req: Request, res: Response) => {
+  try {
+    const resolved = resolveDatabaseConnectionString();
+    let connInfo = { selectedEnvVar: 'NONE', host: 'unknown', port: '5432', database: 'unknown', username: 'unknown' };
+    
+    if (resolved) {
+      try {
+        const u = new URL(resolved.url);
+        connInfo = {
+          selectedEnvVar: resolved.selectedEnvVar,
+          host: u.hostname,
+          port: u.port || '5432',
+          database: u.pathname.replace('/', ''),
+          username: u.username,
+        };
+      } catch (e) {}
+    }
+
+    const pool = createPool();
+    const pingRes = await pool.query('SELECT 1 as connected');
+    const userCountRes = await pool.query('SELECT count(*) as total FROM users');
+    const leaderboardRes = await pool.query('SELECT id, name, email, points FROM users ORDER BY points DESC LIMIT 3');
+
+    return res.json({
+      status: 'healthy',
+      database: connInfo,
+      tests: {
+        ping: pingRes.rows[0]?.connected === 1,
+        totalUsers: parseInt(userCountRes.rows[0]?.total || '0', 10),
+        leaderboardSampleCount: leaderboardRes.rows.length,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Health DB check failed:', err);
+    return res.status(500).json({
+      status: 'unhealthy',
+      error: {
+        code: err?.code,
+        message: err?.message,
+      },
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
+apiRouter.use('/documents', documentRouter);
+
+// Centralized Unified Search & Discovery Router
+const searchRouter = express.Router();
+
+// 1. Unified Search Query across MCQs, Tests, Past Papers, Notes, Documents, Curriculum
+searchRouter.get('/', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const filters = {
+      query: (req.query.q || req.query.query || req.query.search || '') as string,
+      type: (req.query.type || 'all') as any,
+      board: req.query.board as string,
+      classLevel: (req.query.classLevel || req.query.class) as string,
+      subject: req.query.subject as string,
+      chapter: req.query.chapter as string,
+      year: req.query.year ? parseInt(req.query.year as string, 10) : undefined,
+      status: req.query.status as string,
+      page: req.query.page ? parseInt(req.query.page as string, 10) : 1,
+      limit: req.query.limit ? Math.min(100, parseInt(req.query.limit as string, 10)) : 20,
+    };
+
+    const searchResponse = await executeUnifiedSearch(filters, isStaff);
+    res.json(searchResponse);
+  } catch (error: any) {
+    console.error('Unified search API error:', error);
+    res.status(500).json({ error: error.message || 'Error executing search' });
+  }
+});
+
+// 2. Fast Autocomplete & Suggestions
+searchRouter.get('/suggestions', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const query = (req.query.q || req.query.query || '') as string;
+    const suggestions = await getQuickSearchSuggestions(query, isStaff);
+    res.json({ suggestions });
+  } catch (error: any) {
+    console.error('Search suggestions API error:', error);
+    res.status(500).json({ error: error.message || 'Error fetching search suggestions' });
+  }
+});
+
+// 3. Dynamic Filter Options directly from PostgreSQL
+searchRouter.get('/filters', async (req: Request, res: Response) => {
+  try {
+    const filters = await getDynamicSearchFilters();
+    res.json(filters);
+  } catch (error: any) {
+    console.error('Search filters API error:', error);
+    res.status(500).json({ error: error.message || 'Error fetching search filters' });
+  }
+});
+
+apiRouter.use('/search', searchRouter);
+
+// Newsletter Router
+const newsletterRouter = express.Router();
+
+newsletterRouter.post('/subscribe', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Valid email required' });
+    }
+    const result = await addSubscriber(email.trim().toLowerCase());
+    if (result === null) {
+      return res.json({ message: 'You are already subscribed to Weekly Exam Tips.' });
+    }
+    res.status(201).json({ message: "You're subscribed! Weekly Exam Tips will be sent to your email." });
+  } catch (error: any) {
+    console.error('Newsletter subscription error:', error);
+    res.status(500).json({ error: 'Failed to subscribe. Please try again later.' });
+  }
+});
+
+newsletterRouter.get('/', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const subscribers = await getSubscribers();
+    res.json(subscribers);
+  } catch (error: any) {
+    console.error('Error fetching subscribers:', error);
+    res.status(500).json({ error: 'Failed to retrieve subscribers' });
+  }
+});
+
+newsletterRouter.put('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await updateSubscriberStatus(parseInt(req.params.id), req.body.status);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error updating subscriber:', error);
+    res.status(500).json({ error: 'Failed to update subscriber' });
+  }
+});
+
+newsletterRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await removeSubscriber(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error removing subscriber:', error);
+    res.status(500).json({ error: 'Failed to remove subscriber' });
+  }
+});
+
+newsletterRouter.post('/campaigns', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const campaign = await createCampaign(req.body);
+    res.status(201).json(campaign);
+  } catch (error: any) {
+    console.error('Error creating campaign:', error);
+    res.status(500).json({ error: 'Failed to create campaign' });
+  }
+});
+
+apiRouter.use('/newsletter', newsletterRouter);
+
+// Content Approval Router
+const approvalRouter = express.Router();
+
+approvalRouter.get('/', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const filters = {
+      status: req.query.status as string,
+      entityType: req.query.entityType as string,
+      submittedBy: req.query.submittedBy as string,
+      search: req.query.search as string,
+      limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
+      offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+    };
+    const result = await getApprovalRequests(filters);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error fetching approvals:', error);
+    res.status(500).json({ error: 'Failed to retrieve approval requests' });
+  }
+});
+
+approvalRouter.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const stats = await getApprovalStats();
+    res.json(stats);
+  } catch (error: any) {
+    console.error('Error fetching approval stats:', error);
+    res.status(500).json({ error: 'Failed to retrieve approval statistics' });
+  }
+});
+
+approvalRouter.get('/my', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user?.uid) {
+      return res.status(401).json({ error: 'Unauthorized: Missing user identity' });
+    }
+    const submissions = await getMySubmissions(req.user.uid);
+    res.json({ submissions });
+  } catch (error: any) {
+    console.error('Error fetching staff submissions:', error);
+    res.status(500).json({ error: 'Failed to retrieve your submissions' });
+  }
+});
+
+approvalRouter.post('/:id/approve', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid approval request ID' });
+    const result = await approveChangeRequest(
+      id,
+      req.user!.uid,
+      req.user!.email || 'admin@taleemguru.pk',
+      req.user!.name || 'Admin',
+      req.body.comment,
+      req.ip
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error approving request:', error);
+    const code = error.statusCode || 500;
+    res.status(code).json({ error: error.message || 'Failed to approve request' });
+  }
+});
+
+approvalRouter.post('/:id/reject', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid approval request ID' });
+    const reason = req.body.reason || req.body.comment;
+    if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+      return res.status(400).json({ error: 'A rejection reason is required so staff know what to correct.' });
+    }
+    const result = await rejectChangeRequest(
+      id,
+      req.user!.uid,
+      req.user!.email || 'admin@taleemguru.pk',
+      req.user!.name || 'Admin',
+      reason,
+      req.ip
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error rejecting request:', error);
+    const code = error.statusCode || 500;
+    res.status(code).json({ error: error.message || 'Failed to reject request' });
+  }
+});
+
+apiRouter.use('/approvals', approvalRouter);
+
+// 2. Content Management Router
+const contentRouter = express.Router();
+
+contentRouter.get('/boards', requireContentManager, async (req, res) => {
+  res.json(await getAllBoardsFromDb());
+});
+contentRouter.post('/boards', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${req.body.name}`,
+        proposedData: { name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createBoardInDb({ name: req.body.name }));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to add board' });
+  }
+});
+
+contentRouter.put('/boards/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getBoardByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateBoardInDb(id, req.body));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update board' });
+  }
+});
+
+contentRouter.delete('/boards/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getBoardByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Board: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteBoardFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete board' });
+  }
+});
+
+contentRouter.post('/classes', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${req.body.name}`,
+        proposedData: { boardId: req.body.boardId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createClassInDb({ boardId: req.body.boardId, name: req.body.name }));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to add class' });
+  }
+});
+
+contentRouter.put('/classes/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getClassByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateClassInDb(id, req.body));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update class' });
+  }
+});
+
+contentRouter.delete('/classes/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getClassByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Class: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteClassFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete class' });
+  }
+});
+
+contentRouter.post('/subjects', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${req.body.name}`,
+        proposedData: { classId: req.body.classId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await createSubjectInDb({ classId: req.body.classId, name: req.body.name }));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to add subject' });
+  }
+});
+
+contentRouter.put('/subjects/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getSubjectByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateSubjectInDb(id, req.body));
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to update subject' });
+  }
+});
+
+contentRouter.delete('/subjects/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getSubjectByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subject: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteSubjectFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete subject' });
+  }
+});
+
+contentRouter.post('/chapters', requireContentManager, async (req: AuthRequest, res: Response) => {
+  const user = req.user;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    let user: any = null;
-
-    // 1. First check server-signed JWT tokens
-    const serverTokenResult = verifyServerSignedToken(token);
-    if (serverTokenResult.valid && serverTokenResult.user) {
-      user = serverTokenResult.user;
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${req.body.name}`,
+        proposedData: { subjectId: req.body.subjectId, name: req.body.name, ...req.body },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
 
-    // 2. Fall back to Supabase client
-    if (!user && !isServerJwtCandidate(token)) {
-      const client = getSupabaseServerClient();
-      if (client) {
-        try {
-          const { data } = await client.auth.getUser(token);
-          if (data?.user) user = data.user;
-        } catch {}
-      }
+    const saved = await createChapterInDb({ subjectId: req.body.subjectId, name: req.body.name });
+
+    await saveAuditLogToDb({
+      adminUid: user.uid,
+      adminEmail: user.email || 'unknown',
+      adminName: user.name || 'Staff',
+      action: 'CREATE_CHAPTER',
+      targetType: 'CHAPTER',
+      targetId: String(saved.id),
+      details: `Created chapter: ${req.body.name}`
+    });
+
+    res.json(saved);
+  } catch (error: any) {
+    if (error.statusCode === 409) return res.status(409).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to add chapter' });
+  }
+});
+
+contentRouter.put('/chapters/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getChapterByIdFromDb(id);
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${req.body.name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
+    res.json(await updateChapterInDb(id, req.body));
+  } catch (error: any) {
+    if (error.message === 'DUPLICATE_CHAPTER') return res.status(409).json({ error: 'A chapter with this name already exists in this subject.' });
+    res.status(500).json({ error: 'Failed to update chapter' });
+  }
+});
 
-    if (user) {
-      const normalizedEmail = (user.email || '').toLowerCase().trim();
-      const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
-      const bootstrapAdmins = getTrustedBootstrapAdmins();
-      const bootstrapConfig = bootstrapAdmins[normalizedEmail];
-      let dbUser = null;
-      try {
-        dbUser = await getUserByUid(user.id);
-      } catch {}
+contentRouter.delete('/chapters/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    const existing = await getChapterByIdFromDb(id);
 
-      let authoritativeRoles = ['Student'];
-      if (dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0) {
-        authoritativeRoles = dbUser.roles;
-      } else if (isBootstrap) {
-        authoritativeRoles = bootstrapConfig?.roles || ['Admin'];
-      } else if (dbUser?.role) {
-        authoritativeRoles = [dbUser.role];
-      } else if (user.user_metadata?.roles && Array.isArray(user.user_metadata.roles)) {
-        authoritativeRoles = user.user_metadata.roles;
-      }
-
-      req.user = {
-        uid: user.id,
-        email: normalizedEmail,
-        name: (isBootstrap ? (bootstrapConfig?.name || 'Admin') : dbUser?.name) || user.user_metadata?.name || normalizedEmail.split('@')[0],
-        roles: authoritativeRoles,
-      };
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Chapter: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
     }
-  } catch (err) {
-    // Non-blocking in optionalAuth
+    res.json(await deleteChapterFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete chapter' });
+  }
+});
+
+contentRouter.get('/syllabus', requireContentManager, async (req, res) => {
+  res.json(await getSyllabusFromDb());
+});
+contentRouter.post('/syllabus', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Syllabus for Subject ID: ${req.body.subjectId}`,
+        proposedData: { subjectId: req.body.subjectId, content: req.body.content },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus creation submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await addSyllabusToDb(req.body.subjectId, req.body.content));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to add syllabus' });
+  }
+});
+
+contentRouter.put('/syllabus/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: req.params.id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Syllabus #${id}`,
+        proposedData: { id, content: req.body.content },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await updateSyllabusInDb(id, req.body.content));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update syllabus' });
+  }
+});
+
+contentRouter.delete('/syllabus/:id', requireContentManager, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'syllabus',
+        entityId: req.params.id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Syllabus #${id}`,
+        proposedData: null,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Syllabus deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+    res.json(await deleteSyllabusFromDb(id));
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete syllabus' });
+  }
+});
+
+apiRouter.use('/content', contentRouter);
+
+// Rate Limiting Table for Authentication Protection
+interface RateLimitRecord {
+  attempts: number;
+  firstAttempt: number;
+  blockedUntil: number;
+}
+const loginRateLimitMap = new Map<string, RateLimitRecord>();
+
+function checkLoginRateLimit(key: string): { allowed: boolean; retryAfterSeconds?: number } {
+  const now = Date.now();
+  const record = loginRateLimitMap.get(key);
+  if (!record) {
+    loginRateLimitMap.set(key, { attempts: 1, firstAttempt: now, blockedUntil: 0 });
+    return { allowed: true };
   }
 
-  return next();
-};
+  if (record.blockedUntil > now) {
+    const retryAfter = Math.ceil((record.blockedUntil - now) / 1000);
+    return { allowed: false, retryAfterSeconds: retryAfter };
+  }
 
-/**
- * Middleware: Requires an authenticated Supabase user whose role in the
- * authoritative database is explicitly verified as an Administrator.
- * Fails closed on any error, missing user, or non-admin role.
- */
-export const requireAdmin = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
-    try {
-      const uid = req.user?.uid;
-      const email = req.user?.email;
-      if (!uid) {
-        return res.status(401).json({ error: 'Unauthorized: Missing user identity' });
-      }
+  // Reset window after 60 seconds
+  if (now - record.firstAttempt > 60 * 1000) {
+    record.attempts = 1;
+    record.firstAttempt = now;
+    record.blockedUntil = 0;
+    return { allowed: true };
+  }
 
-      const normalizedEmail = (email || '').toLowerCase().trim();
+  record.attempts += 1;
+  // Maximum 6 attempts per minute
+  if (record.attempts > 6) {
+    record.blockedUntil = now + 60 * 1000;
+    return { allowed: false, retryAfterSeconds: 60 };
+  }
 
-      // Query database directly to ensure freshest authoritative verification for the authenticated UID
-      let dbUser = null;
-      try {
-        dbUser = await getUserByUid(uid);
-        if (!dbUser && normalizedEmail) {
-          dbUser = await getOrCreateUser(uid, normalizedEmail);
-        }
-      } catch (dbErr) {
-        console.warn('Notice in requireAdmin database lookup:', dbErr);
-      }
+  return { allowed: true };
+}
 
-      if (!dbUser) {
-        return res.status(403).json({
-          error: 'Forbidden: User record not found in system. Access denied.',
-        });
-      }
+function clearLoginRateLimit(key: string) {
+  loginRateLimitMap.delete(key);
+}
 
-      if (dbUser.status && (dbUser.status.toLowerCase() === 'suspended' || dbUser.status.toLowerCase() === 'inactive')) {
-        return res.status(403).json({
-          error: `Forbidden: Account is currently ${dbUser.status}. Access denied.`,
-          status: dbUser.status,
-        });
-      }
+// 1b. Authoritative Staff & Administrator Authentication Endpoint
+apiRouter.post('/admin/login', async (req: Request, res: Response) => {
+  const cid = (req.headers['x-correlation-id'] as string) || `cid-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  res.setHeader('X-Correlation-ID', cid);
 
-      const staffRolesToCheck = [
-        'admin',
-        'superadmin',
-        'super_admin',
-        'administrator',
-        'teacher',
-        'editor',
-        'contentmanager',
-        'content_manager',
-        'moderator',
-      ];
-      
-      const roles = (dbUser.roles || [dbUser.role || '']).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorizedAdmin = roles.some(role => staffRolesToCheck.includes(role));
+  try {
+    const { email, password, token: bodyToken } = req.body || {};
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPassword = typeof password === 'string' ? password : '';
+    const authHeader = req.headers.authorization;
+    const bearerToken = bodyToken || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split('Bearer ')[1]?.trim() : null);
 
-      if (!isAuthorizedAdmin) {
-        return res.status(403).json({
-          error: 'Forbidden: Administrative or staff privileges required. Access denied.',
-          currentRoles: dbUser.roles || [dbUser.role],
-        });
-      }
+    console.log(`[Admin Login Diagnostic][${cid}] Login request received. TargetEmail: ${cleanEmail || 'none'}, HasBearerToken: ${!!bearerToken}`);
 
-      // Authoritative role confirmed
-      req.user!.roles = dbUser.roles || [dbUser.role];
-      return next();
-    } catch (err) {
-      console.error('requireAdmin verification failed:', err);
-      // Fail closed
-      return res.status(403).json({
-        error: 'Forbidden: Admin security verification failed',
+    if (!cleanEmail && !bearerToken) {
+      console.warn(`[Admin Login Diagnostic][${cid}] Rejected 400: Missing email and bearer token.`);
+      return res.status(400).json({ error: 'Please enter a valid administrator or staff email address.' });
+    }
+
+    // Rate Limiting by IP and Target Email
+    const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || 'ip';
+    const rateLimitKey = `${clientIp}:${cleanEmail || 'token-auth'}`;
+    const rateCheck = checkLoginRateLimit(rateLimitKey);
+    if (!rateCheck.allowed) {
+      console.warn(`[Admin Login Diagnostic][${cid}] Rejected 429: Rate limit exceeded for key ${rateLimitKey}.`);
+      return res.status(429).json({
+        error: `Too many login attempts. Please wait ${rateCheck.retryAfterSeconds || 60} seconds before trying again.`,
       });
     }
-  });
-};
 
-/**
- * Middleware: Requires an authenticated Supabase user whose role in the
- * authoritative database includes ContentManager or is an Administrator.
- */
-export const requireContentManager = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
-    try {
-      const uid = req.user?.uid;
-      const email = req.user?.email;
-      if (!uid) {
-        return res.status(401).json({ error: 'Unauthorized: Missing user identity' });
-      }
+    let authenticatedUser: { id: string; email?: string; user_metadata?: any } | null = null;
 
-      const normalizedEmail = (email || '').toLowerCase().trim();
-
-      // Query database directly to ensure freshest authoritative verification for the authenticated UID
-      let dbUser = null;
-      try {
-        dbUser = await getUserByUid(uid);
-        if (!dbUser && normalizedEmail) {
-          dbUser = await getOrCreateUser(uid, normalizedEmail);
+    // 0. Verify provided Supabase bearer or access token if passed directly
+    if (bearerToken) {
+      const supabase = getSupabaseServerClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.auth.getUser(bearerToken);
+          if (!error && data?.user) {
+            authenticatedUser = {
+              id: data.user.id,
+              email: data.user.email,
+              user_metadata: data.user.user_metadata,
+            };
+            console.log(`[Admin Login Diagnostic][${cid}] Stage 0 (BearerToken): Successfully authenticated via bearer token.`);
+          }
+        } catch (e) {
+          console.warn(`[Admin Login Diagnostic][${cid}] Notice in bearerToken verification:`, e);
         }
-      } catch (dbErr) {
-        console.warn('Notice in requireContentManager database lookup:', dbErr);
       }
+    }
 
-      if (!dbUser) {
-        return res.status(403).json({
-          error: 'Forbidden: User record not found.',
-        });
+    // 1. Authenticate against Supabase Auth using submitted email and password
+    if (!authenticatedUser && cleanEmail && cleanPassword) {
+      const supabase = getSupabaseServerClient();
+      if (supabase) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: cleanPassword,
+          });
+
+          if (!authError && authData?.user) {
+            authenticatedUser = {
+              id: authData.user.id,
+              email: authData.user.email,
+              user_metadata: authData.user.user_metadata,
+            };
+            console.log(`[Admin Login Diagnostic][${cid}] Stage 1 (SupabaseAuth): Successfully authenticated via Supabase signInWithPassword.`);
+          }
+        } catch (err) {
+          console.warn(`[Admin Login Diagnostic][${cid}] Supabase signInWithPassword notice:`, err);
+        }
       }
+    }
 
-      const roles = (dbUser.roles || [dbUser.role || '']).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorized = roles.some(role => ['admin', 'superadmin', 'super_admin', 'administrator', 'contentmanager', 'content_manager'].includes(role));
-
-      if (!isAuthorized) {
-        return res.status(403).json({
-          error: 'Forbidden: Content Manager or Administrator privileges required.',
-        });
+    // Database cryptographic password verification (for staff accounts created by admin)
+    if (!authenticatedUser && cleanEmail && cleanPassword) {
+      try {
+        const dbCandidate = await getUserByEmail(cleanEmail);
+        if (dbCandidate) {
+          const pwdToken = (dbCandidate.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
+          if (pwdToken && verifyPassword(cleanPassword, pwdToken)) {
+            authenticatedUser = {
+              id: dbCandidate.uid,
+              email: dbCandidate.email,
+              user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
+            };
+            console.log(`[Admin Login Diagnostic][${cid}] Stage 2 (DB Password): Successfully authenticated via DB password hash.`);
+          } else if (!pwdToken && cleanPassword.length >= 6) {
+            const userRoles = dbCandidate.roles || [];
+            const isStaff = userRoles.some((r: string) =>
+              ['admin', 'superadmin', 'administrator', 'teacher', 'editor', 'contentmanager', 'moderator'].includes(r.toLowerCase())
+            );
+            if (isStaff && isTrustedBootstrapAdminEmail(cleanEmail)) {
+              const pwdHash = hashPassword(cleanPassword);
+              await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...(dbCandidate.permissions || [])]);
+              authenticatedUser = {
+                id: dbCandidate.uid,
+                email: dbCandidate.email,
+                user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
+              };
+              console.log(`[Admin Login Diagnostic][${cid}] Stage 2b (Bootstrap Initial Password Setup): Successfully configured and authenticated DB password.`);
+            }
+          }
+        }
+      } catch (dbAuthErr) {
+        console.warn(`[Admin Login Diagnostic][${cid}] Notice in database password verification:`, dbAuthErr);
       }
+    }
 
-      return next();
-    } catch (err) {
-      console.error('requireContentManager verification failed:', err);
-      return res.status(403).json({
-        error: 'Forbidden: Security verification failed',
+    // Database cryptographic password verification for bootstrap admin (strictly verifies password hash)
+    if (!authenticatedUser && cleanEmail && cleanPassword && isTrustedBootstrapAdminEmail(cleanEmail)) {
+      try {
+        const dbCandidate = await getUserByEmail(cleanEmail);
+        const pwdToken = (dbCandidate?.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
+        
+        if (pwdToken && verifyPassword(cleanPassword, pwdToken)) {
+          const newUid = dbCandidate?.uid || `admin-${cleanEmail.replace(/[^a-zA-Z0-9]/g, '-')}`;
+          authenticatedUser = {
+            id: newUid,
+            email: cleanEmail,
+            user_metadata: { name: dbCandidate?.name || 'Administrator', roles: ['Admin'] },
+          };
+          console.log(`[Admin Login Diagnostic][${cid}] Stage 3 (Bootstrap Fallback): Successfully authenticated bootstrap admin.`);
+        }
+      } catch (bsErr) {
+        console.warn(`[Admin Login Diagnostic][${cid}] Notice in bootstrap admin login handling:`, bsErr);
+      }
+    }
+
+    // If authentication failed (wrong password, unknown user, unverified credentials), reject with 401
+    if (!authenticatedUser) {
+      console.warn(`[Admin Login Diagnostic][${cid}] Rejected 401: Invalid credentials for target email ${cleanEmail || 'token'}.`);
+      return res.status(401).json({
+        error: 'Invalid email or password.',
       });
     }
-  });
-};
 
-/**
- * Middleware: Requires an authoritative high-level administrator
- * (admin, superadmin, super_admin, administrator) for sensitive operations
- * such as user role delegation and staff account creation.
- * Teachers, Editors, ContentManagers, Moderators, and Students are strictly blocked with HTTP 403 Forbidden.
- */
-export const requireHighAdmin = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAdmin(req, res, async () => {
-    const normalizedEmail = (req.user?.email || '').toLowerCase().trim();
-    if (isTrustedBootstrapAdminEmail(normalizedEmail)) {
-      return next();
+    // Clear rate limit on successful credentials verification
+    clearLoginRateLimit(rateLimitKey);
+
+    // 2. Resolve authoritative role from PostgreSQL database and bootstrap admin list
+    const userId = authenticatedUser.id;
+    const userEmail = (authenticatedUser.email || cleanEmail).toLowerCase().trim();
+
+    let dbUser = null;
+    try {
+      dbUser = await getUserByUid(userId);
+      if (!dbUser && userEmail) {
+        dbUser = await getUserByEmail(userEmail);
+      }
+    } catch (e) {
+      console.warn(`[Admin Login Diagnostic][${cid}] DB lookup notice in /admin/login:`, e);
     }
 
-    const dbRoles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-    const isHighAdmin = dbRoles.some(role => [
+    const isBootstrap = isTrustedBootstrapAdminEmail(userEmail);
+    const bootstrapAdmins = getTrustedBootstrapAdmins();
+    const bootstrapConfig = bootstrapAdmins[userEmail];
+
+    const userRoles = dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0
+      ? dbUser.roles
+      : (dbUser?.role ? [dbUser.role] : ['Student']);
+    const authoritativeRole = isBootstrap ? 'Admin' : (userRoles[0] || 'Student');
+
+    // Check account status
+    const accountStatus = (dbUser?.status || 'Active').trim();
+    if (accountStatus.toLowerCase() === 'inactive' || accountStatus.toLowerCase() === 'suspended') {
+      console.warn(`[Admin Login Diagnostic][${cid}] Rejected 403: Account status ${accountStatus} for user ${userEmail}.`);
+      return res.status(403).json({
+        error: `Access Denied: Your staff account is currently marked as ${accountStatus}. Please contact an administrator.`,
+      });
+    }
+
+    // Verify that the authenticated user possesses an authorized staff or admin role
+    const allowedRoles = [
       'admin',
       'superadmin',
       'super_admin',
       'administrator',
-    ].includes(role));
+      'staff',
+      'teacher',
+      'editor',
+      'contentmanager',
+      'content_manager',
+      'moderator',
+    ];
 
-    if (!isHighAdmin) {
+    const isAuthorizedStaff = isBootstrap || userRoles.some((r: string) => allowedRoles.includes(r.trim().toLowerCase().replace(/\s+/g, '_')));
+
+    if (!isAuthorizedStaff) {
+      console.warn(`[Admin Login Diagnostic][${cid}] Rejected 403: Non-staff roles [${userRoles.join(', ')}] for email ${userEmail}.`);
       return res.status(403).json({
-        error: 'Forbidden: Elevated administrator privileges required for user and role administration. Teachers, Editors, Content Managers, and Moderators cannot access this resource.',
-        currentRoles: req.user?.roles,
+        error: `Access Denied: The account ${userEmail} is registered with roles "${userRoles.join(', ')}" and does not possess administrative or staff privileges.`,
       });
     }
 
-    return next();
-  });
+    const adminName =
+      (isBootstrap ? (bootstrapConfig?.name || 'Admin') : null) ||
+      (dbUser?.name && dbUser.name !== 'avatar-1' ? dbUser.name : null) ||
+      (authenticatedUser.user_metadata?.name && authenticatedUser.user_metadata?.name !== 'avatar-1' ? authenticatedUser.user_metadata?.name : null) ||
+      (authenticatedUser.user_metadata?.full_name && authenticatedUser.user_metadata?.full_name !== 'avatar-1' ? authenticatedUser.user_metadata?.full_name : null) ||
+      'Admin';
+
+    // 3. Generate secure signed standard 7-day administrative session JWT using dedicated SERVER_JWT_SECRET
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expSeconds = nowSeconds + 60 * 60 * 24 * 7;
+
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      sub: userId,
+      email: userEmail,
+      role: authoritativeRole,
+      iss: 'taleemguru-backend',
+      aud: 'taleemguru-admin',
+      exp: expSeconds,
+      iat: nowSeconds,
+      nbf: nowSeconds,
+      user_metadata: {
+        name: adminName,
+        role: authoritativeRole,
+      },
+    })).toString('base64url');
+
+    const crypto = await import('crypto');
+    const secret = getServerJwtSecret();
+    const signature = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
+    const token = `${header}.${payload}.${signature}`;
+
+    console.log(`[Admin Login Diagnostic][${cid}] Admin session token generated successfully for ${userEmail} with role ${authoritativeRole}.`);
+
+    // Ensure database profile exists with authoritative role
+    try {
+      await getOrCreateUser(userId, userEmail, {
+        name: adminName,
+      });
+    } catch (createErr) {
+      console.warn(`[Admin Login Diagnostic][${cid}] Notice ensuring user in db:`, createErr);
+    }
+
+    return res.json({
+      success: true,
+      token,
+      user: {
+        uid: userId,
+        email: userEmail,
+        name: adminName,
+        role: authoritativeRole,
+        roles: [authoritativeRole],
+        status: accountStatus,
+      },
+    });
+  } catch (err: any) {
+    console.error(`[Admin Login Error][${cid}] Exception in /api/admin/login:`, err);
+    return res.status(500).json({ error: 'Internal server error processing admin authentication.' });
+  }
+});
+
+// 2. User Profile Sync (on Google login / auth state change)
+apiRouter.post('/auth/sync', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    const email = (req.user?.email || '').toLowerCase().trim();
+    if (!uid) {
+      return res.status(400).json({ error: 'Missing UID' });
+    }
+
+    const { name, avatar, targetExam, classLevel, board } = req.body;
+    const user = await getOrCreateUser(uid, email, {
+      name: name || req.user?.name,
+      avatar,
+      targetExam,
+      classLevel,
+      board,
+    });
+
+    res.json({ success: true, user });
+  } catch (error: any) {
+    console.error('Error syncing user:', error);
+    res.status(500).json({ error: 'Failed to sync user profile' });
+  }
+});
+
+// 3. Get Current User Profile (/api/auth/me and /api/user/profile)
+const handleGetUserProfile = async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    const email = (req.user?.email || '').toLowerCase().trim();
+    if (!uid) {
+      console.info('[AUTH_ME_DIAGNOSTIC]', {
+        authSession: 'NOT_FOUND',
+        authUid: 'NONE',
+        profileLookup: 'NOT_FOUND',
+        provisioningAttempted: false,
+        provisioningResult: 'FAILED',
+      });
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const normalizedEmail = email;
+    const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
+    const bootstrapAdmins = getTrustedBootstrapAdmins();
+    const bootstrapConfig = bootstrapAdmins[normalizedEmail];
+
+    let profile = await getUserByUid(uid);
+    const profileFound = Boolean(profile);
+
+    if (!profile) {
+      // First-time authenticated user: create initial database record
+      const initialName = isBootstrap
+        ? (bootstrapConfig?.name || 'Admin')
+        : (req.user?.name || (email ? email.split('@')[0] : 'Learner'));
+
+      profile = await getOrCreateUser(uid, normalizedEmail, {
+        name: initialName,
+      });
+    }
+
+    console.info('[AUTH_ME_DIAGNOSTIC]', {
+      authSession: 'FOUND',
+      authUid: uid,
+      profileLookup: profileFound ? 'FOUND' : 'NOT_FOUND',
+      provisioningAttempted: !profileFound,
+      provisioningResult: profileFound ? 'EXISTING' : (profile ? 'CREATED' : 'FAILED'),
+    });
+
+    if (isBootstrap && profile) {
+      profile.roles = ['Admin'];
+      profile.name = bootstrapConfig?.name || 'Admin';
+    } else if (profile && (profile.name === 'avatar-1' || !profile.name)) {
+      profile.name = profile.roles.includes('Admin') ? 'Admin' : (email ? email.split('@')[0] : 'Learner');
+    }
+
+    res.json({ profile: sanitizeUserForClient(profile), user: sanitizeUserForClient(profile) });
+  } catch (error: any) {
+    console.error('Error fetching profile in /api/auth/me:', error);
+    res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
 };
 
-/**
- * Middleware: Requires permission to curate/manage MCQs (Admin, Teacher, Editor, ContentManager)
- */
-export const requireMCQCurator = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
-    try {
-      const email = (req.user?.email || '').toLowerCase().trim();
-      if (isTrustedBootstrapAdminEmail(email)) {
-        return next();
+apiRouter.get('/auth/me', requireAuth, handleGetUserProfile);
+apiRouter.get('/user/profile', requireAuth, handleGetUserProfile);
+
+// 4. Update Profile (Authoritative database update when student changes profile)
+apiRouter.put('/user/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { name, targetExam, classLevel, board, avatar } = req.body;
+    const updated = await updateUserProfile(uid, {
+      ...(name ? { name: name.trim() } : {}),
+      targetExam,
+      classLevel,
+      board,
+      avatar,
+    });
+
+    res.json({ success: true, profile: sanitizeUserForClient(updated) });
+  } catch (error: any) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// 4a. Update Profile (PATCH support)
+apiRouter.patch('/user/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { name, targetExam, classLevel, board, avatar } = req.body;
+    const updated = await updateUserProfile(uid, {
+      ...(name ? { name: name.trim() } : {}),
+      targetExam,
+      classLevel,
+      board,
+      avatar,
+    });
+
+    res.json({ success: true, profile: sanitizeUserForClient(updated) });
+  } catch (error: any) {
+    console.error('Error updating profile with PATCH:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// 4b. Student / User Self Password Change
+apiRouter.post('/user/change-password', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    const userEmail = (req.user?.email || '').toLowerCase().trim();
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword) {
+      return res.status(400).json({ error: 'Current password is required.' });
+    }
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password.' });
+    }
+
+    // 1. Verify current password
+    let isCurrentPasswordValid = false;
+
+    // Check Supabase Auth
+    const supabaseClient = getSupabaseServerClient();
+    if (supabaseClient && userEmail) {
+      try {
+        const { data: authData, error: authError } = await supabaseClient.auth.signInWithPassword({
+          email: userEmail,
+          password: currentPassword,
+        });
+        if (!authError && authData?.user) {
+          isCurrentPasswordValid = true;
+        }
+      } catch (e) {
+        // Continue to check database hash
       }
+    }
 
-      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorized = roles.some(role => [
-        'admin',
-        'superadmin',
-        'super_admin',
-        'administrator',
-        'editor',
-        'teacher',
-        'contentmanager',
-        'content_manager',
-      ].includes(role));
+    // Check Database hashed password token
+    if (!isCurrentPasswordValid) {
+      try {
+        const dbUser = await getUserByUid(uid);
+        if (dbUser) {
+          const pwdToken = (dbUser.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
+          if (pwdToken && verifyPassword(currentPassword, pwdToken)) {
+            isCurrentPasswordValid = true;
+          }
+        }
+      } catch (dbErr) {
+        console.warn('Notice in db password verification:', dbErr);
+      }
+    }
 
-      if (!isAuthorized) {
-        return res.status(403).json({
-          error: 'Forbidden: MCQ curation privileges required (Admin, Teacher, Editor, Content Manager).',
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ error: 'Current password is incorrect. Please verify and try again.' });
+    }
+
+    // 2. Update password in Supabase Auth if available
+    if (supabaseClient && (supabaseClient as any).auth?.admin?.updateUserById) {
+      try {
+        await (supabaseClient as any).auth.admin.updateUserById(uid, { password: newPassword });
+      } catch (authErr) {
+        console.warn('Supabase updateUserById notice:', authErr);
+      }
+    }
+
+    // 3. Update hashed password in database
+    const updated = await setUserPasswordInDb(uid, newPassword);
+    if (!updated) {
+      return res.status(500).json({ error: 'Failed to update password in database.' });
+    }
+
+    // 4. Save audit log
+    await saveAuditLogToDb({
+      adminUid: uid,
+      adminEmail: userEmail,
+      adminName: req.user?.name,
+      action: 'PASSWORD_CHANGED',
+      targetType: 'user',
+      targetId: uid,
+      details: `User changed their account password`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, message: 'Password changed successfully.' });
+  } catch (error: any) {
+    console.error('Error changing student password:', error);
+    return res.status(500).json({ error: 'Failed to change password. Please try again.' });
+  }
+});
+
+// 5. Save Test Result (with deterministic server-side score validation & sanitization)
+apiRouter.post('/user/results', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const body = req.body || {};
+    const resultId = String(body.resultId || `res-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+    const testId = String(body.testId || 'test-default').slice(0, 100);
+    const testTitle = String(body.testTitle || 'Academic Assessment').slice(0, 200);
+    const testType = String(body.testType || 'Quiz').slice(0, 50);
+    const subject = String(body.subject || 'General').slice(0, 100);
+    const category = String(body.category || 'Academic').slice(0, 100);
+
+    const totalQuestions = Math.max(1, Math.min(500, parseInt(body.totalQuestions) || 10));
+    const totalMarks = Math.max(1, Math.min(1000, Number(body.totalMarks) || totalQuestions));
+    const correctCount = Math.max(0, Math.min(totalQuestions, parseInt(body.correctCount) || 0));
+    const wrongCount = Math.max(0, Math.min(totalQuestions, parseInt(body.wrongCount) || 0));
+    const answeredCount = Math.min(totalQuestions, Math.max(0, correctCount + wrongCount));
+    const skippedCount = Math.max(0, totalQuestions - answeredCount);
+
+    // Validate client marks deterministically; prevent negative marks or marks > totalMarks
+    const marksPerQuestion = totalMarks / totalQuestions;
+    const computedMarks = Math.min(totalMarks, Math.max(0, Number(body.marksObtained) || (correctCount * marksPerQuestion)));
+    const percentage = Math.min(100, Math.max(0, Math.round((computedMarks / totalMarks) * 100)));
+
+    let grade = 'F';
+    if (percentage >= 85) grade = 'A+';
+    else if (percentage >= 75) grade = 'A';
+    else if (percentage >= 65) grade = 'B';
+    else if (percentage >= 50) grade = 'C';
+
+    const timeUsedSeconds = Math.max(1, Math.min(14400, parseInt(body.timeUsedSeconds) || 60));
+    const percentileRank = Math.min(99, Math.max(10, parseInt(body.percentileRank) || 85));
+
+    const saved = await saveTestResultToDb({
+      resultId,
+      userUid: uid,
+      testId,
+      testTitle,
+      testType,
+      subject,
+      category,
+      totalQuestions,
+      answeredCount,
+      correctCount,
+      wrongCount,
+      skippedCount,
+      marksObtained: computedMarks,
+      totalMarks,
+      percentage,
+      grade,
+      timeUsedSeconds,
+      percentileRank,
+      answers: body.answers || [],
+    });
+
+    // Helper for certificate IDs
+    const generateUniqueCertificateId = () => {
+      const ts = Date.now().toString(36).toUpperCase();
+      const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+      return `TG-CERT-${ts}-${rand}`;
+    };
+
+    // Automated Certificate Generation
+    if (percentage >= 60) {
+      try {
+        const student = await getUserByUid(uid);
+        const certId = generateUniqueCertificateId();
+        const verificationUrl = `${process.env.VITE_SITE_URL || 'https://taleemguru.pk'}/verify/${certId}`;
+        
+        await saveCertificateToDb({
+          id: certId,
+          userUid: uid,
+          studentName: student?.name || 'Valued Student',
+          testName: testTitle,
+          score: computedMarks,
+          totalMarks: totalMarks,
+          percentage: percentage,
+          grade: grade,
+          className: student?.classLevel || 'N/A',
+          subjectName: subject,
+          status: 'VALID',
+          verificationUrl: verificationUrl,
+        });
+      } catch (certError) {
+        console.error('Failed to generate certificate:', certError);
+        // Do not fail the submission if certificate generation fails
+      }
+    }
+
+    res.json({ success: true, result: saved });
+  } catch (error: any) {
+    console.error('Error saving test result:', error);
+    res.status(500).json({ error: 'Failed to save test result' });
+  }
+});
+
+// 6. Get Test Results History
+apiRouter.get('/user/results', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const results = await getUserTestResultsFromDb(uid);
+    res.json({ results });
+  } catch (error: any) {
+    console.error('Error fetching test results:', error);
+    res.status(500).json({ error: 'Failed to retrieve test history' });
+  }
+});
+
+// 6a. Student Dashboard: Real Authoritative Aggregated Data
+apiRouter.get('/student/dashboard', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const data = await getStudentDashboardStats(uid);
+    res.json({ success: true, ...data });
+  } catch (error: any) {
+    console.error('Error fetching student dashboard data:', error);
+    res.status(500).json({ error: 'Failed to retrieve student dashboard data' });
+  }
+});
+
+// 6b. Student Performance Analytics: Computed ONLY from Authoritative PostgreSQL Records
+apiRouter.get('/student/performance', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const analytics = await getStudentPerformanceAnalytics(uid);
+    res.json({ success: true, analytics });
+  } catch (error: any) {
+    console.error('Error fetching student performance analytics:', error);
+    res.status(500).json({ error: 'Failed to retrieve performance analytics' });
+  }
+});
+
+// 6c. Student Active Exam Check: Server-Authoritative Check for In-Progress Attempt
+apiRouter.get('/student/active-exam', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const activeExam = await getUserActiveExamAttempt(uid);
+    res.json({ success: true, activeExam });
+  } catch (error: any) {
+    console.error('Error fetching active exam session:', error);
+    res.status(500).json({ error: 'Failed to check active exam session' });
+  }
+});
+
+// 6d. Student Profile Update: Secure Endpoint Restricted to Allowed Student Fields
+apiRouter.patch('/student/profile', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { name, classLevel, board, targetExam, avatar } = req.body || {};
+
+    const updated = await updateUserProfile(uid, {
+      ...(name && typeof name === 'string' ? { name: name.trim().slice(0, 100) } : {}),
+      ...(classLevel && typeof classLevel === 'string' ? { classLevel: classLevel.trim().slice(0, 100) } : {}),
+      ...(board && typeof board === 'string' ? { board: board.trim().slice(0, 100) } : {}),
+      ...(targetExam && typeof targetExam === 'string' ? { targetExam: targetExam.trim().slice(0, 100) } : {}),
+      ...(avatar && typeof avatar === 'string' ? { avatar: avatar.trim().slice(0, 50) } : {}),
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+
+    res.json({ success: true, profile: updated });
+  } catch (error: any) {
+    console.error('Error updating student profile:', error);
+    res.status(500).json({ error: 'Failed to update student profile' });
+  }
+});
+
+// 6e. Teacher Dashboard: Real Teacher Metrics & Recent Activity
+apiRouter.get('/teacher/dashboard', requireTeacher, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const data = await getTeacherDashboardStats(uid);
+    res.json({ success: true, ...data });
+  } catch (error: any) {
+    console.error('Error fetching teacher dashboard data:', error);
+    res.status(500).json({ error: 'Failed to retrieve teacher dashboard data' });
+  }
+});
+
+// 7. Toggle Bookmark
+apiRouter.post('/user/bookmarks/toggle', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { questionId } = req.body;
+    if (!questionId) return res.status(400).json({ error: 'Missing questionId' });
+
+    const status = await toggleBookmarkInDb(uid, questionId);
+    res.json(status);
+  } catch (error: any) {
+    console.error('Error toggling bookmark:', error);
+    res.status(500).json({ error: 'Failed to toggle bookmark' });
+  }
+});
+
+// 8. Get Bookmarks
+apiRouter.get('/user/bookmarks', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const bookmarks = await getUserBookmarksFromDb(uid);
+    res.json({ bookmarks });
+  } catch (error: any) {
+    console.error('Error getting bookmarks:', error);
+    res.status(500).json({ error: 'Failed to get bookmarks' });
+  }
+});
+
+// 9. Certificates: Get User's Issued Certificates (Strictly bounded to req.user.uid)
+apiRouter.get('/user/certificates', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const certs = await getUserCertificatesFromDb(uid);
+    res.json({ certificates: certs });
+  } catch (error: any) {
+    console.error('Error fetching user certificates:', error);
+    res.status(500).json({ error: 'Failed to retrieve certificates' });
+  }
+});
+
+// 10. Certificates: Generate / Claim Certificate (Authenticated candidate, IDOR protected)
+apiRouter.post('/user/certificates', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { resultId, testName, score, totalMarks, percentage, grade, className, subjectName, chapterName, performanceLevel } = req.body;
+    if (!resultId) return res.status(400).json({ error: 'Missing resultId' });
+
+    const numScore = Math.max(0, Number(score) || 0);
+    const numTotal = Math.max(1, Number(totalMarks) || 100);
+    const numPct = Math.min(100, Math.max(0, Number(percentage) || Math.round((numScore / numTotal) * 100)));
+
+    if (numPct < 50) {
+      return res.status(400).json({ error: 'Certificate requires passing grade of 50% or higher' });
+    }
+
+    const certId = `TG-CERT-${resultId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 10).toUpperCase()}`;
+    const studentName = req.user?.name || 'Candidate';
+    const verificationUrl = `https://taleemguru.pk/verify/${certId}`;
+
+    const savedCert = await saveCertificateToDb({
+      id: certId,
+      userUid: uid,
+      studentName,
+      testName: String(testName || 'Examination Assessment').slice(0, 150),
+      score: Math.round(numScore),
+      totalMarks: Math.round(numTotal),
+      percentage: numPct,
+      grade: String(grade || 'Pass').slice(0, 10),
+      className,
+      subjectName,
+      chapterName,
+      performanceLevel,
+      verificationUrl,
+    });
+
+    res.json({ success: true, certificate: savedCert });
+  } catch (error: any) {
+    console.error('Error saving certificate:', error);
+    res.status(500).json({ error: 'Failed to save certificate' });
+  }
+});
+
+// 11. Certificates: Get Single Certificate by ID (Strict IDOR protection: verified owner)
+apiRouter.get('/user/certificates/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const certId = req.params.id;
+    const cert = await getCertificateByIdFromDb(certId, uid);
+    if (!cert) {
+      return res.status(404).json({ error: 'Certificate not found or access denied' });
+    }
+
+    res.json({ certificate: cert });
+  } catch (error: any) {
+    console.error('Error fetching certificate by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve certificate' });
+  }
+});
+
+// 12. Certificates: Public Verification Endpoint (safe public verification)
+apiRouter.get('/certificates/verify/:id', async (req: Request, res: Response) => {
+  try {
+    const certId = req.params.id;
+    const cert = await getCertificateByIdFromDb(certId);
+    if (!cert) {
+      return res.status(404).json({ verified: false, error: 'Certificate record not found in Taleem Guru registry' });
+    }
+    
+    res.json({
+      verified: true,
+      status: cert.status,
+      studentName: cert.studentName,
+      testName: cert.testName,
+      subject: cert.subjectName,
+      className: cert.className,
+      score: cert.score,
+      percentage: cert.percentage,
+      grade: cert.grade,
+      issueDate: cert.issueDate,
+      certificateId: (cert as any).certificateId || cert.id,
+    });
+  } catch (error: any) {
+    console.error('Error verifying certificate:', error);
+    res.status(500).json({ verified: false, error: 'Certificate verification failed' });
+  }
+});
+
+// Admin Certificates: List All Certificates (RBAC: certificates.view)
+apiRouter.get('/admin/certificates', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const certs = await getAllCertificatesFromDb();
+    res.json({ certificates: certs });
+  } catch (error) {
+    console.error('Error fetching admin certificates:', error);
+    res.status(500).json({ error: 'Failed to fetch certificates' });
+  }
+});
+
+// Admin Certificates: Revoke Certificate (RBAC: certificates.revoke)
+apiRouter.patch('/admin/certificates/:id/revoke', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const success = await revokeCertificateInDb(id, req.user?.uid || 'system', reason);
+    if (!success) throw new Error('Revocation failed');
+
+    // Record audit log
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'system',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      action: 'REVOKE_CERTIFICATE',
+      targetType: 'CERTIFICATE',
+      targetId: id,
+      details: `Revoked certificate ID: ${id}. Reason: ${reason || 'No reason provided'}`,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error revoking certificate:', error);
+    res.status(500).json({ error: 'Failed to revoke certificate' });
+  }
+});
+
+// Admin Certificates: Restore Certificate (RBAC: certificates.restore)
+apiRouter.patch('/admin/certificates/:id/restore', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const success = await restoreCertificateInDb(id);
+    if (!success) throw new Error('Restoration failed');
+
+    // Record audit log
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'system',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      action: 'RESTORE_CERTIFICATE',
+      targetType: 'CERTIFICATE',
+      targetId: id,
+      details: `Restored certificate ID: ${id}`,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error restoring certificate:', error);
+    res.status(500).json({ error: 'Failed to restore certificate' });
+  }
+});
+
+// 13. Public Leaderboard
+apiRouter.get('/leaderboard', async (req: Request, res: Response) => {
+  const requestId = `req-leaderboard-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  try {
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20));
+    const topUsers = await getTopLeaderboard(limit);
+    res.json({ leaderboard: topUsers });
+  } catch (error: any) {
+    console.error(`[Leaderboard Failure] Request ID: ${requestId} - Internal Error:`, error);
+    if (error?.cause) {
+      console.error(`[Leaderboard Failure] Request ID: ${requestId} - Underlying Cause:`, error.cause);
+    }
+    res.status(500).json({ 
+      error: 'Failed to fetch leaderboard',
+      requestId
+    });
+  }
+});
+
+// 14. Content & Question Issue Reporting (Persisted in PostgreSQL database)
+apiRouter.post('/feedback', async (req: Request, res: Response) => {
+  try {
+    const { type, questionId, subject, description, userEmail, userUid } = req.body;
+    if (!description || typeof description !== 'string' || description.trim().length === 0) {
+      return res.status(400).json({ error: 'Description is required' });
+    }
+
+    const savedReport = await saveContentReportToDb({
+      category: String(type || 'General Issue').slice(0, 100),
+      questionId: questionId ? String(questionId).slice(0, 100) : undefined,
+      subject: subject ? String(subject).slice(0, 100) : undefined,
+      description: String(description).slice(0, 2000),
+      userEmail: userEmail ? String(userEmail).slice(0, 150) : undefined,
+      userUid: userUid ? String(userUid).slice(0, 150) : undefined,
+    });
+
+    res.json({
+      success: true,
+      message: 'Report received. Our academic editorial team will audit this item.',
+      reportId: savedReport?.reportId,
+    });
+  } catch (error: any) {
+    console.error('Error recording content report:', error);
+    res.status(500).json({ error: 'Failed to record issue report' });
+  }
+});
+
+// 15. Public Platform Statistics (Real dynamic metrics from database)
+apiRouter.get('/public-stats', async (req: Request, res: Response) => {
+  try {
+    const stats = await getPlatformPublicStats();
+    res.json({
+      success: true,
+      data: stats,
+    });
+  } catch (error: any) {
+    console.error('Failed to retrieve platform stats:', error);
+    res.status(500).json({ error: 'Failed to retrieve platform stats' });
+  }
+});
+
+// ============================================================================
+// EDUCATIONAL CONTENT REST API (Authoritative PostgreSQL + Drizzle backend)
+// ============================================================================
+
+// --- Content Approval & Moderation Endpoints ---
+apiRouter.post('/content/moderate', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { contentType, id, targetStatus, rejectionReason, changeNotes } = req.body || {};
+    if (!contentType || !id || !targetStatus) {
+      return res.status(400).json({ error: 'contentType, id, and targetStatus are required.' });
+    }
+
+    const validStatuses = ['Draft', 'Pending Review', 'Approved', 'Published', 'Rejected', 'Archived'];
+    if (!validStatuses.includes(targetStatus)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const validTypes = ['MCQ', 'Test', 'PastPaper', 'StudyNote', 'Document'];
+    if (!validTypes.includes(contentType)) {
+      return res.status(400).json({ error: `Invalid contentType. Must be one of: ${validTypes.join(', ')}` });
+    }
+
+    const userUid = req.user?.uid || 'unknown';
+    const userRoles = req.user?.roles || [];
+
+    // Role Enforcement:
+    // Approved, Published, Rejected, Archived require Moderator, Editor, ContentManager, or Admin.
+    if (['Approved', 'Published', 'Rejected', 'Archived'].includes(targetStatus) && !isModeratorOrEditorOrAdmin(req.user)) {
+      return res.status(403).json({ error: 'Forbidden: Moderation rights (Editor, Moderator, or Admin) required for this action.' });
+    }
+
+    const result = await moderateContentItemInDb({
+      contentType,
+      id,
+      targetStatus,
+      userUid,
+      userRoles,
+      rejectionReason,
+      changeNotes,
+    });
+
+    if (!result.success) {
+      const isForbidden = result.message?.includes('Self-approval') || result.message?.includes('Forbidden');
+      return res.status(isForbidden ? 403 : 400).json({ error: result.message || 'Failed to update content status' });
+    }
+
+    res.json({ success: true, item: result.item, message: `Content ${id} status updated to ${targetStatus}` });
+  } catch (error: any) {
+    console.error('Error in /content/moderate:', error);
+    res.status(500).json({ error: error.message || 'Internal server error during content moderation' });
+  }
+});
+
+apiRouter.post('/content/bulk-moderate', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { contentType, ids, targetStatus, rejectionReason, changeNotes } = req.body || {};
+    if (!contentType || !Array.isArray(ids) || ids.length === 0 || !targetStatus) {
+      return res.status(400).json({ error: 'contentType, ids array, and targetStatus are required.' });
+    }
+
+    if (['Approved', 'Published', 'Rejected', 'Archived'].includes(targetStatus) && !isModeratorOrEditorOrAdmin(req.user)) {
+      return res.status(403).json({ error: 'Forbidden: Moderation rights (Editor, Moderator, or Admin) required for bulk moderation.' });
+    }
+
+    const userUid = req.user?.uid || 'unknown';
+    const userRoles = req.user?.roles || [];
+
+    const result = await bulkModerateContentInDb({
+      contentType,
+      ids,
+      targetStatus,
+      userUid,
+      userRoles,
+      rejectionReason,
+      changeNotes,
+    });
+
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('Error in /content/bulk-moderate:', error);
+    res.status(500).json({ error: error.message || 'Internal server error during bulk moderation' });
+  }
+});
+
+apiRouter.get('/content/versions/:contentType/:id', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { contentType, id } = req.params;
+    const versions = await getContentVersionHistoryFromDb(contentType, id);
+    res.json({ success: true, contentType, id, versions });
+  } catch (error: any) {
+    console.error('Error in /content/versions:', error);
+    res.status(500).json({ error: 'Failed to retrieve version history' });
+  }
+});
+
+// --- 1. MCQs Endpoints ---
+apiRouter.get('/mcqs', async (req: Request, res: Response) => {
+  try {
+    const filters = {
+      subject: req.query.subject as string,
+      classLevel: req.query.classLevel as string,
+      board: req.query.board as string,
+      chapter: req.query.chapter as string,
+      exam: req.query.exam as string,
+      difficulty: req.query.difficulty as string,
+      status: req.query.status as string || 'Published',
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(1000, parseInt(req.query.limit as string)) : 500,
+    };
+    const items = await getMCQsFromDb(filters);
+    res.json({ mcqs: items, total: items.length });
+  } catch (error: any) {
+    console.error('Error fetching MCQs:', error);
+    res.status(500).json({ error: 'Failed to retrieve questions from question bank' });
+  }
+});
+
+apiRouter.get('/mcqs/:id', async (req: Request, res: Response) => {
+  try {
+    const mcq = await getMCQByIdFromDb(req.params.id);
+    if (!mcq) return res.status(404).json({ error: 'Question not found' });
+    res.json({ mcq });
+  } catch (error: any) {
+    console.error('Error fetching MCQ by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve question' });
+  }
+});
+
+apiRouter.post('/mcqs', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    if (!body.question || typeof body.question !== 'string' || body.question.trim().length === 0) {
+      return res.status(400).json({ error: 'Question text is required.' });
+    }
+    if (!Array.isArray(body.options) || body.options.length < 2) {
+      return res.status(400).json({ error: 'At least 2 question options are required.' });
+    }
+    if (typeof body.correctAnswer !== 'number' || body.correctAnswer < 0 || body.correctAnswer >= body.options.length) {
+      return res.status(400).json({ error: 'Valid correct answer index is required.' });
+    }
+    if (!body.subject || typeof body.subject !== 'string') {
+      return res.status(400).json({ error: 'Subject is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.subject}: ${body.question.slice(0, 60)}...`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your MCQ will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createMCQInDb(body, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'CREATE_MCQ',
+      targetType: 'MCQ',
+      targetId: created.id,
+      details: `Created MCQ in ${created.subject}: ${created.question.slice(0, 60)}...`,
+      subject: created.subject,
+      classLevel: created.classLevel,
+      board: created.board,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, mcq: created });
+  } catch (error: any) {
+    console.error('Error creating MCQ:', error);
+    res.status(500).json({ error: error.message || 'Failed to create MCQ' });
+  }
+});
+
+apiRouter.put('/mcqs/:id', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const body = req.body || {};
+    const existingMCQ = await getMCQByIdFromDb(id);
+    if (!existingMCQ) return res.status(404).json({ error: 'Question not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.question ? `${body.subject || existingMCQ.subject}: ${body.question.slice(0, 60)}...` : existingMCQ.question,
+        proposedData: { ...existingMCQ, ...body },
+        previousData: existingMCQ,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. MCQ updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateMCQInDb(id, body, req.user?.uid);
+    if (!updated) return res.status(404).json({ error: 'Question not found' });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPDATE_MCQ',
+      targetType: 'MCQ',
+      targetId: id,
+      details: `Updated question in ${updated.subject}`,
+      subject: updated.subject,
+      classLevel: updated.classLevel,
+      board: updated.board,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, mcq: updated });
+  } catch (error: any) {
+    console.error('Error updating MCQ:', error);
+    res.status(500).json({ error: error.message || 'Failed to update MCQ' });
+  }
+});
+
+apiRouter.delete('/mcqs/:id', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const existingMCQ = await getMCQByIdFromDb(id);
+    if (!existingMCQ) return res.status(404).json({ error: 'Question not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'mcqs',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete MCQ: ${existingMCQ.question.slice(0, 60)}...`,
+        proposedData: null,
+        previousData: existingMCQ,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'MCQ deletion submitted for Admin Approval. The question will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    await deleteMCQInDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'DELETE_MCQ',
+      targetType: 'MCQ',
+      targetId: id,
+      details: `Deleted MCQ ${id}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Question deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting MCQ:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete MCQ' });
+  }
+});
+
+apiRouter.post('/mcqs/bulk', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const items = req.body?.mcqs;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Invalid or empty mcqs array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.question) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.subject || 'MCQ'}: ${item.question.slice(0, 60)}...`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQs submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const count = await bulkInsertMCQsInDb(items, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_IMPORT_MCQS',
+      targetType: 'MCQ_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk imported ${count} MCQs`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error bulk importing MCQs:', error);
+    res.status(500).json({ error: error.message || 'Failed to bulk import questions' });
+  }
+});
+
+apiRouter.post('/mcqs/bulk-status', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!['Published', 'Draft', 'Archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getMCQByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.question.slice(0, 50)}...`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQ status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const updatedCount = await bulkUpdateMCQStatusInDb(ids, status, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_STATUS_MCQS',
+      targetType: 'MCQ_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated status to "${status}" for ${updatedCount} MCQs`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: updatedCount });
+  } catch (error: any) {
+    console.error('Error in bulk status update for MCQs:', error);
+    res.status(500).json({ error: 'Failed to update MCQ status' });
+  }
+});
+
+apiRouter.post('/mcqs/bulk-delete', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getMCQByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.question.slice(0, 50)}...`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} MCQ deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const deletedCount = await bulkDeleteMCQsInDb(ids);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_DELETE_MCQS',
+      targetType: 'MCQ_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk deleted ${deletedCount} MCQs`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: deletedCount });
+  } catch (error: any) {
+    console.error('Error in bulk delete for MCQs:', error);
+    res.status(500).json({ error: 'Failed to delete MCQs' });
+  }
+});
+
+apiRouter.post('/mcqs/bulk-create', requireMCQCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const items = req.body?.mcqs;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Invalid or empty mcqs array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.question) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'mcqs',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.subject || 'MCQ'}: ${item.question.slice(0, 60)}...`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        inserted: requests.length,
+        message: `${requests.length} MCQs submitted for Admin Approval.`,
+        changeRequests: requests,
+        errors: [],
+      });
+    }
+
+    const result = await bulkCreateMCQsBatchInDb(items, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'editor@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_CREATE_MCQS',
+      targetType: 'MCQ_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk entered ${result.inserted} MCQs with ${result.errors.length} validation errors`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, inserted: result.inserted, errors: result.errors });
+  } catch (error: any) {
+    console.error('Error in bulk create for MCQs:', error);
+    res.status(500).json({ error: 'Failed to bulk create MCQs' });
+  }
+});
+
+// --- 2. Tests & Quizzes Endpoints ---
+apiRouter.get('/tests', async (req: Request, res: Response) => {
+  try {
+    const filters = {
+      subject: req.query.subject as string,
+      classLevel: req.query.classLevel as string,
+      board: req.query.board as string,
+      category: req.query.category as string,
+      testType: req.query.testType as string,
+      status: req.query.status as string || 'Published',
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(500, parseInt(req.query.limit as string)) : 200,
+    };
+    const items = await getTestsFromDb(filters);
+    res.json({ tests: items, total: items.length });
+  } catch (error: any) {
+    console.error('Error fetching tests:', error);
+    res.status(500).json({ error: 'Failed to retrieve assessments' });
+  }
+});
+
+apiRouter.get('/tests/:id', async (req: Request, res: Response) => {
+  try {
+    const test = await getTestByIdFromDb(req.params.id);
+    if (!test) return res.status(404).json({ error: 'Test not found' });
+    res.json({ test });
+  } catch (error: any) {
+    console.error('Error fetching test by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve assessment' });
+  }
+});
+
+apiRouter.post('/tests', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return res.status(400).json({ error: 'Test title is required.' });
+    }
+    if (!body.subject || typeof body.subject !== 'string') {
+      return res.status(400).json({ error: 'Subject is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.subject})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your test will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createTestInDb(body, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'CREATE_TEST',
+      targetType: 'TEST',
+      targetId: created.id,
+      details: `Created test: ${created.title} (${created.subject})`,
+      subject: created.subject,
+      classLevel: created.classLevel,
+      board: created.board,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, test: created });
+  } catch (error: any) {
+    console.error('Error creating test:', error);
+    res.status(500).json({ error: error.message || 'Failed to create assessment' });
+  }
+});
+
+apiRouter.put('/tests/:id', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const body = req.body || {};
+    const existingTest = await getTestByIdFromDb(id);
+    if (!existingTest) return res.status(404).json({ error: 'Test not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingTest.title,
+        proposedData: { ...existingTest, ...body },
+        previousData: existingTest,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Test updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateTestInDb(id, body, req.user?.uid);
+    if (!updated) return res.status(404).json({ error: 'Test not found' });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPDATE_TEST',
+      targetType: 'TEST',
+      targetId: id,
+      details: `Updated test: ${updated.title}`,
+      subject: updated.subject,
+      classLevel: updated.classLevel,
+      board: updated.board,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, test: updated });
+  } catch (error: any) {
+    console.error('Error updating test:', error);
+    res.status(500).json({ error: error.message || 'Failed to update assessment' });
+  }
+});
+
+apiRouter.delete('/tests/:id', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const existingTest = await getTestByIdFromDb(id);
+    if (!existingTest) return res.status(404).json({ error: 'Test not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'tests',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Test: ${existingTest.title}`,
+        proposedData: null,
+        previousData: existingTest,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Test deletion submitted for Admin Approval. The assessment will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    await deleteTestInDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'DELETE_TEST',
+      targetType: 'TEST',
+      targetId: id,
+      details: `Deleted test ${id}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Test deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting test:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete assessment' });
+  }
+});
+
+apiRouter.post('/tests/bulk', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const items = req.body?.tests;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Invalid or empty tests array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.subject || 'Assessment'})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} tests submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const count = await bulkInsertTestsInDb(items, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_IMPORT_TESTS',
+      targetType: 'TEST_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk imported ${count} test configurations`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error bulk importing tests:', error);
+    res.status(500).json({ error: error.message || 'Failed to bulk import assessments' });
+  }
+});
+
+apiRouter.post('/tests/bulk-status', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!['Published', 'Draft', 'Archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getTestByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} test status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const updatedCount = await bulkUpdateTestStatusInDb(ids, status, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_STATUS_TESTS',
+      targetType: 'TEST_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated status to "${status}" for ${updatedCount} tests`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: updatedCount });
+  } catch (error: any) {
+    console.error('Error in bulk status update for tests:', error);
+    res.status(500).json({ error: 'Failed to update test status' });
+  }
+});
+
+apiRouter.post('/tests/bulk-delete', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getTestByIdFromDb(id);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'tests',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} test deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const deletedCount = await bulkDeleteTestsInDb(ids);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_DELETE_TESTS',
+      targetType: 'TEST_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk deleted ${deletedCount} tests`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: deletedCount });
+  } catch (error: any) {
+    console.error('Error in bulk delete for tests:', error);
+    res.status(500).json({ error: 'Failed to delete tests' });
+  }
+});
+
+// ============================================================================
+// --- 2.1 ADVANCED EXAMINATION & ASSESSMENT ENGINE ENDPOINTS ---
+// ============================================================================
+
+// 1. Start or Resume Exam Attempt (Server-Authoritative)
+apiRouter.post('/exams/start', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { testId, candidateSessionId, studentName, studentEmail } = req.body || {};
+    if (!testId || typeof testId !== 'string') {
+      return res.status(400).json({ error: 'Valid testId is required to start an assessment' });
+    }
+
+    // Resolve user UID (from authenticated session or guest candidate session)
+    const userUid = req.user?.uid || candidateSessionId || `anon-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const effectiveName = req.user?.name || studentName || 'Candidate';
+    const effectiveEmail = req.user?.email || studentEmail || undefined;
+
+    const startData = await startExamAttemptInDb({
+      testId,
+      userUid,
+      studentName: effectiveName,
+      studentEmail: effectiveEmail,
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      ...startData,
+      candidateSessionId: userUid,
+    });
+  } catch (error: any) {
+    console.error('Error starting examination attempt:', error);
+    res.status(400).json({ error: error.message || 'Failed to initialize examination session' });
+  }
+});
+
+// 2. Real-time Autosave Candidate Answer
+apiRouter.post('/exams/:attemptId/save-answer', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const attemptId = req.params.attemptId || req.body?.attemptId;
+    const { questionId, selectedOption, markedForReview, timeSpentSeconds, candidateSessionId } = req.body || {};
+
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to save answer' });
+    }
+
+    if (!questionId) {
+      return res.status(400).json({ error: 'questionId is required' });
+    }
+
+    const userUid = req.user?.uid || candidateSessionId || undefined;
+
+    const result = await saveExamAnswerInDb({
+      attemptId,
+      userUid,
+      questionId,
+      selectedOption: selectedOption !== undefined && selectedOption !== null ? Number(selectedOption) : null,
+      markedForReview: Boolean(markedForReview),
+      timeSpentSeconds: Number(timeSpentSeconds || 0),
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error saving candidate answer:', error);
+    res.status(400).json({ error: error.message || 'Failed to record answer' });
+  }
+});
+
+// 3. Submit Exam Attempt & Execute Server-Authoritative Evaluation
+apiRouter.post('/exams/:attemptId/submit', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const attemptId = req.params.attemptId || req.body?.attemptId;
+    const { answers, timeSpentSeconds, candidateSessionId } = req.body || {};
+
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to submit examination' });
+    }
+
+    const userUid = req.user?.uid || candidateSessionId || undefined;
+
+    const evaluation = await submitExamAttemptInDb({
+      attemptId,
+      userUid,
+      submittedAnswers: answers || {},
+      timeSpentSeconds: timeSpentSeconds ? Number(timeSpentSeconds) : undefined,
+    });
+
+    res.json({
+      success: true,
+      result: evaluation.result,
+      certificateId: evaluation.certificateId,
+    });
+  } catch (error: any) {
+    console.error('Error evaluating examination attempt:', error);
+    res.status(400).json({ error: error.message || 'Failed to submit examination' });
+  }
+});
+
+// 3.1 Direct Submit Exam Attempt (when attemptId is in body)
+apiRouter.post('/exams/submit', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const { attemptId, answers, timeSpentSeconds, candidateSessionId } = req.body || {};
+
+    if (!attemptId || attemptId === 'undefined' || attemptId === 'null') {
+      return res.status(400).json({ error: 'Valid attemptId is required to submit examination' });
+    }
+
+    const userUid = req.user?.uid || candidateSessionId || undefined;
+
+    const evaluation = await submitExamAttemptInDb({
+      attemptId,
+      userUid,
+      submittedAnswers: answers || {},
+      timeSpentSeconds: timeSpentSeconds ? Number(timeSpentSeconds) : undefined,
+    });
+
+    res.json({
+      success: true,
+      result: evaluation.result,
+      certificateId: evaluation.certificateId,
+    });
+  } catch (error: any) {
+    console.error('Error evaluating examination attempt:', error);
+    res.status(400).json({ error: error.message || 'Failed to submit examination' });
+  }
+});
+
+// 4. Retrieve Examination Result
+apiRouter.get('/exams/:attemptId/result', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const attemptId = req.params.attemptId;
+    const candidateSessionId = req.query.candidateSessionId as string | undefined;
+    const userUid = req.user?.uid || candidateSessionId || undefined;
+
+    const result = await getExamAttemptResultFromDb(attemptId, userUid);
+    if (!result) {
+      return res.status(404).json({ error: 'Examination result not found or unauthorized' });
+    }
+
+    res.json({ success: true, result });
+  } catch (error: any) {
+    console.error('Error retrieving examination result:', error);
+    res.status(500).json({ error: 'Failed to retrieve assessment result' });
+  }
+});
+
+// 5. Retrieve Student Authoritative Exam History
+apiRouter.get('/user/exam-history', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    if (!uid) return res.status(401).json({ error: 'Unauthorized' });
+
+    const history = await getUserExamHistoryFromDb(uid);
+    res.json({ success: true, attempts: history });
+  } catch (error: any) {
+    console.error('Error fetching student exam history:', error);
+    res.status(500).json({ error: 'Failed to retrieve examination history' });
+  }
+});
+
+// 6. Admin / Staff Exam Attempt Monitor & Analytics
+apiRouter.get('/admin/exam-attempts', requireQuizCreator, async (req: AuthRequest, res: Response) => {
+  try {
+    const filters = {
+      testId: req.query.testId as string,
+      status: req.query.status as string,
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(500, parseInt(req.query.limit as string)) : 100,
+      offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
+    };
+
+    const data = await getAllExamAttemptsFromDb(filters);
+    res.json({ success: true, ...data });
+  } catch (error: any) {
+    console.error('Error fetching admin exam attempts:', error);
+    res.status(500).json({ error: 'Failed to retrieve examination records' });
+  }
+});
+
+// --- 3. Past Papers Endpoints ---
+apiRouter.get('/past-papers', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const filters = {
+      board: req.query.board as string,
+      province: req.query.province as string,
+      classLevel: req.query.classLevel as string,
+      subject: req.query.subject as string,
+      topic: req.query.topic as string,
+      exam: req.query.exam as string,
+      language: req.query.language as string,
+      year: req.query.year ? parseInt(req.query.year as string, 10) : undefined,
+      status: req.query.status as string,
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(500, parseInt(req.query.limit as string, 10)) : 300,
+      isStaff,
+    };
+    const items = await getPastPapersFromDb(filters);
+    res.json({ pastPapers: items, total: items.length });
+  } catch (error: any) {
+    console.error('Error fetching past papers:', error);
+    res.status(500).json({ error: 'Failed to retrieve past papers' });
+  }
+});
+
+apiRouter.get('/past-papers/:id', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const paper = await getPastPaperByIdFromDb(req.params.id, isStaff);
+    if (!paper) return res.status(404).json({ error: 'Past paper not found or access restricted' });
+    res.json({ pastPaper: paper });
+  } catch (error: any) {
+    console.error('Error fetching past paper by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve past paper' });
+  }
+});
+
+apiRouter.get('/past-papers/:id/download', documentRateLimitMiddleware, optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const paper = await getPastPaperByIdFromDb(req.params.id, true);
+    if (!paper) return res.status(404).json({ error: 'Past paper not found' });
+
+    if (paper.status !== 'Published' && !isStaff) {
+      return res.status(403).json({ error: 'Access denied: Past paper is not published' });
+    }
+
+    // Check if associated document exists in documents table
+    const doc = await getDocumentByIdFromDb(paper.id, true);
+    let targetFilePath: string | undefined;
+
+    if (doc) {
+      const isPrivileged = isAdminOrContentManager(req.user);
+      const requestOriginal = req.query.original === 'true' && isPrivileged;
+      const fileInfo = requestOriginal ? getSafeOriginalPath(doc) : getSafeBrandedPath(doc);
+      if (fileInfo.valid && fileInfo.filePath) {
+        targetFilePath = fileInfo.filePath;
+      }
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    const userAgent = req.headers['user-agent']?.substring(0, 500);
+    const sessionId = (req.headers['x-session-id'] as string) || req.cookies?.tg_session_id;
+
+    recordDocumentDownload(paper.id, {
+      documentType: 'Past Paper',
+      userUid: req.user?.uid,
+      anonymousSessionId: sessionId,
+      ipAddress: clientIp,
+      userAgent,
+      version: paper.version || 1,
+    }).catch((recErr) => console.warn('Failed to record download event:', recErr));
+
+    if (targetFilePath && fs.existsSync(targetFilePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${sanitizeDownloadFilename(paper.title + '.pdf', 'past_paper.pdf')}"`);
+      res.setHeader('X-TaleemGuru-Branded', 'true');
+      return fs.createReadStream(targetFilePath).pipe(res);
+    }
+
+    // Fallback: check fileUrl / downloadUrl if local
+    const fallbackUrl = paper.brandedFileUrl || paper.downloadUrl || paper.fileUrl;
+    if (fallbackUrl && fallbackUrl.startsWith('/')) {
+      const resolved = resolveSafeLocalFilePath(fallbackUrl);
+      if (resolved.valid && resolved.absolutePath && fs.existsSync(resolved.absolutePath)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${sanitizeDownloadFilename(paper.title + '.pdf', 'past_paper.pdf')}"`);
+        return fs.createReadStream(resolved.absolutePath).pipe(res);
+      }
+    }
+
+    return res.status(404).json({ error: 'Past paper document file is currently unavailable' });
+  } catch (error: any) {
+    console.error('Error downloading past paper:', error);
+    res.status(500).json({ error: 'Failed to download past paper' });
+  }
+});
+
+apiRouter.post('/past-papers', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return res.status(400).json({ error: 'Paper title is required.' });
+    }
+    if (!body.board || !body.classLevel || !body.subject || !body.year) {
+      return res.status(400).json({ error: 'Board, class level, subject, and year are required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.board} ${body.year})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your past paper will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createPastPaperInDb(body, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'CREATE_PAST_PAPER',
+      targetType: 'PAST_PAPER',
+      targetId: created.id,
+      details: `Created past paper: ${created.title} (${created.board} ${created.year})`,
+      subject: created.subject,
+      classLevel: created.classLevel,
+      board: created.board,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, pastPaper: created });
+  } catch (error: any) {
+    console.error('Error creating past paper:', error);
+    res.status(500).json({ error: error.message || 'Failed to create past paper' });
+  }
+});
+
+apiRouter.put('/past-papers/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const body = req.body || {};
+    const existingPaper = await getPastPaperByIdFromDb(id, true);
+    if (!existingPaper) return res.status(404).json({ error: 'Past paper not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingPaper.title,
+        proposedData: { ...existingPaper, ...body },
+        previousData: existingPaper,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Past paper updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updatePastPaperInDb(id, body, req.user?.uid);
+    if (!updated) return res.status(404).json({ error: 'Past paper not found' });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPDATE_PAST_PAPER',
+      targetType: 'PAST_PAPER',
+      targetId: id,
+      details: `Updated past paper: ${updated.title}`,
+      subject: updated.subject,
+      classLevel: updated.classLevel,
+      board: updated.board,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, pastPaper: updated });
+  } catch (error: any) {
+    console.error('Error updating past paper:', error);
+    res.status(500).json({ error: error.message || 'Failed to update past paper' });
+  }
+});
+
+apiRouter.delete('/past-papers/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const existingPaper = await getPastPaperByIdFromDb(id, true);
+    if (!existingPaper) return res.status(404).json({ error: 'Past paper not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'past_papers',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Past Paper: ${existingPaper.title}`,
+        proposedData: null,
+        previousData: existingPaper,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Past paper deletion submitted for Admin Approval. Content will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    await deletePastPaperInDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'DELETE_PAST_PAPER',
+      targetType: 'PAST_PAPER',
+      targetId: id,
+      details: `Deleted past paper ${id}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Past paper deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting past paper:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete past paper' });
+  }
+});
+
+apiRouter.post('/past-papers/bulk', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const items = req.body?.pastPapers;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Invalid or empty pastPapers array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.board || ''} ${item.year || ''})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past papers submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const count = await bulkInsertPastPapersInDb(items, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_IMPORT_PAST_PAPERS',
+      targetType: 'PAST_PAPER_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk imported ${count} past papers`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error bulk importing past papers:', error);
+    res.status(500).json({ error: error.message || 'Failed to bulk import past papers' });
+  }
+});
+
+apiRouter.post('/past-papers/bulk-status', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!['Published', 'Draft', 'Archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getPastPaperByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past paper status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const updatedCount = await bulkUpdatePastPaperStatusInDb(ids, status, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_STATUS_PAST_PAPERS',
+      targetType: 'PAST_PAPER_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated status to "${status}" for ${updatedCount} past papers`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: updatedCount });
+  } catch (error: any) {
+    console.error('Error in bulk status update for past papers:', error);
+    res.status(500).json({ error: 'Failed to update past paper status' });
+  }
+});
+
+apiRouter.post('/past-papers/bulk-delete', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getPastPaperByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'past_papers',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} past paper deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const deletedCount = await bulkDeletePastPapersInDb(ids);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_DELETE_PAST_PAPERS',
+      targetType: 'PAST_PAPER_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk deleted ${deletedCount} past papers`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: deletedCount });
+  } catch (error: any) {
+    console.error('Error in bulk delete for past papers:', error);
+    res.status(500).json({ error: 'Failed to delete past papers' });
+  }
+});
+
+// --- 4. Study Notes Endpoints ---
+apiRouter.get('/study-notes', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const filters = {
+      subject: req.query.subject as string,
+      classLevel: req.query.classLevel as string,
+      board: req.query.board as string,
+      chapter: req.query.chapter as string,
+      topic: req.query.topic as string,
+      type: req.query.type as string,
+      language: req.query.language as string,
+      status: req.query.status as string,
+      search: req.query.search as string,
+      limit: req.query.limit ? Math.min(500, parseInt(req.query.limit as string, 10)) : 300,
+      isStaff,
+    };
+    const items = await getStudyNotesFromDb(filters);
+    res.json({ studyNotes: items, total: items.length });
+  } catch (error: any) {
+    console.error('Error fetching study notes:', error);
+    res.status(500).json({ error: 'Failed to retrieve study notes' });
+  }
+});
+
+apiRouter.get('/study-notes/:id', optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const note = await getStudyNoteByIdFromDb(req.params.id, isStaff);
+    if (!note) return res.status(404).json({ error: 'Study note not found or access restricted' });
+    res.json({ studyNote: note });
+  } catch (error: any) {
+    console.error('Error fetching study note by ID:', error);
+    res.status(500).json({ error: 'Failed to retrieve study note' });
+  }
+});
+
+apiRouter.get('/study-notes/:id/download', documentRateLimitMiddleware, optionalAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const isStaff = isStaffUser(req.user);
+    const note = await getStudyNoteByIdFromDb(req.params.id, true);
+    if (!note) return res.status(404).json({ error: 'Study note not found' });
+
+    if (note.status !== 'Published' && !isStaff) {
+      return res.status(403).json({ error: 'Access denied: Study note is not published' });
+    }
+
+    // Check if associated document exists in documents table
+    const doc = await getDocumentByIdFromDb(note.id, true);
+    let targetFilePath: string | undefined;
+
+    if (doc) {
+      const isPrivileged = isAdminOrContentManager(req.user);
+      const requestOriginal = req.query.original === 'true' && isPrivileged;
+      const fileInfo = requestOriginal ? getSafeOriginalPath(doc) : getSafeBrandedPath(doc);
+      if (fileInfo.valid && fileInfo.filePath) {
+        targetFilePath = fileInfo.filePath;
+      }
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip;
+    const userAgent = req.headers['user-agent']?.substring(0, 500);
+    const sessionId = (req.headers['x-session-id'] as string) || req.cookies?.tg_session_id;
+
+    recordDocumentDownload(note.id, {
+      documentType: 'Study Note',
+      userUid: req.user?.uid,
+      anonymousSessionId: sessionId,
+      ipAddress: clientIp,
+      userAgent,
+      version: note.version || 1,
+    }).catch((recErr) => console.warn('Failed to record download event:', recErr));
+
+    if (targetFilePath && fs.existsSync(targetFilePath)) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${sanitizeDownloadFilename(note.title + '.pdf', 'study_note.pdf')}"`);
+      res.setHeader('X-TaleemGuru-Branded', 'true');
+      return fs.createReadStream(targetFilePath).pipe(res);
+    }
+
+    // Fallback: check pdfUrl / fileUrl if local
+    const fallbackUrl = note.brandedFileUrl || note.pdfUrl || note.fileUrl;
+    if (fallbackUrl && fallbackUrl.startsWith('/')) {
+      const resolved = resolveSafeLocalFilePath(fallbackUrl);
+      if (resolved.valid && resolved.absolutePath && fs.existsSync(resolved.absolutePath)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${sanitizeDownloadFilename(note.title + '.pdf', 'study_note.pdf')}"`);
+        return fs.createReadStream(resolved.absolutePath).pipe(res);
+      }
+    }
+
+    return res.status(404).json({ error: 'Study note document file is currently unavailable' });
+  } catch (error: any) {
+    console.error('Error downloading study note:', error);
+    res.status(500).json({ error: 'Failed to download study note' });
+  }
+});
+
+apiRouter.post('/study-notes', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    if (!body.title || typeof body.title !== 'string' || body.title.trim().length === 0) {
+      return res.status(400).json({ error: 'Note title is required.' });
+    }
+    if (!body.subject || !body.classLevel || !body.chapter) {
+      return res.status(400).json({ error: 'Subject, class level, and chapter are required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `${body.title} (${body.subject} - ${body.chapter})`,
+        proposedData: body,
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your study note will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createStudyNoteInDb(body, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'CREATE_STUDY_NOTE',
+      targetType: 'STUDY_NOTE',
+      targetId: created.id,
+      details: `Created study note: ${created.title} (${created.subject} - ${created.chapter})`,
+      subject: created.subject,
+      classLevel: created.classLevel,
+      board: created.board,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, studyNote: created });
+  } catch (error: any) {
+    console.error('Error creating study note:', error);
+    res.status(500).json({ error: error.message || 'Failed to create study note' });
+  }
+});
+
+apiRouter.put('/study-notes/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const body = req.body || {};
+    const existingNote = await getStudyNoteByIdFromDb(id, true);
+    if (!existingNote) return res.status(404).json({ error: 'Study note not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: id,
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: body.title || existingNote.title,
+        proposedData: { ...existingNote, ...body },
+        previousData: existingNote,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Study note updates will be reviewed before becoming live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateStudyNoteInDb(id, body, req.user?.uid);
+    if (!updated) return res.status(404).json({ error: 'Study note not found' });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'UPDATE_STUDY_NOTE',
+      targetType: 'STUDY_NOTE',
+      targetId: id,
+      details: `Updated study note: ${updated.title}`,
+      subject: updated.subject,
+      classLevel: updated.classLevel,
+      board: updated.board,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, studyNote: updated });
+  } catch (error: any) {
+    console.error('Error updating study note:', error);
+    res.status(500).json({ error: error.message || 'Failed to update study note' });
+  }
+});
+
+apiRouter.delete('/study-notes/:id', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = req.params.id;
+    const existingNote = await getStudyNoteByIdFromDb(id, true);
+    if (!existingNote) return res.status(404).json({ error: 'Study note not found' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'study_notes',
+        entityId: id,
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Study Note: ${existingNote.title}`,
+        proposedData: null,
+        previousData: existingNote,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Study note deletion submitted for Admin Approval. Content will remain live until approved.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    await deleteStudyNoteInDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'DELETE_STUDY_NOTE',
+      targetType: 'STUDY_NOTE',
+      targetId: id,
+      details: `Deleted study note ${id}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Study note deleted successfully' });
+  } catch (error: any) {
+    console.error('Error deleting study note:', error);
+    res.status(500).json({ error: error.message || 'Failed to delete study note' });
+  }
+});
+
+apiRouter.post('/study-notes/bulk', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const items = req.body?.studyNotes;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Invalid or empty studyNotes array' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const item of items) {
+        if (item && item.title) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: null,
+            action: 'CREATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `${item.title} (${item.subject || ''} - ${item.chapter || ''})`,
+            proposedData: item,
+            previousData: null,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study notes submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const count = await bulkInsertStudyNotesInDb(items, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_IMPORT_STUDY_NOTES',
+      targetType: 'STUDY_NOTE_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk imported ${count} study notes`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count });
+  } catch (error: any) {
+    console.error('Error bulk importing study notes:', error);
+    res.status(500).json({ error: error.message || 'Failed to bulk import study notes' });
+  }
+});
+
+apiRouter.post('/study-notes/bulk-status', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!['Published', 'Draft', 'Archived'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be Published, Draft, or Archived' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getStudyNoteByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: id,
+            action: 'UPDATE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Status -> ${status}: ${existing.title}`,
+            proposedData: { ...existing, status },
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study note status updates submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const updatedCount = await bulkUpdateStudyNoteStatusInDb(ids, status, req.user?.uid);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_STATUS_STUDY_NOTES',
+      targetType: 'STUDY_NOTE_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Updated status to "${status}" for ${updatedCount} study notes`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: updatedCount });
+  } catch (error: any) {
+    console.error('Error in bulk status update for study notes:', error);
+    res.status(500).json({ error: 'Failed to update study note status' });
+  }
+});
+
+apiRouter.post('/study-notes/bulk-delete', requireContentCurator, async (req: AuthRequest, res: Response) => {
+  try {
+    const { ids } = req.body || {};
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const requests = [];
+      for (const id of ids) {
+        const existing = await getStudyNoteByIdFromDb(id, true);
+        if (existing) {
+          const cr = await createOrUpdateChangeRequest({
+            entityType: 'study_notes',
+            entityId: id,
+            action: 'DELETE',
+            submittedBy: req.user!.uid,
+            submitterName: req.user!.name,
+            submitterEmail: req.user!.email,
+            submitterRoles: req.user!.roles,
+            title: `Delete: ${existing.title}`,
+            proposedData: null,
+            previousData: existing,
+          });
+          requests.push(cr);
+        }
+      }
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        count: requests.length,
+        message: `${requests.length} study note deletions submitted for Admin Approval.`,
+        changeRequests: requests,
+      });
+    }
+
+    const deletedCount = await bulkDeleteStudyNotesInDb(ids);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'staff@taleemguru.pk',
+      adminName: req.user?.name || 'Staff',
+      action: 'BULK_DELETE_STUDY_NOTES',
+      targetType: 'STUDY_NOTE_BATCH',
+      targetId: `batch-${Date.now()}`,
+      details: `Bulk deleted ${deletedCount} study notes`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, count: deletedCount });
+  } catch (error: any) {
+    console.error('Error in bulk delete for study notes:', error);
+    res.status(500).json({ error: 'Failed to delete study notes' });
+  }
+});
+
+// --- 5. Academic Management & Hierarchy Endpoints ---
+
+// Boards Endpoints
+apiRouter.get(['/academic/boards', '/hierarchy/boards'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllBoardsFromDb();
+    res.json({ success: true, boards: items });
+  } catch (error: any) {
+    console.error('Error fetching academic boards:', error);
+    res.status(500).json({ error: 'Failed to retrieve boards' });
+  }
+});
+
+apiRouter.get('/academic/boards/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
+    const current = await getBoardByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Board not found' });
+    const deps = await checkBoardDependencies(id, current.name);
+    res.json({ success: true, board: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/boards', '/hierarchy/boards'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, code, establishmentYear, province, city, description, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Board name is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${name}`,
+        proposedData: { name, code, establishmentYear, province, city, description, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your board will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createBoardInDb({
+      name,
+      code,
+      establishmentYear: establishmentYear ? parseInt(establishmentYear) : undefined,
+      province,
+      city,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_BOARD',
+      targetType: 'ACADEMIC_BOARD',
+      targetId: String(created.id),
+      details: `Created board: ${created.name} (${created.province || 'National'})`,
+      board: created.name,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, board: created });
+  } catch (error: any) {
+    console.error('Error creating board:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create board' });
+  }
+});
+
+apiRouter.put(['/academic/boards/:id', '/hierarchy/boards/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
+    const { name, code, establishmentYear, province, city, description, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getBoardByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Board: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateBoardInDb(id, {
+      name,
+      code,
+      establishmentYear: establishmentYear !== undefined ? (establishmentYear ? parseInt(establishmentYear) : undefined) : undefined,
+      province,
+      city,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_BOARD',
+      targetType: 'ACADEMIC_BOARD',
+      targetId: String(id),
+      details: `Updated board: ${updated.name} (Status: ${updated.status})`,
+      board: updated.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, board: updated });
+  } catch (error: any) {
+    console.error('Error updating board:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update board' });
+  }
+});
+
+apiRouter.delete(['/academic/boards/:id', '/hierarchy/boards/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid board ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getBoardByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'boards',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Board: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Board deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteBoardFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_BOARD',
+      targetType: 'ACADEMIC_BOARD',
+      targetId: String(id),
+      details: `Deleted board: ${result.name} (ID: ${id})`,
+      board: result.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Board "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting board:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete board',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Classes Endpoints
+apiRouter.get(['/academic/classes', '/hierarchy/classes'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllClassesFromDb();
+    res.json({ success: true, classes: items });
+  } catch (error: any) {
+    console.error('Error fetching academic classes:', error);
+    res.status(500).json({ error: 'Failed to retrieve classes' });
+  }
+});
+
+apiRouter.get('/academic/classes/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
+    const current = await getClassByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Class not found' });
+    const deps = await checkClassDependencies(id, current.name);
+    res.json({ success: true, class: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/classes', '/hierarchy/classes'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, boardId, boardIds, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Class name is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${name}`,
+        proposedData: { name, boardId, boardIds, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your class will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const created = await createClassInDb({
+      name,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_CLASS',
+      targetType: 'ACADEMIC_CLASS',
+      targetId: String(created.id),
+      details: `Created class: ${created.name}`,
+      classLevel: created.name,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, class: created });
+  } catch (error: any) {
+    console.error('Error creating class:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create class' });
+  }
+});
+
+apiRouter.put(['/academic/classes/:id', '/hierarchy/classes/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
+    const { name, boardId, boardIds, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getClassByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Class: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const updated = await updateClassInDb(id, {
+      name,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_CLASS',
+      targetType: 'ACADEMIC_CLASS',
+      targetId: String(id),
+      details: `Updated class: ${updated.name}`,
+      classLevel: updated.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, class: updated });
+  } catch (error: any) {
+    console.error('Error updating class:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update class' });
+  }
+});
+
+apiRouter.delete(['/academic/classes/:id', '/hierarchy/classes/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid class ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getClassByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'classes',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Class: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Class deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteClassFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_CLASS',
+      targetType: 'ACADEMIC_CLASS',
+      targetId: String(id),
+      details: `Deleted class: ${result.name} (ID: ${id})`,
+      classLevel: result.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Class "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting class:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete class',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Subjects Endpoints
+apiRouter.get(['/academic/subjects', '/hierarchy/subjects'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllSubjectsFromDb();
+    res.json({ success: true, subjects: items });
+  } catch (error: any) {
+    console.error('Error fetching academic subjects:', error);
+    res.status(500).json({ error: 'Failed to retrieve subjects' });
+  }
+});
+
+apiRouter.get('/academic/subjects/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
+    const current = await getSubjectByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Subject not found' });
+    const deps = await checkSubjectDependencies(id, current.name);
+    res.json({ success: true, subject: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/subjects', '/hierarchy/subjects'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, classId, classIds, boardId, boardIds, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Subject name is required.' });
+    }
+    const parsedClassIds = Array.isArray(classIds) ? classIds.map((c: any) => parseInt(c)).filter((c: number) => !isNaN(c)) : undefined;
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+    const effectiveClassId = parsedClassIds?.[0] || (classId ? parseInt(classId) : undefined);
+
+    if (!effectiveClassId || isNaN(effectiveClassId)) {
+      return res.status(400).json({ error: 'At least one valid class ID is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${name}`,
+        proposedData: { name, classId: effectiveClassId, classIds: parsedClassIds, boardId, boardIds, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your subject will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createSubjectInDb({
+      name,
+      classId: effectiveClassId,
+      classIds: parsedClassIds,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
+      targetId: String(created.id),
+      details: `Created subject: ${created.name}`,
+      subject: created.name,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, subject: created });
+  } catch (error: any) {
+    console.error('Error creating subject:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create subject' });
+  }
+});
+
+apiRouter.put(['/academic/subjects/:id', '/hierarchy/subjects/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
+    const { name, classId, classIds, boardId, boardIds, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getSubjectByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subject: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const parsedClassIds = Array.isArray(classIds) ? classIds.map((c: any) => parseInt(c)).filter((c: number) => !isNaN(c)) : undefined;
+    const parsedBoardIds = Array.isArray(boardIds) ? boardIds.map((b: any) => parseInt(b)).filter((b: number) => !isNaN(b)) : undefined;
+
+    const updated = await updateSubjectInDb(id, {
+      name,
+      classId: classId !== undefined ? parseInt(classId) : undefined,
+      classIds: parsedClassIds,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
+      boardIds: parsedBoardIds,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
+      targetId: String(id),
+      details: `Updated subject: ${updated.name}`,
+      subject: updated.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, subject: updated });
+  } catch (error: any) {
+    console.error('Error updating subject:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update subject' });
+  }
+});
+
+apiRouter.delete(['/academic/subjects/:id', '/hierarchy/subjects/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subject ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getSubjectByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'subjects',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subject: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subject deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteSubjectFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_SUBJECT',
+      targetType: 'ACADEMIC_SUBJECT',
+      targetId: String(id),
+      details: `Deleted subject: ${result.name} (ID: ${id})`,
+      subject: result.name,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Subject "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting subject:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete subject',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Chapters Endpoints
+apiRouter.get(['/academic/chapters', '/hierarchy/chapters'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllChaptersFromDb();
+    res.json({ success: true, chapters: items });
+  } catch (error: any) {
+    console.error('Error fetching academic chapters:', error);
+    res.status(500).json({ error: 'Failed to retrieve chapters' });
+  }
+});
+
+apiRouter.get('/academic/chapters/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
+    const current = await getChapterByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Chapter not found' });
+    const deps = await checkChapterDependencies(id, current.name);
+    res.json({ success: true, chapter: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/chapters', '/hierarchy/chapters'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, subjectId, classId, boardId, status, draftStatus } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Chapter name is required.' });
+    }
+    if (!subjectId || isNaN(parseInt(subjectId))) {
+      return res.status(400).json({ error: 'Valid subject ID is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${name}`,
+        proposedData: { name, subjectId: parseInt(subjectId), classId, boardId, status, draftStatus },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your chapter will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createChapterInDb({
+      name,
+      subjectId: parseInt(subjectId),
+      classId: classId ? parseInt(classId) : undefined,
+      boardId: boardId ? parseInt(boardId) : undefined,
+      status,
+      draftStatus,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
+      targetId: String(created.id),
+      details: `Created chapter: ${created.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, chapter: created });
+  } catch (error: any) {
+    console.error('Error creating chapter:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create chapter' });
+  }
+});
+
+apiRouter.put(['/academic/chapters/:id', '/hierarchy/chapters/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
+    const { name, subjectId, classId, boardId, status, draftStatus } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getChapterByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Chapter: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateChapterInDb(id, {
+      name,
+      subjectId: subjectId !== undefined ? parseInt(subjectId) : undefined,
+      classId: classId !== undefined ? parseInt(classId) : undefined,
+      boardId: boardId !== undefined ? parseInt(boardId) : undefined,
+      status,
+      draftStatus,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
+      targetId: String(id),
+      details: `Updated chapter: ${updated.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, chapter: updated });
+  } catch (error: any) {
+    console.error('Error updating chapter:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update chapter' });
+  }
+});
+
+apiRouter.delete(['/academic/chapters/:id', '/hierarchy/chapters/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid chapter ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getChapterByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'chapters',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Chapter: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Chapter deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteChapterFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_CHAPTER',
+      targetType: 'ACADEMIC_CHAPTER',
+      targetId: String(id),
+      details: `Deleted chapter: ${result.name} (ID: ${id})`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Chapter "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting chapter:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete chapter',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Entry Test Categories Endpoints
+apiRouter.get(['/academic/entry-test-categories', '/academic/entry-tests'], async (req: Request, res: Response) => {
+  try {
+    const items = await getAllEntryTestCategoriesFromDb();
+    res.json({ success: true, entryTestCategories: items });
+  } catch (error: any) {
+    console.error('Error fetching entry test categories:', error);
+    res.status(500).json({ error: 'Failed to retrieve entry test categories' });
+  }
+});
+
+apiRouter.get('/academic/entry-test-categories/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+    const current = await getEntryTestCategoryByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Entry test category not found' });
+    const deps = await checkEntryTestCategoryDependencies(id, current.name);
+    res.json({ success: true, category: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post(['/academic/entry-test-categories', '/academic/entry-tests'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, type, description, organizer, totalMarks, duration, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Category name is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test: ${name}`,
+        proposedData: { name, type: type || 'General', description, organizer, totalMarks: totalMarks ? parseInt(totalMarks) : undefined, duration, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your entry test category will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createEntryTestCategoryInDb({
+      name,
+      type: type || 'General',
+      description,
+      organizer,
+      totalMarks: totalMarks ? parseInt(totalMarks) : undefined,
+      duration,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(created.id),
+      details: `Created entry test parent category: ${created.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, category: created, entryTestCategory: created });
+  } catch (error: any) {
+    console.error('Error creating entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create entry test category' });
+  }
+});
+
+// Entry Test Subcategories Endpoints
+apiRouter.get('/academic/entry-test-subcategories', async (req: Request, res: Response) => {
+  try {
+    const categoryId = req.query.categoryId ? parseInt(req.query.categoryId as string) : undefined;
+    const items = await getAllEntryTestSubcategoriesFromDb(categoryId);
+    res.json({ success: true, subcategories: items, entryTestSubcategories: items });
+  } catch (error: any) {
+    console.error('Error fetching subcategories:', error);
+    res.status(500).json({ error: 'Failed to retrieve subcategories' });
+  }
+});
+
+apiRouter.get('/academic/entry-test-subcategories/:id/dependencies', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+    const current = await getEntryTestSubcategoryByIdFromDb(id);
+    if (!current) return res.status(404).json({ error: 'Subcategory not found' });
+    const deps = await checkEntryTestSubcategoryDependencies(id, current.name);
+    res.json({ success: true, subcategory: current, dependencies: deps });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || 'Failed to check dependencies' });
+  }
+});
+
+apiRouter.post('/academic/entry-test-subcategories', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { categoryId, name, description, status } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Subcategory name is required.' });
+    }
+    if (!categoryId || isNaN(parseInt(categoryId))) {
+      return res.status(400).json({ error: 'Valid Parent Category ID is required.' });
+    }
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: null,
+        action: 'CREATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test Subcategory: ${name}`,
+        proposedData: { categoryId: parseInt(categoryId), name, description, status },
+        previousData: null,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Submitted for Admin Approval. Your subcategory will be reviewed before appearing live.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const created = await createEntryTestSubcategoryInDb({
+      categoryId: parseInt(categoryId),
+      name,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'CREATE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(created.id),
+      details: `Created subcategory: ${created.name} under parent ID ${categoryId}`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, subcategory: created });
+  } catch (error: any) {
+    console.error('Error creating subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to create subcategory' });
+  }
+});
+
+apiRouter.put('/academic/entry-test-subcategories/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+    const { categoryId, name, description, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestSubcategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Subcategory: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subcategory update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateEntryTestSubcategoryInDb(id, {
+      categoryId: categoryId ? parseInt(categoryId) : undefined,
+      name,
+      description,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(id),
+      details: `Updated subcategory: ${updated.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, subcategory: updated });
+  } catch (error: any) {
+    console.error('Error updating subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update subcategory' });
+  }
+});
+
+apiRouter.delete('/academic/entry-test-subcategories/:id', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid subcategory ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestSubcategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_subcategories',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Subcategory: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Subcategory deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteEntryTestSubcategoryFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_ENTRY_TEST_SUBCATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_SUBCATEGORY',
+      targetId: String(id),
+      details: `Deleted subcategory: ${result.name} (ID: ${id})`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Subcategory "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting subcategory:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete subcategory',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+apiRouter.put(['/academic/entry-test-categories/:id', '/academic/entry-tests/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+    const { name, type, description, organizer, totalMarks, duration, status } = req.body || {};
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestCategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: String(id),
+        action: 'UPDATE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Entry Test: ${name || existing?.name || id}`,
+        proposedData: { ...(existing || {}), ...req.body },
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Entry test category update submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const updated = await updateEntryTestCategoryInDb(id, {
+      name,
+      type,
+      description,
+      organizer,
+      totalMarks: totalMarks !== undefined ? parseInt(totalMarks) : undefined,
+      duration,
+      status,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'UPDATE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(id),
+      details: `Updated entry test category: ${updated.name}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, category: updated, entryTestCategory: updated });
+  } catch (error: any) {
+    console.error('Error updating entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || 'Failed to update entry test category' });
+  }
+});
+
+apiRouter.delete(['/academic/entry-test-categories/:id', '/academic/entry-tests/:id'], requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid category ID' });
+
+    if (!isDirectPublisherAdmin(req.user)) {
+      const existing = await getEntryTestCategoryByIdFromDb(id);
+      const changeReq = await createOrUpdateChangeRequest({
+        entityType: 'entry_test_categories',
+        entityId: String(id),
+        action: 'DELETE',
+        submittedBy: req.user!.uid,
+        submitterName: req.user!.name,
+        submitterEmail: req.user!.email,
+        submitterRoles: req.user!.roles,
+        title: `Delete Entry Test: ${existing?.name || id}`,
+        proposedData: null,
+        previousData: existing,
+      });
+      return res.status(202).json({
+        success: true,
+        status: 'PENDING',
+        message: 'Entry test category deletion submitted for Admin Approval.',
+        approvalRequestId: changeReq.id,
+        changeRequest: changeReq,
+      });
+    }
+
+    const result = await deleteEntryTestCategoryFromDb(id);
+
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'unknown',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'DELETE_ENTRY_TEST_CATEGORY',
+      targetType: 'ACADEMIC_ENTRY_TEST_CATEGORY',
+      targetId: String(id),
+      details: `Deleted entry test category: ${result.name} (ID: ${id})`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: `Entry test category "${result.name}" deleted successfully` });
+  } catch (error: any) {
+    console.error('Error deleting entry test category:', error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      error: error.message || 'Failed to delete entry test category',
+      dependencies: (error as any).dependencies,
+    });
+  }
+});
+
+// Academic Structure Summary Endpoint
+apiRouter.get('/academic/summary', async (req: Request, res: Response) => {
+  try {
+    const [bList, cList, sList, chList, etcList] = await Promise.all([
+      getAllBoardsFromDb(),
+      getAllClassesFromDb(),
+      getAllSubjectsFromDb(),
+      getAllChaptersFromDb(),
+      getAllEntryTestCategoriesFromDb(),
+    ]);
+
+    res.json({
+      success: true,
+      summary: {
+        boards: bList.length,
+        classes: cList.length,
+        subjects: sList.length,
+        chapters: chList.length,
+        entryTestCategories: etcList.length,
+      },
+      boards: bList,
+      classes: cList,
+      subjects: sList,
+      chapters: chList,
+      entryTestCategories: etcList,
+    });
+  } catch (error: any) {
+    console.error('Error fetching academic summary:', error);
+    res.status(500).json({ error: 'Failed to retrieve academic summary' });
+  }
+});
+
+// 16. Authoritative Admin Verification: Evaluates caller's database role
+apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const uid = req.user?.uid;
+    const email = req.user?.email;
+    if (!uid) {
+      return res.status(401).json({ authorized: false, error: 'Unauthorized: Missing UID' });
+    }
+
+    const normalizedEmail = (email || '').toLowerCase().trim();
+    const isBootstrap = isTrustedBootstrapAdminEmail(normalizedEmail);
+    const bootstrapAdmins = getTrustedBootstrapAdmins();
+    const bootstrapConfig = bootstrapAdmins[normalizedEmail];
+
+    let dbUser = null;
+    try {
+      dbUser = await getUserByUid(uid);
+      const hasAdminRole = dbUser?.roles && dbUser.roles.some((r: string) => ['admin', 'superadmin', 'super_admin'].includes(r.toLowerCase()));
+      if (!dbUser && normalizedEmail) {
+        dbUser = await getOrCreateUser(uid, normalizedEmail, {
+          name: isBootstrap ? (bootstrapConfig?.name || 'Admin') : req.user?.name,
+        });
+      } else if (dbUser && isBootstrap && !hasAdminRole) {
+        dbUser = await getOrCreateUser(uid, normalizedEmail, {
+          name: bootstrapConfig?.name || 'Admin',
         });
       }
-
-      return next();
-    } catch (err) {
-      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    } catch (dbErr) {
+      console.warn('Notice in /api/admin/verify database lookup:', dbErr);
     }
-  });
-};
 
-/**
- * Middleware: Requires permission to create/manage tests and quizzes (Admin, Teacher, ContentManager)
- */
-export const requireQuizCreator = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
-    try {
-      const email = (req.user?.email || '').toLowerCase().trim();
-      if (isTrustedBootstrapAdminEmail(email)) {
-        return next();
-      }
+    const userRoles = dbUser?.roles && Array.isArray(dbUser.roles) && dbUser.roles.length > 0
+      ? dbUser.roles
+      : (dbUser?.role ? [dbUser.role] : (isBootstrap ? ['Admin'] : ['Student']));
+    const primaryRole = (dbUser?.roles && dbUser.roles.length > 0) ? dbUser.roles[0] : (isBootstrap ? 'Admin' : (userRoles[0] || 'Student'));
 
-      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorized = roles.some(role => [
-        'admin',
-        'superadmin',
-        'super_admin',
-        'administrator',
-        'teacher',
-        'contentmanager',
-        'content_manager',
-      ].includes(role));
+    const staffRolesToCheck = [
+      'admin',
+      'superadmin',
+      'super_admin',
+      'administrator',
+      'teacher',
+      'editor',
+      'contentmanager',
+      'content_manager',
+      'moderator',
+    ];
 
-      if (!isAuthorized) {
-        return res.status(403).json({
-          error: 'Forbidden: Assessment creation privileges required (Admin, Teacher, Content Manager).',
+    const isAdmin = isBootstrap || userRoles.some((r: string) => staffRolesToCheck.includes(r.trim().toLowerCase().replace(/\s+/g, '_')));
+
+    if (isBootstrap) {
+      console.log('[/api/admin/verify Diagnostic]', {
+        normalizedEmail,
+        tokenVerificationSuccess: true,
+        trustedAdminMatch: true,
+        dbProfileRoles: dbUser?.roles || [],
+        finalAuthoritativeRole: primaryRole,
+        finalIsAdminBoolean: true,
+      });
+
+      return res.json({
+        authorized: true,
+        uid: dbUser?.uid || uid,
+        role: primaryRole,
+        roles: userRoles,
+        name: dbUser?.name || bootstrapConfig?.name || 'Admin',
+        email: dbUser?.email || normalizedEmail,
+      });
+    }
+
+    if (!dbUser) {
+      const middlewareRoles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
+      const isMiddlewareAdmin = isBootstrap || middlewareRoles.some(r => staffRolesToCheck.includes(r));
+      if (isMiddlewareAdmin) {
+        return res.json({
+          authorized: true,
+          uid,
+          role: middlewareRoles.includes('teacher') ? 'Teacher' : 'Admin',
+          name: req.user?.name || (isBootstrap ? (bootstrapConfig?.name || 'Admin') : 'Administrator'),
+          email: normalizedEmail,
         });
       }
-
-      return next();
-    } catch (err) {
-      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+      return res.status(403).json({ authorized: false, role: 'Student', error: 'User record not found in system' });
     }
-  });
-};
 
-/**
- * Middleware: Requires permission to manage Past Papers and Study Notes (Admin, ContentManager, Editor, Teacher)
- */
-export const requireContentCurator = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
+    console.log('[/api/admin/verify Diagnostic]', {
+      normalizedEmail,
+      tokenVerificationSuccess: true,
+      trustedAdminMatch: false,
+      dbProfileRoles: userRoles,
+      finalAuthoritativeRole: isAdmin ? primaryRole : 'Student',
+      finalIsAdminBoolean: isAdmin,
+    });
+
+    if (!isAdmin) {
+      return res.status(403).json({
+        authorized: false,
+        role: primaryRole,
+        message: 'Account does not possess administrative privileges.',
+      });
+    }
+
+    res.json({
+      authorized: true,
+      uid: dbUser.uid,
+      role: primaryRole,
+      name: dbUser.name,
+      email: dbUser.email,
+    });
+  } catch (error: any) {
+    console.error('Error in /api/admin/verify:', error);
+    res.status(500).json({ authorized: false, error: 'Failed to verify admin status' });
+  }
+});
+
+// 17. Admin Management: Get registered users from database (Requires verified High Admin)
+apiRouter.get('/admin/users', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const allDbUsers = await getAllUsersFromDb(200);
+    res.json({ users: allDbUsers });
+  } catch (error: any) {
+    console.error('Admin users fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch admin users' });
+  }
+});
+
+// 17b. Admin Management: Create Staff / User Account (Requires verified High Admin)
+apiRouter.post('/admin/users', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { name, email, roles, role, password, status } = req.body || {};
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanName = (name || '').trim();
+    const cleanRoles = Array.isArray(roles) ? roles.map((r: string) => r.trim()) : (typeof role === 'string' && role.trim() ? [role.trim()] : ['Teacher']);
+    const initialStatus = (status === 'Inactive' || status === 'Suspended') ? status : 'Active';
+
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return res.status(400).json({ error: 'A valid email address is required.' });
+    }
+
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Full name is required.' });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+
+    const allowedRoles = ['Student', 'Teacher', 'Staff', 'Editor', 'ContentManager', 'Moderator', 'Admin', 'SuperAdmin'];
+    const invalidRoles = cleanRoles.filter(r => !allowedRoles.includes(r));
+    if (invalidRoles.length > 0) {
+      return res.status(400).json({ error: `Invalid roles: ${invalidRoles.join(', ')}. Allowed roles: ${allowedRoles.join(', ')}` });
+    }
+
+    // Hierarchy check: Regular Admin cannot create SuperAdmin accounts
+    const callerRoles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    const isCallerSuperAdmin = callerRoles.includes('superadmin') || callerRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+    if (cleanRoles.includes('SuperAdmin') && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Only a SuperAdmin can create SuperAdmin accounts.' });
+    }
+
+    // Check if user already exists in database
+    const existingUser = await getUserByEmail(cleanEmail);
+    if (existingUser) {
+      return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in the system.` });
+    }
+
+    // Server-side unique UID ownership
+    const requestId = `req-${Date.now()}-${randomUUID().substring(0, 8)}`;
+    let authUid = `staff-${Date.now()}-${randomUUID()}`;
+    const supabaseClient = getSupabaseServerClient();
+    if (supabaseClient) {
+      try {
+        if ((supabaseClient as any).auth?.admin?.createUser) {
+          const { data: authData, error: authError } = await (supabaseClient as any).auth.admin.createUser({
+            email: cleanEmail,
+            password: password,
+            email_confirm: true,
+            user_metadata: {
+              name: cleanName,
+              role: cleanRoles[0] || 'Teacher',
+            },
+          });
+          if (!authError && authData?.user?.id) {
+            authUid = authData.user.id;
+          } else if (authError) {
+            console.warn('Notice from Supabase admin createUser:', authError.message);
+            if (authError.message?.toLowerCase().includes('already') || authError.status === 422 || authError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
+          }
+        }
+        
+        // Fallback to client-level signUp if admin API is not available with anon key
+        if (!authUid || authUid.startsWith('staff-')) {
+          const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+            email: cleanEmail,
+            password: password,
+            options: {
+              data: {
+                name: cleanName,
+                role: cleanRoles[0] || 'Teacher',
+              },
+            },
+          });
+          // Supabase JS v2 returns user.id with identities: [] when email already exists without throwing signUpError
+          if (signUpData?.user && Array.isArray(signUpData.user.identities) && signUpData.user.identities.length === 0) {
+            return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+          }
+          if (!signUpError && signUpData?.user?.id) {
+            authUid = signUpData.user.id;
+          } else if (signUpError) {
+            console.warn('Notice from Supabase signUp:', signUpError.message);
+            if (signUpError.message?.toLowerCase().includes('already') || signUpError.status === 422 || signUpError.status === 409) {
+              return res.status(409).json({ error: `An account with email ${cleanEmail} already exists in authentication system.` });
+            }
+          }
+        }
+      } catch (authCreateErr) {
+        console.warn('Notice during Supabase user registration execution:', authCreateErr);
+      }
+    }
+
+    // Pre-insert verification: check if authUid was already present in database
+    const existingByUid = await getUserByUid(authUid);
+    if (existingByUid) {
+      return res.status(409).json({ error: `An account with User ID (${authUid}) already exists in the system.` });
+    }
+
+    // Safe diagnostic log (strictly excluding passwords, hashes, JWTs, headers)
+    console.log('STAFF CREATION ATTEMPT LOG', {
+      requestId,
+      generatedUid: authUid,
+      email: cleanEmail,
+      databaseInsertAttempt: true,
+    });
+
+    let createdUser;
     try {
-      const email = (req.user?.email || '').toLowerCase().trim();
-      if (isTrustedBootstrapAdminEmail(email)) {
-        return next();
+      // Authoritative profile insertion into application database with securely hashed credentials
+      createdUser = await createUserInDb({
+        uid: authUid,
+        email: cleanEmail,
+        name: cleanName,
+        roles: cleanRoles,
+        password: password,
+        status: initialStatus,
+      });
+    } catch (dbInsertErr: any) {
+      // Rollback safety: if Supabase Auth created a user but DB insert failed, cleanup orphaned Auth user
+      if (supabaseClient && authUid && !authUid.startsWith('staff-') && (supabaseClient as any).auth?.admin?.deleteUser) {
+        try {
+          await (supabaseClient as any).auth.admin.deleteUser(authUid);
+          console.warn(`Rolled back orphaned Supabase Auth user ${authUid} due to DB insert failure.`);
+        } catch (rollbackErr) {
+          console.error('Failed to rollback orphaned Supabase Auth user:', rollbackErr);
+        }
       }
-
-      const roles = (req.user?.roles || []).map(r => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorized = roles.some(role => [
-        'admin',
-        'superadmin',
-        'super_admin',
-        'administrator',
-        'contentmanager',
-        'content_manager',
-        'editor',
-        'teacher',
-      ].includes(role));
-
-      if (!isAuthorized) {
-        return res.status(403).json({
-          error: 'Forbidden: Content curation privileges required.',
-        });
-      }
-
-      return next();
-    } catch (err) {
-      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+      throw dbInsertErr;
     }
-  });
-};
 
-/**
- * Middleware: Requires permission to access Teacher portal (Admin, Teacher, ContentManager, SuperAdmin)
- */
-export const requireTeacher = async (
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-) => {
-  await requireAuth(req, res, async () => {
-    try {
-      const email = (req.user?.email || '').toLowerCase().trim();
-      if (isTrustedBootstrapAdminEmail(email)) {
-        return next();
-      }
+    // Record audit log
+    await saveAuditLogToDb({
+      adminUid: req.user?.uid || 'admin-system',
+      adminEmail: req.user?.email || 'admin@taleemguru.pk',
+      adminName: req.user?.name || 'Admin',
+      action: 'STAFF_USER_CREATED',
+      targetType: 'user',
+      targetId: authUid,
+      details: `Created new ${cleanRoles.join(', ')} account (${initialStatus}) for ${cleanEmail} (${cleanName})`,
+      ipAddress: req.ip,
+    });
 
-      const roles = (req.user?.roles || []).map((r) => r.trim().toLowerCase().replace(/\s+/g, '_'));
-      const isAuthorized = roles.some((role) =>
-        [
-          'admin',
-          'superadmin',
-          'super_admin',
-          'administrator',
-          'teacher',
-          'contentmanager',
-          'content_manager',
-        ].includes(role)
-      );
+    return res.status(201).json({
+      success: true,
+      user: sanitizeUserForClient(createdUser),
+    });
+  } catch (error: any) {
+    console.error('Error creating staff user:', error);
+    const detailMsg = error?.cause?.message || error?.message || 'Failed to create staff account';
+    const isConflict = error?.statusCode === 409 || error?.cause?.statusCode === 409 || detailMsg.toLowerCase().includes('already exists') || detailMsg.toLowerCase().includes('duplicate');
+    const statusCode = isConflict ? 409 : 500;
+    return res.status(statusCode).json({ error: detailMsg });
+  }
+});
 
-      if (!isAuthorized) {
-        return res.status(403).json({
-          error: 'Forbidden: Teacher or Administrator privileges required to access teacher portal.',
-        });
-      }
+// 18. Admin Management: Update User Roles (Requires verified High Admin)
+apiRouter.patch('/admin/users/:uid/roles', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { roles } = req.body;
 
-      return next();
-    } catch (err) {
-      return res.status(403).json({ error: 'Forbidden: Security verification failed' });
+    // 1. Privilege Escalation Prevention: User cannot change their own roles
+    if (req.user?.uid === targetUid) {
+      return res.status(403).json({ error: 'Forbidden: You cannot modify your own roles.' });
     }
+
+    const allowedRoles = ['Student', 'Staff', 'Admin', 'Teacher', 'Editor', 'ContentManager', 'Moderator', 'SuperAdmin'];
+    if (!roles || !Array.isArray(roles) || !roles.every(r => allowedRoles.includes(r))) {
+      return res.status(400).json({ error: `Invalid roles. Allowed roles: ${allowedRoles.join(', ')}` });
+    }
+
+    // Retrieve previous user record to verify target existence and capture previous roles for audit
+    const previousUser = await getUserByUid(targetUid);
+    if (!previousUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+    const previousRoles = (previousUser as any).roles || [];
+
+    // 2. Hierarchy Check: Caller level vs Target level
+    const callerRoles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    const isCallerSuperAdmin = callerRoles.includes('superadmin') || callerRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+
+    // Target is SuperAdmin or bootstrap admin: Admin cannot demote/modify SuperAdmin!
+    const targetIsSuperAdmin = previousRoles.some((r: string) => r.toLowerCase() === 'superadmin' || r.toLowerCase() === 'super_admin') || isTrustedBootstrapAdminEmail(previousUser.email);
+    if (targetIsSuperAdmin && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Administrators cannot modify or demote a SuperAdmin.' });
+    }
+
+    // Caller trying to grant SuperAdmin: Only SuperAdmin can assign SuperAdmin role!
+    if (roles.includes('SuperAdmin') && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Only SuperAdmin can grant the SuperAdmin role.' });
+    }
+
+    const updatedUser = await updateUserRolesInDb(targetUid, roles);
+    if (!updatedUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    // Audit log with previous and new roles recorded
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'USER_ROLES_CHANGED',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Roles changed from [${previousRoles.join(', ')}] to [${roles.join(', ')}] for user ${updatedUser.email}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, user: sanitizeUserForClient(updatedUser), previousRoles });
+  } catch (error: any) {
+    console.error('Error updating user roles:', error);
+    res.status(500).json({ error: 'Failed to update user roles' });
+  }
+});
+
+// 18a1. Admin Management: Update User Status (Active / Inactive / Suspended) (Requires verified High Admin)
+apiRouter.patch('/admin/users/:uid/status', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { status } = req.body;
+
+    if (req.user?.uid === targetUid) {
+      return res.status(403).json({ error: 'Forbidden: You cannot change your own account status.' });
+    }
+
+    const validStatuses = ['Active', 'Inactive', 'Suspended'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Allowed statuses: ${validStatuses.join(', ')}` });
+    }
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    const callerRoles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    const isCallerSuperAdmin = callerRoles.includes('superadmin') || callerRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+    const targetIsSuperAdmin = targetUser.roles.some((r: string) => r.toLowerCase() === 'superadmin' || r.toLowerCase() === 'super_admin') || isTrustedBootstrapAdminEmail(targetUser.email);
+
+    if (targetIsSuperAdmin && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Administrators cannot modify status of a SuperAdmin.' });
+    }
+
+    const updated = await updateUserStatusInDb(targetUid, status as 'Active' | 'Inactive' | 'Suspended');
+    if (!updated) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'USER_STATUS_CHANGED',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Status changed to ${status} for user ${updated.email}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, user: sanitizeUserForClient(updated) });
+  } catch (error: any) {
+    console.error('Error updating user status:', error);
+    res.status(500).json({ error: 'Failed to update user status' });
+  }
+});
+
+// 18a2. Admin Management: Update User Profile Details (Requires verified High Admin)
+apiRouter.patch('/admin/users/:uid/profile', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { name, classLevel, board, targetExam } = req.body;
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    const updated = await updateUserProfile(targetUid, {
+      name: name?.trim() || targetUser.name,
+      classLevel: classLevel?.trim() || targetUser.classLevel,
+      board: board?.trim() || targetUser.board,
+      targetExam: targetExam?.trim() || targetUser.targetExam,
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'USER_PROFILE_EDITED_BY_ADMIN',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Admin updated profile info for user ${targetUser.email}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, user: sanitizeUserForClient(updated) });
+  } catch (error: any) {
+    console.error('Error editing user profile by admin:', error);
+    res.status(500).json({ error: 'Failed to update user profile' });
+  }
+});
+
+// 18a2b. Admin Management: Reset User / Staff Password (Requires verified High Admin)
+apiRouter.post('/admin/users/:uid/reset-password', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { password } = req.body || {};
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    }
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found.' });
+    }
+
+    const callerRoles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    const isCallerSuperAdmin = callerRoles.includes('superadmin') || callerRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+    const targetRoles = (targetUser.roles || []).map((r: string) => r.toLowerCase().trim());
+    const targetIsSuperAdmin = targetRoles.includes('superadmin') || targetRoles.includes('super_admin') || isTrustedBootstrapAdminEmail(targetUser.email);
+
+    // Regular admin cannot reset password of a SuperAdmin unless caller is SuperAdmin
+    if (targetIsSuperAdmin && !isCallerSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden: Administrators cannot reset credentials for a SuperAdmin.' });
+    }
+
+    // 1. Update in Supabase Auth if server client is available
+    const supabaseClient = getSupabaseServerClient();
+    if (supabaseClient && (supabaseClient as any).auth?.admin?.updateUserById) {
+      try {
+        await (supabaseClient as any).auth.admin.updateUserById(targetUid, { password });
+      } catch (authErr) {
+        console.warn('Supabase admin updateUserById notice:', authErr);
+      }
+    }
+
+    // 2. Authoritatively store hashed password in application database
+    const updated = await setUserPasswordInDb(targetUid, password);
+    if (!updated) {
+      return res.status(500).json({ error: 'Failed to update user password in database.' });
+    }
+
+    // 3. Record secure audit log
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'STAFF_PASSWORD_RESET_BY_ADMIN',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Admin reset password for account ${targetUser.email} (${targetUser.name})`,
+      ipAddress: req.ip,
+    });
+
+    return res.json({ success: true, message: 'Password has been reset successfully.' });
+  } catch (error: any) {
+    console.error('Error resetting staff password by admin:', error);
+    return res.status(500).json({ error: 'Failed to reset user password.' });
+  }
+});
+
+// 18a3. Admin Management: Update Granular Permissions (Requires verified High Admin)
+apiRouter.patch('/admin/users/:uid/permissions', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { permissions } = req.body;
+
+    if (!Array.isArray(permissions)) {
+      return res.status(400).json({ error: 'Permissions must be an array of strings.' });
+    }
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    const updated = await updateUserPermissionsInDb(targetUid, permissions);
+
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'USER_PERMISSIONS_OVERRIDDEN',
+      targetType: 'user',
+      targetId: targetUid,
+      details: `Updated granular permissions (${permissions.length} items) for user ${targetUser.email}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, user: sanitizeUserForClient(updated) });
+  } catch (error: any) {
+    console.error('Error updating user permissions:', error);
+    res.status(500).json({ error: 'Failed to update user permissions' });
+  }
+});
+
+// 18a4. Admin Management: Staff Assignments (Requires verified High Admin)
+apiRouter.get('/admin/users/:uid/assignments', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const assignments = await getStaffAssignmentsFromDb(targetUid);
+    res.json({ success: true, assignments });
+  } catch (error: any) {
+    console.error('Error fetching staff assignments:', error);
+    res.status(500).json({ error: 'Failed to fetch staff assignments' });
+  }
+});
+
+apiRouter.post('/admin/users/:uid/assignments', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUid = req.params.uid;
+    const { role, board, classLevel, subject, contentTypes } = req.body;
+
+    if (!board || !classLevel || !subject) {
+      return res.status(400).json({ error: 'Board, classLevel, and subject are required for assignment.' });
+    }
+
+    const targetUser = await getUserByUid(targetUid);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    const created = await addStaffAssignmentToDb({
+      userUid: targetUid,
+      role: role || (targetUser.roles && targetUser.roles.length > 0 ? targetUser.roles[0] : 'Teacher'),
+      board,
+      classLevel,
+      subject,
+      contentTypes: Array.isArray(contentTypes) ? contentTypes : ['all'],
+    });
+
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'STAFF_ACADEMIC_ASSIGNMENT_ADDED',
+      targetType: 'staff_assignment',
+      targetId: String(created.id),
+      details: `Assigned ${targetUser.email} to ${subject} (${classLevel}, ${board})`,
+      ipAddress: req.ip,
+    });
+
+    res.status(201).json({ success: true, assignment: created });
+  } catch (error: any) {
+    console.error('Error adding staff assignment:', error);
+    res.status(500).json({ error: 'Failed to add staff assignment' });
+  }
+});
+
+apiRouter.delete('/admin/assignments/:id', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const assignmentId = parseInt(req.params.id, 10);
+    if (isNaN(assignmentId)) {
+      return res.status(400).json({ error: 'Valid assignment ID required.' });
+    }
+
+    await deleteStaffAssignmentFromDb(assignmentId);
+
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'STAFF_ACADEMIC_ASSIGNMENT_DELETED',
+      targetType: 'staff_assignment',
+      targetId: String(assignmentId),
+      details: `Deleted staff assignment ID ${assignmentId}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, message: 'Assignment removed.' });
+  } catch (error: any) {
+    console.error('Error removing staff assignment:', error);
+    res.status(500).json({ error: 'Failed to delete assignment' });
+  }
+});
+
+// 18b. Admin Management: Get Available Roles & Hierarchy Metadata
+apiRouter.get('/admin/roles', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = [
+      {
+        id: 'SuperAdmin',
+        name: 'Super Administrator',
+        level: 100,
+        description: 'Full master access to all system functions, database security, and administrator delegation.',
+        permissions: ['all', 'manage_admins', 'manage_staff', 'manage_content', 'manage_tests', 'view_reports', 'view_audit_logs'],
+      },
+      {
+        id: 'Admin',
+        name: 'Administrator',
+        level: 90,
+        description: 'Full administrative access to manage staff users, review test analytics, and audit content.',
+        permissions: ['manage_staff', 'manage_content', 'manage_tests', 'view_reports', 'view_audit_logs', 'system_health'],
+      },
+      {
+        id: 'ContentManager',
+        name: 'Content Manager',
+        level: 60,
+        description: 'Full management over questions, study notes, past papers, test configurations, and syllabus.',
+        permissions: ['manage_content', 'manage_tests', 'view_results', 'view_reports'],
+      },
+      {
+        id: 'Teacher',
+        name: 'Teacher / Instructor',
+        level: 50,
+        description: 'Create custom classroom tests, review test analytics, and track student scores.',
+        permissions: ['create_tests', 'view_results', 'view_quizzes'],
+      },
+      {
+        id: 'Staff',
+        name: 'Staff / Operations',
+        level: 45,
+        description: 'Manage institutional operations, content maintenance, and administrative assistance.',
+        permissions: ['manage_content', 'view_reports', 'view_results'],
+      },
+      {
+        id: 'Editor',
+        name: 'Curriculum Editor',
+        level: 40,
+        description: 'Author, edit, and audit MCQs, chapter notes, and past paper answers.',
+        permissions: ['edit_mcqs', 'edit_notes', 'view_reports', 'view_results'],
+      },
+      {
+        id: 'Moderator',
+        name: 'Community Moderator',
+        level: 30,
+        description: 'Review student feedback, investigate reported question errors, and monitor audit logs.',
+        permissions: ['view_reports', 'update_reports', 'view_feedback', 'view_audit_logs'],
+      },
+      {
+        id: 'Student',
+        name: 'Candidate / Student',
+        level: 10,
+        description: 'Take tests, track personalized performance, bookmark questions, and earn verified certificates.',
+        permissions: ['take_tests', 'view_profile', 'save_bookmarks', 'earn_certificates'],
+      },
+    ];
+
+    res.json({ success: true, roles });
+  } catch (error: any) {
+    console.error('Error fetching admin roles:', error);
+    res.status(500).json({ error: 'Failed to fetch roles' });
+  }
+});
+
+// 18c. Admin Management: Get Active User Permissions Matrix
+apiRouter.get('/admin/permissions', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const userRoles = req.user?.roles || ['Student'];
+    const roleLower = userRoles.map(r => r.toLowerCase());
+
+    const isSuperAdmin = roleLower.includes('superadmin') || roleLower.includes('super_admin') || isTrustedBootstrapAdminEmail(req.user?.email);
+    const isAdmin = isSuperAdmin || roleLower.includes('admin') || roleLower.includes('administrator');
+    const isContentManager = isAdmin || roleLower.includes('contentmanager') || roleLower.includes('content_manager');
+    const isTeacher = isContentManager || roleLower.includes('teacher');
+    const isEditor = isContentManager || roleLower.includes('editor');
+    const isModerator = isAdmin || roleLower.includes('moderator');
+
+    res.json({
+      success: true,
+      user: {
+        uid: req.user?.uid,
+        email: req.user?.email,
+        roles: userRoles,
+      },
+      permissions: {
+        canManageUsers: isAdmin,
+        canManageAdmins: isSuperAdmin,
+        canCreateStaff: isAdmin,
+        canModifyRoles: isAdmin,
+        canManageCurriculum: isContentManager,
+        canCreateTests: isTeacher,
+        canViewResults: isTeacher || isEditor || isContentManager || isAdmin,
+        canModerateReports: isModerator || isEditor || isAdmin,
+        canViewAuditLogs: isModerator || isAdmin,
+        canViewSystemHealth: isAdmin,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error fetching permissions:', error);
+    res.status(500).json({ error: 'Failed to fetch permissions' });
+  }
+});
+
+// 19. Admin Management: Real Comprehensive Platform Analytics
+apiRouter.get('/admin/comprehensive-stats', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const stats = await getComprehensiveStatsFromDb();
+    res.json({
+      success: true,
+      stats,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Admin comprehensive stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch platform stats' });
+  }
+});
+
+// 20. Admin Management: System Analytics (Legacy support)
+apiRouter.get('/admin/stats', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const allDbUsers = await getAllUsersFromDb(1000);
+    const totalUsers = allDbUsers.length;
+    const adminsCount = allDbUsers.filter((u) =>
+      u.roles.some((r) => ['admin', 'superadmin', 'administrator', 'editor', 'moderator'].includes(r.toLowerCase().replace(/\s+/g, '_')))
+    ).length;
+    const studentsCount = allDbUsers.filter((u) => u.roles.some((r) => r.toLowerCase() === 'student')).length;
+
+    res.json({
+      totalUsers,
+      adminsCount,
+      studentsCount,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    console.error('Admin stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch admin stats' });
+  }
+});
+
+// 21. Admin Management: All Test Submissions Audit (Real database test results)
+apiRouter.get('/admin/results', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    if (roles.includes('moderator')) {
+      return res.status(403).json({ error: 'Forbidden: Community moderators cannot access student test submissions.' });
+    }
+
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit as string) || 150));
+    const allResults = await getAllTestResultsFromDb(limit);
+    res.json({ results: allResults });
+  } catch (error: any) {
+    console.error('Admin test results fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch test submissions' });
+  }
+});
+
+// 22. Admin Management: Content Reports / Issues Review
+apiRouter.get('/admin/reports', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    if (roles.includes('teacher')) {
+      return res.status(403).json({ error: 'Forbidden: Teachers cannot manage platform content issue reports.' });
+    }
+
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 100));
+    const reports = await getAllContentReportsFromDb(limit);
+    res.json({ reports });
+  } catch (error: any) {
+    console.error('Admin reports fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch content reports' });
+  }
+});
+
+// 23. Admin Management: Update Content Report Status (OPEN, IN_REVIEW, RESOLVED, REJECTED)
+apiRouter.patch('/admin/reports/:reportId', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    if (roles.includes('teacher')) {
+      return res.status(403).json({ error: 'Forbidden: Teachers cannot modify platform content issue reports.' });
+    }
+
+    const reportId = req.params.reportId;
+    const { status, adminNotes } = req.body;
+
+    const validStatuses = ['OPEN', 'IN_REVIEW', 'RESOLVED', 'REJECTED'];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    }
+
+    const updated = await updateContentReportStatusInDb(
+      reportId,
+      status,
+      adminNotes,
+      req.user?.email || 'admin@taleemguru.pk'
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+
+    // Audit log
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'REPORT_STATUS_CHANGED',
+      targetType: 'report',
+      targetId: reportId,
+      details: `Status set to ${status}. Notes: ${adminNotes || 'None'}`,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, report: updated });
+  } catch (error: any) {
+    console.error('Admin update report error:', error);
+    res.status(500).json({ error: 'Failed to update report' });
+  }
+});
+
+// 24. Admin Management: Audit Logs
+apiRouter.get('/admin/audit-logs', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    if (['teacher', 'editor', 'contentmanager', 'content_manager'].some(r => roles.includes(r))) {
+      return res.status(403).json({ error: 'Forbidden: Access to platform audit logs requires administrative or moderation privileges.' });
+    }
+
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 100));
+    const logs = await getAllAuditLogsFromDb({
+      limit,
+      adminUid: req.query.staffUid as string,
+      board: req.query.board as string,
+      classLevel: req.query.classLevel as string,
+      subject: req.query.subject as string,
+    });
+    res.json({ logs });
+  } catch (error: any) {
+    console.error('Admin audit logs fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
+});
+
+// 25. Admin Management: Record Manual Audit Action (e.g. content additions from admin panel)
+apiRouter.post('/admin/audit-logs', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const roles = (req.user?.roles || []).map(r => r.toLowerCase().trim());
+    if (['teacher', 'editor', 'contentmanager', 'content_manager'].some(r => roles.includes(r))) {
+      return res.status(403).json({ error: 'Forbidden: Access to record platform audit logs requires administrative or moderation privileges.' });
+    }
+
+    const { action, targetType, targetId, details, board, classLevel, subject } = req.body;
+    if (!action || !targetType) {
+      return res.status(400).json({ error: 'Action and targetType are required' });
+    }
+
+    const logEntry = await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: String(action).slice(0, 100),
+      targetType: String(targetType).slice(0, 50),
+      targetId: targetId ? String(targetId).slice(0, 100) : undefined,
+      details: details ? String(details).slice(0, 1000) : undefined,
+      board: board ? String(board).slice(0, 50) : undefined,
+      classLevel: classLevel ? String(classLevel).slice(0, 50) : undefined,
+      subject: subject ? String(subject).slice(0, 50) : undefined,
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, log: logEntry });
+  } catch (error: any) {
+    console.error('Error creating audit log:', error);
+    res.status(500).json({ error: 'Failed to create audit log' });
+  }
+});
+
+// 26. Professional Analytics & Insights API
+apiRouter.get('/analytics', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const roles = (user.roles || []).map((r: string) => r.toLowerCase());
+    const isAdmin = roles.includes('admin') || roles.includes('superadmin') || roles.includes('administrator');
+    const isTeacher = roles.includes('teacher') || roles.includes('contentmanager') || roles.includes('editor');
+
+    const range = (req.query.range as any) || 'all';
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const filter: AnalyticsDateFilter = { range, startDate, endDate };
+
+    // IDOR & Role Isolation Enforcement
+    if (isAdmin) {
+      const analytics = await getAdminAnalytics(filter);
+      return res.json({ success: true, analytics });
+    } else if (isTeacher) {
+      const analytics = await getTeacherAnalytics(user.uid, filter);
+      return res.json({ success: true, analytics });
+    } else {
+      const requestedUid = (req.query.userUid as string) || user.uid;
+      if (requestedUid !== user.uid) {
+        return res.status(403).json({ error: "Access denied: Cannot view another student's analytics (IDOR protection)" });
+      }
+      const analytics = await getStudentAnalytics(user.uid, filter);
+      return res.json({ success: true, analytics });
+    }
+  } catch (error: any) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
+// 27. Professional Notifications & Communication API
+apiRouter.get('/notifications', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const notificationsList = await getNotificationsForUser(user.uid);
+    const unreadCount = await getUnreadNotificationCount(user.uid);
+
+    res.json({ success: true, notifications: notificationsList, unreadCount });
+  } catch (error: any) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ error: 'Failed to retrieve notifications' });
+  }
+});
+
+apiRouter.post('/notifications/:notificationId/read', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { notificationId } = req.params;
+    const updated = await markNotificationRead(notificationId, user.uid);
+
+    res.json({ success: true, notification: updated });
+  } catch (error: any) {
+    console.error('Error marking notification read:', error);
+    if (error.message.includes('Unauthorized')) {
+      return res.status(403).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Failed to update notification' });
+  }
+});
+
+apiRouter.post('/notifications/read-all', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    await markAllNotificationsRead(user.uid);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error marking all notifications read:', error);
+    res.status(500).json({ error: 'Failed to update notifications' });
+  }
+});
+
+apiRouter.post('/notifications/send', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const roles = (user.roles || []).map((r: string) => r.toLowerCase());
+    const isAdmin = roles.includes('admin') || roles.includes('superadmin') || roles.includes('administrator');
+    const isTeacher = roles.includes('teacher') || roles.includes('contentmanager') || roles.includes('editor');
+
+    if (!isAdmin && !isTeacher) {
+      return res.status(403).json({ error: 'Access denied: Only admins and teachers can dispatch notifications' });
+    }
+
+    const { recipientUid, title, message, category, actionUrl } = req.body;
+    if (!title || !message) {
+      return res.status(400).json({ error: 'Title and message are required' });
+    }
+
+    const notification = await createNotification({
+      recipientUid: recipientUid || 'ALL',
+      title: String(title).slice(0, 200),
+      message: String(message).slice(0, 1000),
+      category: category || 'Announcement',
+      actionUrl: actionUrl ? String(actionUrl).slice(0, 500) : undefined,
+      senderUid: user.uid,
+      senderName: user.name || user.email,
+    });
+
+    res.json({ success: true, notification });
+  } catch (error: any) {
+    console.error('Error sending notification:', error);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
+// 28. Admin Management: System Health
+apiRouter.get('/admin/system-health', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const hasDb = Boolean(process.env.SQL_HOST && process.env.SQL_DB_NAME);
+    const hasSupabase = Boolean(
+      (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL) &&
+      (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY)
+    );
+
+    res.json({
+      status: 'healthy',
+      database: {
+        type: 'PostgreSQL (Cloud SQL)',
+        status: hasDb ? 'Connected' : 'Not configured',
+      },
+      auth: {
+        provider: 'Supabase Auth',
+        status: hasSupabase ? 'Configured' : 'Not configured',
+      },
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      nodeVersion: process.version,
+    });
+  } catch (error: any) {
+    console.error('System health check error:', error);
+    res.status(500).json({ error: 'Failed to query system health' });
+  }
+});
+
+// 29. Admin Maintenance: Database Integrity & Backup Export
+apiRouter.get('/admin/integrity-check', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const report = await runDatabaseIntegrityCheck();
+    res.json({ success: true, report });
+  } catch (error: any) {
+    console.error('Integrity check error:', error);
+    res.status(500).json({ error: 'Failed to run database integrity check' });
+  }
+});
+
+// Static Uploads & Assets Serving
+app.use('/assets/uploads', express.static(path.join(process.cwd(), 'public', 'assets', 'uploads')));
+app.use('/storage', express.static(path.join(process.cwd(), 'storage')));
+
+// 31. Centralized Site Settings Management APIs
+apiRouter.get('/settings/public', async (req: Request, res: Response) => {
+  try {
+    const settings = await getPublicSettingsFromDb();
+    // Prevent stale caching so changes in Site Name and settings appear immediately
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.json({ success: true, settings });
+  } catch (error: any) {
+    console.error('Error fetching public site settings:', error);
+    res.status(500).json({ error: 'Failed to retrieve public settings' });
+  }
+});
+
+apiRouter.get('/admin/settings', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const settings = await getAllSettingsFromDb();
+    res.json({ success: true, settings });
+  } catch (error: any) {
+    console.error('Error fetching administrative site settings:', error);
+    res.status(500).json({ error: 'Failed to retrieve site settings' });
+  }
+});
+
+apiRouter.put('/admin/settings', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    const updates = body.settings || body;
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ error: 'Invalid settings payload provided' });
+    }
+
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const result = await updateSettingsInDb(updates, adminEmail);
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to persist settings' });
+    }
+
+    // Record authoritative audit log
+    await saveAuditLogToDb({
+      adminUid: req.user!.uid,
+      adminEmail: req.user!.email || 'admin@taleemguru.pk',
+      adminName: req.user!.name,
+      action: 'SITE_SETTINGS_UPDATED',
+      targetType: 'site_settings',
+      targetId: 'global',
+      details: `Updated ${result.count} settings parameters across site configuration`,
+      ipAddress: req.ip,
+    });
+
+    const updatedSettings = await getAllSettingsFromDb();
+    res.json({
+      success: true,
+      message: 'Site Settings saved successfully.',
+      count: result.count,
+      settings: updatedSettings,
+    });
+  } catch (error: any) {
+    console.error('Error saving administrative site settings:', error);
+    res.status(500).json({ error: 'Failed to save site settings' });
+  }
+});
+
+apiRouter.post('/admin/settings/upload-asset', requireAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const { fileBase64, filename = 'asset.png' } = req.body || {};
+    if (!fileBase64 || typeof fileBase64 !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid fileBase64 payload' });
+    }
+
+    // Clean data URL prefix if present
+    const base64Data = fileBase64.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Asset exceeds maximum allowed file size of 5MB' });
+    }
+
+    const extMatch = String(filename).match(/\.(png|jpg|jpeg|svg|webp|ico)$/i);
+    const ext = extMatch ? extMatch[0].toLowerCase() : '.png';
+    const safeBaseName = String(filename).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 30);
+    const safeFileName = `${safeBaseName}_${Date.now()}${ext}`;
+
+    const uploadsDir = path.join(process.cwd(), 'public', 'assets', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    const targetPath = path.join(uploadsDir, safeFileName);
+    fs.writeFileSync(targetPath, buffer);
+
+    const assetUrl = `/assets/uploads/${safeFileName}`;
+    res.json({
+      success: true,
+      url: assetUrl,
+      filename: safeFileName,
+    });
+  } catch (error: any) {
+    console.error('Error uploading setting asset:', error);
+    res.status(500).json({ error: 'Failed to upload image asset' });
+  }
+});
+
+apiRouter.get('/admin/backup-export', requireHighAdmin, async (req: AuthRequest, res: Response) => {
+  try {
+    const exportData = await generateSystemBackupExport();
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="taleemguru-backup-${Date.now()}.json"`);
+    res.json({ success: true, backup: exportData });
+  } catch (error: any) {
+    console.error('Backup export error:', error);
+    res.status(500).json({ error: 'Failed to generate system backup export' });
+  }
+});
+
+// 30. SEO Endpoints: Dynamic Sitemap, Robots.txt & Database-driven Metadata
+app.get('/sitemap.xml', async (req: Request, res: Response) => {
+  try {
+    const xml = await generateDynamicSitemap();
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400');
+    res.send(xml);
+  } catch (error: any) {
+    console.error('Error generating dynamic sitemap:', error);
+    res.status(500).send('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>');
+  }
+});
+
+app.get('/robots.txt', (req: Request, res: Response) => {
+  try {
+    const robots = generateRobotsTxt();
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=86400');
+    res.send(robots);
+  } catch (error: any) {
+    console.error('Error generating robots.txt:', error);
+    res.status(500).send('User-agent: *\nDisallow: /admin\nDisallow: /api/');
+  }
+});
+
+apiRouter.get('/seo/metadata', async (req: Request, res: Response) => {
+  try {
+    const meta = await getDynamicSeoMetadata({
+      view: req.query.view as string,
+      subFilter: req.query.subFilter as string,
+      testId: req.query.testId as string,
+      paperId: req.query.paperId as string,
+      noteId: req.query.noteId as string,
+      mcqId: req.query.mcqId as string,
+      path: req.query.path as string,
+    });
+    res.json(meta);
+  } catch (error: any) {
+    console.error('Error resolving SEO metadata:', error);
+    res.status(500).json({ error: 'Failed to resolve SEO metadata' });
+  }
+});
+
+apiRouter.get('/seo/sitemap', async (req: Request, res: Response) => {
+  try {
+    const xml = await generateDynamicSitemap();
+    res.json({ success: true, sitemapXml: xml });
+  } catch (error: any) {
+    console.error('Error generating dynamic sitemap:', error);
+    res.status(500).json({ error: 'Failed to generate sitemap' });
+  }
+});
+
+// Mount routes at /api
+app.use('/api', apiRouter);
+
+// Also mount apiRouter at root so serverless runtimes (like Vercel rewrites) that strip /api route seamlessly
+app.use(apiRouter);
+
+// Strict 404 handler for any unmatched /api/* route - GUARANTEES JSON responses, NEVER index.html
+app.all('/api/*', (req: Request, res: Response) => {
+  res.status(404).json({ error: `API endpoint ${req.method} ${req.path} not found` });
+});
+
+// Global server error handling - never leak stack traces, database credentials, or internal secrets
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error('Unhandled server error:', err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(500).json({
+    error: 'Internal server error. Please try again later.',
   });
-};
+});
 
-
+export default app;
