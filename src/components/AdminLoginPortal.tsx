@@ -115,9 +115,9 @@ export const AdminLoginPortal: React.FC<AdminLoginPortalProps> = ({
           email: (user.email || cleanEmail).trim().toLowerCase(),
           roles: resolvedRoles,
           status: 'Active',
-          testsCompleted: 0,
-          points: 9999,
-          joinedDate: new Date().toLocaleDateString('en-GB'),
+          testsCompleted: userProfile?.testsTaken ?? 0,
+          points: userProfile?.points ?? 0,
+          joinedDate: (userProfile as any)?.createdAt ? new Date((userProfile as any).createdAt).toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB'),
         };
 
         if (token) {

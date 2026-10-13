@@ -123,12 +123,24 @@ export const AdminApprovalsTab: React.FC<AdminApprovalsTabProps> = ({
   }, [requests]);
 
   const handleApprove = async () => {
-    if (!activeRequest) return;
+    if (!activeRequest || actionLoading) return;
     setActionLoading(true);
     setActionFeedback(null);
     try {
       const res = await approveChangeRequestApi(activeRequest.id, reviewComment);
       if (!res.success) {
+        if (res.error?.toLowerCase().includes('already been approved') || res.error?.toLowerCase().includes('already been processed')) {
+          setActionFeedback({ type: 'success', message: 'This request was already approved and published live to production.' });
+          setTimeout(() => {
+            setActiveRequest(null);
+            setReviewComment('');
+            setShowRejectInput(false);
+            setActionFeedback(null);
+            loadData();
+            onContentPublished?.();
+          }, 1200);
+          return;
+        }
         setActionFeedback({ type: 'error', message: res.error || 'Failed to approve request' });
         return;
       }
@@ -143,14 +155,26 @@ export const AdminApprovalsTab: React.FC<AdminApprovalsTabProps> = ({
         onContentPublished?.();
       }, 1000);
     } catch (err: any) {
-      setActionFeedback({ type: 'error', message: err.message || 'Error occurred while approving' });
+      if (err.message?.toLowerCase().includes('already been approved') || err.message?.toLowerCase().includes('already been processed')) {
+        setActionFeedback({ type: 'success', message: 'This request was already approved and published live to production.' });
+        setTimeout(() => {
+          setActiveRequest(null);
+          setReviewComment('');
+          setShowRejectInput(false);
+          setActionFeedback(null);
+          loadData();
+          onContentPublished?.();
+        }, 1200);
+      } else {
+        setActionFeedback({ type: 'error', message: err.message || 'Error occurred while approving' });
+      }
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleReject = async () => {
-    if (!activeRequest) return;
+    if (!activeRequest || actionLoading) return;
     if (!rejectionReason.trim()) {
       setActionFeedback({ type: 'error', message: 'A rejection reason is required so staff know what to correct.' });
       return;
@@ -161,6 +185,17 @@ export const AdminApprovalsTab: React.FC<AdminApprovalsTabProps> = ({
     try {
       const res = await rejectChangeRequestApi(activeRequest.id, rejectionReason.trim());
       if (!res.success) {
+        if (res.error?.toLowerCase().includes('already been')) {
+          setActionFeedback({ type: 'success', message: 'This request was already processed.' });
+          setTimeout(() => {
+            setActiveRequest(null);
+            setRejectionReason('');
+            setShowRejectInput(false);
+            setActionFeedback(null);
+            loadData();
+          }, 1200);
+          return;
+        }
         setActionFeedback({ type: 'error', message: res.error || 'Failed to reject request' });
         return;
       }
@@ -174,7 +209,18 @@ export const AdminApprovalsTab: React.FC<AdminApprovalsTabProps> = ({
         loadData();
       }, 1000);
     } catch (err: any) {
-      setActionFeedback({ type: 'error', message: err.message || 'Error occurred while rejecting' });
+      if (err.message?.toLowerCase().includes('already been')) {
+        setActionFeedback({ type: 'success', message: 'This request was already processed.' });
+        setTimeout(() => {
+          setActiveRequest(null);
+          setRejectionReason('');
+          setShowRejectInput(false);
+          setActionFeedback(null);
+          loadData();
+        }, 1200);
+      } else {
+        setActionFeedback({ type: 'error', message: err.message || 'Error occurred while rejecting' });
+      }
     } finally {
       setActionLoading(false);
     }
