@@ -248,7 +248,16 @@ export async function getOrCreateUser(
         : true;
       const shouldPromoteAdmin = isAccountBootstrapAdmin && effectiveBootstrap && !hasRequiredAdminRole;
       const shouldEnforceAdminName = isAccountBootstrapAdmin && effectiveBootstrap && existing.name !== effectiveBootstrap.name;
-      const shouldUpdateUid = existing.uid !== uid;
+      let shouldUpdateUid = existing.uid !== uid;
+
+      if (shouldUpdateUid) {
+        // Prevent unique constraint violation if UID is already taken by another record
+        const taken = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
+        if (taken.length > 0 && taken[0].id !== existing.id) {
+          console.warn(`[ProfileProvisioning] UID conflict: ${uid} is already assigned to another account. Skipping UID update for email ${normalizedEmail}.`);
+          shouldUpdateUid = false;
+        }
+      }
 
       if (shouldUpdateEmail || shouldPromoteAdmin || shouldEnforceAdminName || shouldUpdateUid) {
         const newRoles = shouldPromoteAdmin ? effectiveBootstrap.roles : rolesArray;
