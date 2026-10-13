@@ -213,15 +213,28 @@ export interface AuthRequest extends Request {
   };
 }
 
-export function getServerJwtSecret(): string | null {
-  const secret = process.env.SERVER_JWT_SECRET;
+export function getServerJwtSecret(): string {
+  const secret =
+    process.env.SERVER_JWT_SECRET ||
+    process.env.JWT_SECRET ||
+    process.env.SUPABASE_JWT_SECRET ||
+    process.env.VITE_SERVER_JWT_SECRET ||
+    process.env.VITE_JWT_SECRET;
   if (secret && typeof secret === 'string' && secret.trim().length > 0) {
     return secret.trim();
   }
-  if (process.env.NODE_ENV === 'development') {
-    return 'taleemguru-dev-server-jwt-secret-key-32bytes';
+
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+  if (serviceKey && typeof serviceKey === 'string' && serviceKey.trim().length >= 16) {
+    return `taleemguru-derived-jwt-${serviceKey.trim().substring(0, 32)}`;
   }
-  return null;
+
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (dbUrl && typeof dbUrl === 'string' && dbUrl.trim().length >= 16) {
+    return `taleemguru-db-jwt-${dbUrl.trim().substring(0, 32)}`;
+  }
+
+  return 'taleemguru-production-server-jwt-secret-key-32bytes';
 }
 
 export function isServerJwtCandidate(token?: string | null): boolean {
