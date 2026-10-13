@@ -2326,21 +2326,19 @@ function clearLoginRateLimit(key: string) {
 // 1b. Authoritative Staff & Administrator Authentication Endpoint
 apiRouter.post('/admin/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body || {};
+    const { email, password, token: bodyToken } = req.body || {};
     const cleanEmail = (email || '').trim().toLowerCase();
-    const cleanPassword = (password || '');
+    const cleanPassword = typeof password === 'string' ? password : '';
+    const authHeader = req.headers.authorization;
+    const bearerToken = bodyToken || (authHeader && authHeader.startsWith('Bearer ') ? authHeader.split('Bearer ')[1]?.trim() : null);
 
-    if (!cleanEmail || !cleanEmail.includes('@')) {
+    if (!cleanEmail && !bearerToken) {
       return res.status(400).json({ error: 'Please enter a valid administrator or staff email address.' });
-    }
-
-    if (!cleanPassword || cleanPassword.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
     // Rate Limiting by IP and Target Email
     const clientIp = (req.headers['x-forwarded-for'] as string) || req.ip || 'ip';
-    const rateLimitKey = `${clientIp}:${cleanEmail}`;
+    const rateLimitKey = `${clientIp}:${cleanEmail || 'token-auth'}`;
     const rateCheck = checkLoginRateLimit(rateLimitKey);
     if (!rateCheck.allowed) {
       return res.status(429).json({
@@ -2348,38 +2346,52 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
       });
     }
 
-    // 1. Authenticate against Supabase Auth using submitted email and password
-    const supabase = getSupabaseServerClient();
     let authenticatedUser: { id: string; email?: string; user_metadata?: any } | null = null;
-    let authFailed = false;
 
-    if (supabase) {
-      try {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password: cleanPassword,
-        });
-
-        if (authError || !authData?.user) {
-          authFailed = true;
-        } else {
-          authenticatedUser = {
-            id: authData.user.id,
-            email: authData.user.email,
-            user_metadata: authData.user.user_metadata,
-          };
+    // 0. Verify provided Supabase bearer or access token if passed directly
+    if (bearerToken) {
+      const supabase = getSupabaseServerClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase.auth.getUser(bearerToken);
+          if (!error && data?.user) {
+            authenticatedUser = {
+              id: data.user.id,
+              email: data.user.email,
+              user_metadata: data.user.user_metadata,
+            };
+          }
+        } catch (e) {
+          console.warn('Notice in bearerToken verification:', e);
         }
-      } catch (err) {
-        console.warn('Supabase signInWithPassword error:', err);
-        authFailed = true;
       }
-    } else {
-      // Supabase is unconfigured
-      authFailed = true;
+    }
+
+    // 1. Authenticate against Supabase Auth using submitted email and password
+    if (!authenticatedUser && cleanEmail && cleanPassword) {
+      const supabase = getSupabaseServerClient();
+      if (supabase) {
+        try {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password: cleanPassword,
+          });
+
+          if (!authError && authData?.user) {
+            authenticatedUser = {
+              id: authData.user.id,
+              email: authData.user.email,
+              user_metadata: authData.user.user_metadata,
+            };
+          }
+        } catch (err) {
+          console.warn('Supabase signInWithPassword error:', err);
+        }
+      }
     }
 
     // Database cryptographic password verification (for staff accounts created by admin)
-    if (!authenticatedUser) {
+    if (!authenticatedUser && cleanEmail && cleanPassword) {
       try {
         const dbCandidate = await getUserByEmail(cleanEmail);
         if (dbCandidate) {
@@ -2390,11 +2402,12 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
               email: dbCandidate.email,
               user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
             };
-            authFailed = false;
           } else if (!pwdToken && cleanPassword.length >= 6) {
             const userRoles = dbCandidate.roles || [];
-            const isStaff = userRoles.some((r: string) => ['admin', 'superadmin', 'administrator', 'teacher', 'editor'].includes(r.toLowerCase()));
-            if (isStaff) {
+            const isStaff = userRoles.some((r: string) =>
+              ['admin', 'superadmin', 'administrator', 'teacher', 'editor', 'contentmanager', 'moderator'].includes(r.toLowerCase())
+            );
+            if (isStaff && isTrustedBootstrapAdminEmail(cleanEmail)) {
               const pwdHash = hashPassword(cleanPassword);
               await updateUserPermissionsInDb(dbCandidate.uid, [pwdHash, ...(dbCandidate.permissions || [])]);
               authenticatedUser = {
@@ -2402,7 +2415,6 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
                 email: dbCandidate.email,
                 user_metadata: { name: dbCandidate.name, roles: dbCandidate.roles },
               };
-              authFailed = false;
             }
           }
         }
@@ -2412,7 +2424,7 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
     }
 
     // Database cryptographic password verification for bootstrap admin (strictly verifies password hash)
-    if (!authenticatedUser && isTrustedBootstrapAdminEmail(cleanEmail)) {
+    if (!authenticatedUser && cleanEmail && cleanPassword && isTrustedBootstrapAdminEmail(cleanEmail)) {
       try {
         const dbCandidate = await getUserByEmail(cleanEmail);
         const pwdToken = (dbCandidate?.permissions || []).find((p: string) => p.startsWith('__auth_pwd:'));
@@ -2424,7 +2436,6 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
             email: cleanEmail,
             user_metadata: { name: dbCandidate?.name || 'Administrator', roles: ['Admin'] },
           };
-          authFailed = false;
         }
       } catch (bsErr) {
         console.warn('Notice in bootstrap admin login handling:', bsErr);
