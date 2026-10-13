@@ -216,15 +216,12 @@ export async function getOrCreateUser(
 
     let existing: any = null;
 
-    // For bootstrap admins, prioritize lookup by email first
-    if (isBootstrapAdmin && normalizedEmail) {
-      existing = await getUserByEmail(normalizedEmail);
-    }
-
-    if (!existing) {
+    // 1. Authoritative deterministic lookup: prefer exact authenticated Supabase UID first
+    if (uid) {
       existing = await getUserByUid(uid);
     }
 
+    // 2. If no record exists for this UID, look up by normalized email for reconciliation
     if (!existing && normalizedEmail) {
       existing = await getUserByEmail(normalizedEmail);
     }
@@ -248,13 +245,13 @@ export async function getOrCreateUser(
         : true;
       const shouldPromoteAdmin = isAccountBootstrapAdmin && effectiveBootstrap && !hasRequiredAdminRole;
       const shouldEnforceAdminName = isAccountBootstrapAdmin && effectiveBootstrap && existing.name !== effectiveBootstrap.name;
-      let shouldUpdateUid = existing.uid !== uid;
+      let shouldUpdateUid = Boolean(uid && existing.uid !== uid);
 
       if (shouldUpdateUid) {
         // Prevent unique constraint violation if UID is already taken by another record
         const taken = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
         if (taken.length > 0 && taken[0].id !== existing.id) {
-          console.warn(`[ProfileProvisioning] UID conflict: ${uid} is already assigned to another account. Skipping UID update for email ${normalizedEmail}.`);
+          console.warn(`[ProfileProvisioning] UID conflict: ${uid} is already assigned to account ID ${taken[0].id}. Skipping UID reassignment for existing record ${existing.id}.`);
           shouldUpdateUid = false;
         }
       }
@@ -266,7 +263,7 @@ export async function getOrCreateUser(
           const [updated] = await db
             .update(users)
             .set({
-              uid,
+              ...(shouldUpdateUid ? { uid } : {}),
               ...(shouldUpdateEmail ? { email: normalizedEmail } : {}),
               ...(shouldPromoteAdmin ? { roles: newRoles } : {}),
               ...(shouldEnforceAdminName ? { name: newName } : {}),
@@ -285,7 +282,7 @@ export async function getOrCreateUser(
                 ...(shouldEnforceAdminName ? { name: newName } : {}),
                 updatedAt: new Date(),
               })
-              .where(eq(users.uid, uid))
+              .where(eq(users.id, existing.id))
               .returning();
             return promoted || existing;
           } catch (e2) {
