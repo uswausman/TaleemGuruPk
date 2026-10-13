@@ -7,18 +7,45 @@ const rawSupabaseUrl = (
   (typeof process !== 'undefined' && (process.env?.VITE_SUPABASE_URL || process.env?.SUPABASE_URL)) ||
   ''
 ).trim();
-function sanitizeSupabaseUrl(raw: string): string {
-  let s = (raw || '').trim().replace(/^["']|["']$/g, '');
-  if (!s) return '';
-  s = s.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
-  if (!s.startsWith('http://') && !s.startsWith('https://')) {
-    s = `https://${s}`;
+function sanitizeEnvValue(val: string): string {
+  if (!val || typeof val !== 'string') return '';
+  let s = val.trim().replace(/^\uFEFF/, '').trim();
+  while (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  if (s.toLowerCase() === 'undefined' || s.toLowerCase() === 'null') {
+    return '';
   }
   return s;
 }
 
+function sanitizeSupabaseUrl(raw: string): string {
+  const sanitized = sanitizeEnvValue(raw);
+  if (!sanitized) return '';
+  const cleanPath = sanitized.replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+  try {
+    const parsed = new URL(cleanPath);
+    const isHttps = parsed.protocol === 'https:';
+    const isLocalHttp = parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    if (!isHttps && !isLocalHttp) {
+      return '';
+    }
+    if (parsed.hostname.toLowerCase().includes('placeholder') || cleanPath.toLowerCase().includes('placeholder')) {
+      return '';
+    }
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`.replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
 function sanitizeSupabaseKey(raw: string): string {
-  return (raw || '').trim().replace(/^["']|["']$/g, '');
+  const sanitized = sanitizeEnvValue(raw);
+  if (sanitized.toLowerCase().includes('placeholder')) return '';
+  return sanitized;
 }
 
 const rawSupabaseAnonKey = (
