@@ -229,7 +229,8 @@ export async function getOrCreateUser(
     if (existing) {
       // Security Check: If lookup by email matched an account whose UID is already established
       // and differs from the requested uid, do NOT hijack or reassign the account!
-      const isEstablishedUid = existing.uid && !existing.uid.startsWith('bootstrap-admin-') && !existing.uid.startsWith('temp-');
+      const isBootstrapSeedUid = isBootstrapAdmin && (existing.uid === 'admin-root' || existing.uid.startsWith('bootstrap-admin-'));
+      const isEstablishedUid = existing.uid && !isBootstrapSeedUid && !existing.uid.startsWith('temp-');
       if (uid && existing.uid !== uid && isEstablishedUid) {
         console.warn(`[Security Safeguard] Denied account hijacking attempt: Token sub '${uid}' tried to claim account ID ${existing.id} (${existing.email}) bound to established UID '${existing.uid}'.`);
         // Do not return the admin account for a mismatched UID.
@@ -255,7 +256,8 @@ export async function getOrCreateUser(
         : true;
       const shouldPromoteAdmin = isAccountBootstrapAdmin && effectiveBootstrap && !hasRequiredAdminRole;
       const shouldEnforceAdminName = isAccountBootstrapAdmin && effectiveBootstrap && existing.name !== effectiveBootstrap.name;
-      let shouldUpdateUid = Boolean(uid && existing.uid !== uid && !isEstablishedUid);
+      // Preserve users.uid in database for bootstrap seed accounts to avoid breaking foreign key constraints
+      let shouldUpdateUid = Boolean(uid && existing.uid !== uid && !isEstablishedUid && !isBootstrapSeedUid);
 
       if (shouldUpdateUid) {
         // Prevent unique constraint violation if UID is already taken by another record
