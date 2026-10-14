@@ -135,16 +135,26 @@ export default function App() {
   // Student Profile State - Supabase Auth is the sole source of authentication truth
   const [student, setStudent] = useState<StudentProfile | null>(null);
 
-  // Admin User State - Supabase Auth is the sole source of authentication truth
+  // Admin User State - Verified via /api/admin/verify
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
 
   // Initial Auth session hydration state
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
+  // Race-Safe Admin Verification State
+  const [isAdminVerifying, setIsAdminVerifying] = useState<boolean>(() => {
+    return typeof window !== 'undefined' && Boolean(localStorage.getItem('taleemguru_admin_token'));
+  });
+  const [adminVerifyError, setAdminVerifyError] = useState<string | null>(null);
+
+  // Active verification sequence counter to discard stale in-flight responses
+  const authSessionSeqRef = useRef<number>(0);
+
   // State refs to ensure checkAndApplyRoute is referentially stable across renders
   const studentRef = useRef<StudentProfile | null>(null);
   const adminUserRef = useRef<AdminUser | null>(null);
   const isAuthLoadingRef = useRef<boolean>(true);
+  const isAdminVerifyingRef = useRef<boolean>(false);
   const currentViewRef = useRef<ViewMode>(currentView);
   const activeSubFilterRef = useRef<string | undefined>(activeSubFilter);
   const activeAdminTabRef = useRef<string | undefined>(activeAdminTab);
@@ -152,6 +162,7 @@ export default function App() {
   studentRef.current = student;
   adminUserRef.current = adminUser;
   isAuthLoadingRef.current = isAuthLoading;
+  isAdminVerifyingRef.current = isAdminVerifying;
   currentViewRef.current = currentView;
   activeSubFilterRef.current = activeSubFilter;
   activeAdminTabRef.current = activeAdminTab;
@@ -171,8 +182,10 @@ export default function App() {
       const route = resolveRoute(targetPath);
       console.log('[TALEEMGURU-ROUTING] RESOLVED ROUTE:', route);
       
-      // If initial auth session is still hydrating from Supabase, defer blocking protected views
-      const initializing = userOverride?.isInitializing !== undefined ? userOverride.isInitializing : isAuthLoadingRef.current;
+      // If initial auth session is still hydrating or admin session is verifying, defer blocking protected views
+      const initializing = userOverride?.isInitializing !== undefined 
+        ? userOverride.isInitializing 
+        : (isAuthLoadingRef.current || isAdminVerifyingRef.current);
       if (initializing && route.isProtected) {
         return;
       }
@@ -224,6 +237,89 @@ export default function App() {
     checkAndApplyRoute(canonical);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Race-Safe Admin Verification Function
+  const verifyAdminSession = useCallback(async () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('taleemguru_admin_token') : null;
+    if (!token) {
+      setIsAdminVerifying(false);
+      return;
+    }
+
+    const seqId = ++authSessionSeqRef.current;
+    setIsAdminVerifying(true);
+    setAdminVerifyError(null);
+
+    try {
+      const res = await fetch('/api/admin/verify', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      // Post-Logout Race Defense: Discard response if session sequence has advanced
+      if (authSessionSeqRef.current !== seqId) return;
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.authorized) {
+          const verifiedRoles = Array.isArray(data.roles) && data.roles.length > 0
+            ? data.roles
+            : (data.role ? [data.role] : ['Admin']);
+          const verifiedAdmin: AdminUser = {
+            id: data.uid || 'admin-root',
+            name: (data.name && data.name !== 'avatar-1') ? data.name : 'Admin',
+            email: (data.email || '').toLowerCase().trim(),
+            roles: verifiedRoles,
+            status: 'Active',
+            testsCompleted: 0,
+            points: 9999,
+            joinedDate: new Date().toLocaleDateString('en-GB'),
+          };
+          setAdminUser(verifiedAdmin);
+          setIsAdminVerifying(false);
+          setAdminVerifyError(null);
+
+          const currentPath = getBrowserPath();
+          checkAndApplyRoute(currentPath, {
+            adminUser: verifiedAdmin,
+            isInitializing: false,
+          });
+          return;
+        }
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        try {
+          localStorage.removeItem('taleemguru_admin_token');
+          localStorage.removeItem('taleemguru_admin_profile');
+        } catch (e) {}
+        setAdminUser(null);
+        setIsAdminVerifying(false);
+        setAdminVerifyError(null);
+        const currentPath = getBrowserPath();
+        if (currentPath.startsWith('/admin')) {
+          checkAndApplyRoute(currentPath, { adminUser: null, isInitializing: false });
+        }
+        return;
+      }
+
+      setAdminVerifyError('Unable to verify administrative credentials due to server response. Please try again.');
+      setIsAdminVerifying(false);
+    } catch (err: any) {
+      if (authSessionSeqRef.current !== seqId) return;
+      console.error('Admin session verification network error:', err);
+      // Area 2.3: Network failure: do NOT grant admin access. adminUser remains null.
+      setIsAdminVerifying(false);
+      setAdminVerifyError('Unable to verify administrative credentials. Please check your internet connection.');
+    }
+  }, [checkAndApplyRoute]);
+
+  // Initial Admin Session Hydration on Mount
+  useEffect(() => {
+    const hasAdminToken = typeof window !== 'undefined' && Boolean(localStorage.getItem('taleemguru_admin_token'));
+    if (hasAdminToken) {
+      verifyAdminSession();
+    }
+  }, [verifyAdminSession]);
 
   // Comparison Navigation Context State
   const [comparisonContext, setComparisonContext] = useState<NavigationContext | null>(null);
@@ -424,35 +520,64 @@ export default function App() {
           isInitializing: false,
         });
       } else {
-        // SIGNED_OUT or unauthenticated state across all tabs
-        try {
-          localStorage.removeItem('taleemguru_admin_token');
-          localStorage.removeItem('taleemguru_admin_profile');
-        } catch (e) {}
-
-        setStudent((prev) => (prev ? null : null));
-        setAdminUser((prev) => (prev ? null : null));
+        // Supabase SIGNED_OUT or unauthenticated student state across tabs
+        setStudent(null);
         setIsAuthLoading(false);
 
-        const currentPath = getBrowserPath();
-        const isStudentProtected =
-          currentPath.startsWith('/dashboard') ||
-          currentPath.startsWith('/student-dashboard') ||
-          currentPath.startsWith('/profile') ||
-          currentPath.startsWith('/results') ||
-          currentPath.startsWith('/attempts') ||
-          currentPath.startsWith('/certificates');
+        // Crucial Decoupling: A Supabase student logout must NOT destroy a separately authenticated admin session
+        const hasAdminToken = typeof window !== 'undefined' && Boolean(localStorage.getItem('taleemguru_admin_token'));
+        const activeAdmin = adminUserRef.current;
 
-        if (isStudentProtected) {
-          updateBrowserUrl('/home');
-          setCurrentView('home');
-          setAuthAccessResult(null);
+        if (!hasAdminToken && !activeAdmin) {
+          // If no separate admin token exists, clear admin state as well
+          try {
+            localStorage.removeItem('taleemguru_admin_token');
+            localStorage.removeItem('taleemguru_admin_profile');
+          } catch (e) {}
+          setAdminUser(null);
+
+          const currentPath = getBrowserPath();
+          const isStudentProtected =
+            currentPath.startsWith('/dashboard') ||
+            currentPath.startsWith('/student-dashboard') ||
+            currentPath.startsWith('/profile') ||
+            currentPath.startsWith('/results') ||
+            currentPath.startsWith('/attempts') ||
+            currentPath.startsWith('/certificates');
+
+          if (isStudentProtected) {
+            updateBrowserUrl('/home');
+            setCurrentView('home');
+            setAuthAccessResult(null);
+          } else {
+            checkAndApplyRoute(currentPath, {
+              student: null,
+              adminUser: null,
+              isInitializing: false,
+            });
+          }
         } else {
-          checkAndApplyRoute(currentPath, {
-            student: null,
-            adminUser: null,
-            isInitializing: false,
-          });
+          // Admin session is active or verifying: re-evaluate route keeping admin intact
+          const currentPath = getBrowserPath();
+          const isStudentProtected =
+            currentPath.startsWith('/dashboard') ||
+            currentPath.startsWith('/student-dashboard') ||
+            currentPath.startsWith('/profile') ||
+            currentPath.startsWith('/results') ||
+            currentPath.startsWith('/attempts') ||
+            currentPath.startsWith('/certificates');
+
+          if (isStudentProtected) {
+            updateBrowserUrl('/home');
+            setCurrentView('home');
+            setAuthAccessResult(null);
+          } else {
+            checkAndApplyRoute(currentPath, {
+              student: null,
+              adminUser: activeAdmin,
+              isInitializing: isAdminVerifyingRef.current,
+            });
+          }
         }
       }
     }).then((unsub) => {
@@ -561,6 +686,11 @@ export default function App() {
       } catch (err) {
         console.error('Logout error:', err);
       } finally {
+        // Instantly invalidate all in-flight asynchronous admin verification requests
+        authSessionSeqRef.current++;
+        setIsAdminVerifying(false);
+        setAdminVerifyError(null);
+
         // 1. Immediately purge both Student and Admin state (prevent cross-role leakage)
         setStudent(null);
         setAdminUser(null);
@@ -1578,47 +1708,75 @@ export default function App() {
             )}
 
             {(!authAccessResult || authAccessResult.isAllowed) && (currentView === 'admin-panel' || currentView === 'teacher-panel') && (
-              <AdminTeacherPanel
-                allMCQs={mcqBank}
-                allTests={allTests}
-                allPastPapers={allPastPapers}
-                allStudyNotes={allStudyNotes}
-                historyResults={historyResults}
-                adminUser={adminUser}
-                initialTab={activeAdminTab as any}
-                onAdminLogin={(admin) => {
-                  const safeAdmin: AdminUser = {
-                    ...admin,
-                    name: (admin.email?.toLowerCase().trim() === 'admin@taleemguru.pk' || admin.name === 'avatar-1' || !admin.name)
-                      ? 'Admin'
-                      : admin.name,
-                  };
-                  setAdminUser(safeAdmin);
-                  const currentPath = getBrowserPath();
-                  if (currentPath.startsWith('/admin')) {
-                    checkAndApplyRoute(currentPath, { adminUser: safeAdmin });
-                  } else {
-                    handleNavigateWithFilter('admin-panel', undefined, 'dashboard');
-                  }
-                }}
-                onAdminLogout={handleAdminLogout}
-                onBackToHome={() => handleNavigateWithFilter('home')}
-                onAddMCQ={handleAddMCQ}
-                onUpdateMCQ={handleUpdateMCQ}
-                onDeleteMCQ={handleDeleteMCQ}
-                onCreateCustomTest={handleCreateTest}
-                onUpdateCustomTest={handleUpdateTest}
-                onDeleteCustomTest={handleDeleteTest}
-                onStartTest={handleStartTest}
-                onBulkImportMCQs={handleBulkImportMCQs}
-                onBulkImportTests={handleBulkImportTests}
-                onBulkImportPastPapers={handleBulkImportPastPapers}
-                onBulkImportStudyNotes={handleBulkImportStudyNotes}
-                onBulkImportBundle={handleBulkImportBundle}
-                onNavigateTab={(tab) => {
-                  handleNavigateWithFilter('admin-panel', undefined, tab);
-                }}
-              />
+              isAdminVerifying ? (
+                <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white text-center">
+                  <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
+                  <h2 className="text-xl font-semibold mb-2">Verifying administrator session...</h2>
+                  <p className="text-slate-400 text-sm max-w-md">Cryptographically validating your administrative credentials with the server. Please wait...</p>
+                </div>
+              ) : adminVerifyError ? (
+                <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-white text-center">
+                  <div className="w-12 h-12 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center text-2xl font-bold mb-4">⚠️</div>
+                  <h2 className="text-xl font-semibold mb-2">Verification Notice</h2>
+                  <p className="text-slate-300 text-sm max-w-md mb-6">{adminVerifyError}</p>
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => verifyAdminSession()}
+                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors cursor-pointer"
+                    >
+                      Retry Verification
+                    </button>
+                    <button
+                      onClick={() => handleAdminLogout()}
+                      className="px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg transition-colors cursor-pointer"
+                    >
+                      Return to Login
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <AdminTeacherPanel
+                  allMCQs={mcqBank}
+                  allTests={allTests}
+                  allPastPapers={allPastPapers}
+                  allStudyNotes={allStudyNotes}
+                  historyResults={historyResults}
+                  adminUser={adminUser}
+                  initialTab={activeAdminTab as any}
+                  onAdminLogin={(admin) => {
+                    const safeAdmin: AdminUser = {
+                      ...admin,
+                      name: (admin.email?.toLowerCase().trim() === 'admin@taleemguru.pk' || admin.name === 'avatar-1' || !admin.name)
+                        ? 'Admin'
+                        : admin.name,
+                    };
+                    setAdminUser(safeAdmin);
+                    const currentPath = getBrowserPath();
+                    if (currentPath.startsWith('/admin')) {
+                      checkAndApplyRoute(currentPath, { adminUser: safeAdmin });
+                    } else {
+                      handleNavigateWithFilter('admin-panel', undefined, 'dashboard');
+                    }
+                  }}
+                  onAdminLogout={handleAdminLogout}
+                  onBackToHome={() => handleNavigateWithFilter('home')}
+                  onAddMCQ={handleAddMCQ}
+                  onUpdateMCQ={handleUpdateMCQ}
+                  onDeleteMCQ={handleDeleteMCQ}
+                  onCreateCustomTest={handleCreateTest}
+                  onUpdateCustomTest={handleUpdateTest}
+                  onDeleteCustomTest={handleDeleteTest}
+                  onStartTest={handleStartTest}
+                  onBulkImportMCQs={handleBulkImportMCQs}
+                  onBulkImportTests={handleBulkImportTests}
+                  onBulkImportPastPapers={handleBulkImportPastPapers}
+                  onBulkImportStudyNotes={handleBulkImportStudyNotes}
+                  onBulkImportBundle={handleBulkImportBundle}
+                  onNavigateTab={(tab) => {
+                    handleNavigateWithFilter('admin-panel', undefined, tab);
+                  }}
+                />
+              )
             )}
 
             {currentView === 'privacy-policy' && (
