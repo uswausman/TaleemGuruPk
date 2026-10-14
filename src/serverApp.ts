@@ -2549,6 +2549,12 @@ apiRouter.post('/admin/login', async (req: Request, res: Response) => {
 
     const crypto = await import('crypto');
     const secret = getServerJwtSecret();
+    if (!secret) {
+      console.error(`[Admin Login Error][${cid}] SERVER_JWT_SECRET is not configured.`);
+      return res.status(500).json({
+        error: 'Authentication service is temporarily unavailable due to a server configuration issue. Please contact support.',
+      });
+    }
     const signature = crypto.createHmac('sha256', secret).update(`${header}.${payload}`).digest('base64url');
     const token = `${header}.${payload}.${signature}`;
 
@@ -6458,6 +6464,7 @@ apiRouter.get('/admin/verify', requireAuth, async (req: AuthRequest, res: Respon
       authorized: true,
       uid: dbUser.uid,
       role: primaryRole,
+      roles: userRoles,
       name: dbUser.name,
       email: dbUser.email,
     });
