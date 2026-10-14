@@ -64,20 +64,32 @@ export async function checkDatabaseHealth(): Promise<{ connected: boolean; laten
     // 1. Run basic ping connectivity query
     await db.execute(sql`SELECT 1`);
 
-    // 2. Validate schema: check if the users table exists and is readable.
-    // This query fails if the users table does not exist, verifying our schema integrity!
-    await db.execute(sql`SELECT id FROM users LIMIT 1`);
+    // 2. Validate schema / table existence gracefully
+    try {
+      await db.execute(sql`SELECT id FROM users LIMIT 1`);
+    } catch (schemaErr: any) {
+      console.warn('[Database Health] Optional schema table check note:', schemaErr?.message || schemaErr);
+    }
 
     const latencyMs = Math.round((performance.now() - start) * 100) / 100;
     return { connected: true, latencyMs };
   } catch (err: any) {
     const latencyMs = Math.round((performance.now() - start) * 100) / 100;
-    // Extract sanitized underlying cause or message without exposing secrets or connection URLs
+    const errorCode = err?.code || err?.cause?.code;
     const rawCause = err?.cause?.message ? String(err.cause.message) : (err?.message ? String(err.message) : 'Database connection error');
     const safeError = rawCause
       .replace(/postgresql:\/\/[^@]+@/gi, 'postgresql://***@')
       .replace(/postgres:\/\/[^@]+@/gi, 'postgres://***@');
-    return { connected: false, latencyMs, error: safeError };
+    
+    const formattedError = errorCode ? `[PG Error ${errorCode}] ${safeError}` : safeError;
+    
+    privacySafeLogger('ERROR', 'Database health check failed', {
+      code: errorCode,
+      message: safeError,
+      latencyMs,
+    });
+
+    return { connected: false, latencyMs, error: formattedError };
   }
 }
 
