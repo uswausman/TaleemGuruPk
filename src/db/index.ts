@@ -8,38 +8,83 @@ declare global {
   var _drizzlePoolRef: Pool | undefined;
 }
 
+function isValidProjectRefFormat(ref: string): boolean {
+  return /^[a-z0-9-]+$/i.test(ref) && ref.length >= 1 && ref.length <= 64;
+}
+
+function extractProjectRefFromUrl(urlStr: string): string | undefined {
+  if (!urlStr) return undefined;
+  try {
+    const parsed = new URL(urlStr);
+    const hostParts = parsed.hostname.toLowerCase().split('.');
+    if (
+      hostParts.length === 3 &&
+      hostParts[1] === 'supabase' &&
+      (hostParts[2] === 'co' || hostParts[2] === 'net')
+    ) {
+      const ref = hostParts[0];
+      if (isValidProjectRefFormat(ref)) {
+        return ref;
+      }
+    }
+  } catch (e) {
+    // Invalid URL format
+  }
+  return undefined;
+}
+
 /**
- * Sanitizes and validates Supabase connection strings to prevent authentication failures on Supabase Pooler (Port 6543 / 5432).
+ * Sanitizes and validates Supabase connection strings to prevent authentication failures on Supabase Pooler.
  */
 export function sanitizeSupabaseConnectionString(urlStr: string): string {
   try {
     const parsed = new URL(urlStr);
     const host = parsed.hostname.toLowerCase();
-    
-    // Check if connecting via Supabase Pooler (e.g. *.pooler.supabase.com)
-    if (host.includes('pooler.supabase.com')) {
-      let projectRef = 'gshwabwmhzxbxbetqgcp';
+
+    // Exact pooler host validation: must be pooler.supabase.com or *.pooler.supabase.com
+    const isPoolerHost = host === 'pooler.supabase.com' || host.endsWith('.pooler.supabase.com');
+
+    if (isPoolerHost) {
+      const explicitProjectId = process.env.SUPABASE_PROJECT_ID?.trim();
+      if (explicitProjectId && !isValidProjectRefFormat(explicitProjectId)) {
+        throw new Error('Database configuration error: Invalid SUPABASE_PROJECT_ID format');
+      }
+
       const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
-      if (supabaseUrl) {
-        try {
-          const sHost = new URL(supabaseUrl).hostname;
-          projectRef = sHost.split('.')[0] || projectRef;
-        } catch (e) {}
+      const derivedRef = extractProjectRefFromUrl(supabaseUrl);
+
+      if (explicitProjectId && derivedRef && explicitProjectId !== derivedRef) {
+        throw new Error('Database configuration error: SUPABASE_PROJECT_ID mismatch with configured SUPABASE_URL');
       }
-      
-      // Supabase pooler requires username format: postgres.[project_ref]
-      if (parsed.username === 'postgres' && projectRef && !parsed.username.includes('.')) {
-        parsed.username = `postgres.${projectRef}`;
+
+      const projectRef = explicitProjectId || derivedRef;
+
+      if (!projectRef) {
+        throw new Error('Database configuration error: Missing required SUPABASE_PROJECT_ID or valid SUPABASE_URL for pooler connection');
       }
-      
-      // Transaction pooler uses port 6543
-      if (parsed.port === '5432' || !parsed.port) {
+
+      if (parsed.username) {
+        if (parsed.username.startsWith('postgres.')) {
+          const existingUserRef = parsed.username.slice(9);
+          if (!existingUserRef || !isValidProjectRefFormat(existingUserRef) || existingUserRef !== projectRef) {
+            throw new Error('Database configuration error: Connection string username project reference mismatch');
+          }
+        } else if (parsed.username === 'postgres') {
+          parsed.username = `postgres.${projectRef}`;
+        }
+        // Custom usernames not starting with 'postgres.' are preserved unchanged without modifying auth behavior
+      }
+
+      // Default port to 6543 ONLY when missing; preserve explicit ports (e.g. 5432 or custom)
+      if (!parsed.port) {
         parsed.port = '6543';
       }
       return parsed.toString();
     }
-  } catch (e) {
-    // If URL parsing fails, return original string
+  } catch (e: any) {
+    if (e?.message?.startsWith('Database configuration error:')) {
+      throw e;
+    }
   }
   return urlStr;
 }
