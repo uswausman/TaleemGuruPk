@@ -1365,9 +1365,7 @@ let isHierarchyRepaired = false;
 async function ensureSchemaTablesAndColumns() {
   // Execute each statement in an isolated try/catch so permission warnings on one query do not abort others
   try {
-    await db.execute(sql`
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_days INTEGER NOT NULL DEFAULT 0;
-    `);
+    // Schema repair logic
   } catch (e) {}
 
   try {
