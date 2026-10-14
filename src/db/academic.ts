@@ -1366,6 +1366,12 @@ async function ensureSchemaTablesAndColumns() {
   // Execute each statement in an isolated try/catch so permission warnings on one query do not abort others
   try {
     await db.execute(sql`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS streak_days INTEGER NOT NULL DEFAULT 0;
+    `);
+  } catch (e) {}
+
+  try {
+    await db.execute(sql`
       CREATE TABLE IF NOT EXISTS boards (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
