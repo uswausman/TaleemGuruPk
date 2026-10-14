@@ -50,7 +50,7 @@ export function sanitizeSupabaseConnectionString(urlStr: string): string {
         throw new Error('Database configuration error: Invalid SUPABASE_PROJECT_ID format');
       }
 
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
       const derivedRef = extractProjectRefFromUrl(supabaseUrl);
 
       if (explicitProjectId && derivedRef && explicitProjectId !== derivedRef) {
