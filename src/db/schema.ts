@@ -7,7 +7,7 @@ export const users = pgTable('users', {
   uid: text('uid').notNull().unique(), // Supabase Auth User ID
   email: text('email').notNull(),
   name: text('name'),
-  roles: jsonb('roles').$type<string[]>().default(['Student']).notNull(), // Multiple roles
+  roles: text('roles').array().$type<string[]>().default(['Student']).notNull(), // Multiple roles
   targetExam: text('target_exam'),
   classLevel: text('class_level'),
   board: text('board'),
