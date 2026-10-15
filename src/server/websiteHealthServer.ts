@@ -363,32 +363,11 @@ export async function recordLiveError(entry: Omit<ErrorLogEntry, 'id' | 'occurre
     const fingerprint = crypto.createHash('sha256').update(rawFingerprint).digest('hex');
 
     const now = new Date();
+    const newId = `err_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-    // Check if the incident already exists in database
-    const existingRows = await db
-      .select()
-      .from(websiteErrorIncidents)
-      .where(eq(websiteErrorIncidents.fingerprint, fingerprint))
-      .limit(1);
-
-    const existing = existingRows[0] || null;
-
-    if (existing) {
-      // Deduplicate occurrence: increment count and update lastSeen timestamp
-      const nextStatus = existing.incidentStatus === 'Resolved' ? 'Open' : existing.incidentStatus;
-      await db
-        .update(websiteErrorIncidents)
-        .set({
-          occurrenceCount: existing.occurrenceCount + 1,
-          lastSeen: now,
-          incidentStatus: nextStatus,
-          updatedAt: now,
-        })
-        .where(eq(websiteErrorIncidents.id, existing.id));
-    } else {
-      // Create new persistent incident row
-      const newId = `err_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await db.insert(websiteErrorIncidents).values({
+    await db
+      .insert(websiteErrorIncidents)
+      .values({
         id: newId,
         severity: severityVal,
         category: categoryVal,
@@ -403,11 +382,19 @@ export async function recordLiveError(entry: Omit<ErrorLogEntry, 'id' | 'occurre
         fingerprint,
         createdAt: now,
         updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: websiteErrorIncidents.fingerprint,
+        set: {
+          occurrenceCount: sql`website_error_incidents.occurrence_count + 1`,
+          lastSeen: now,
+          incidentStatus: sql`CASE WHEN website_error_incidents.incident_status = 'Resolved' THEN 'Open' ELSE website_error_incidents.incident_status END`,
+          updatedAt: now,
+        },
       });
 
-      // Retain maximum of 500 records to prevent infinite growth
-      await cleanupOldResolvedIncidents();
-    }
+    // Retain maximum of 500 records to prevent infinite growth
+    await cleanupOldResolvedIncidents();
   } catch (error) {
     console.error('Error in persistent recordLiveError:', error);
   }
