@@ -468,9 +468,16 @@ apiRouter.post('/admin/website-health/errors/status', requireHighAdmin, async (r
   try {
     const { id, status } = req.body || {};
     if (!id || !status) return res.status(400).json({ error: 'id and status required' });
-    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const rawEmail = req.user?.email;
+    const adminEmail = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (!adminEmail || !adminEmail.includes('@')) {
+      return res.status(400).json({ error: 'Authenticated administrator email identity is required.' });
+    }
     const ok = await updateErrorStatus(id, status, adminEmail);
-    res.json({ success: ok });
+    if (!ok) {
+      return res.status(500).json({ error: 'Failed to update error status in database' });
+    }
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to update error status' });
   }
@@ -480,7 +487,11 @@ apiRouter.post('/admin/website-health/errors/:id/investigate', requireHighAdmin,
   try {
     const id = req.params.id || req.body.id;
     if (!id) return res.status(400).json({ error: 'Incident ID is required' });
-    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const rawEmail = req.user?.email;
+    const adminEmail = typeof rawEmail === 'string' ? rawEmail.trim().toLowerCase() : '';
+    if (!adminEmail || !adminEmail.includes('@')) {
+      return res.status(400).json({ error: 'Authenticated administrator email identity is required.' });
+    }
     const report = await investigateErrorIncident(id, adminEmail);
     res.json({ success: true, report });
   } catch (err: any) {
