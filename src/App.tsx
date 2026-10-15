@@ -238,7 +238,7 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Race-Safe Admin Verification Function
+  // Race-Safe Admin Verification Function with Bounded Transient Retry
   const verifyAdminSession = useCallback(async () => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('taleemguru_admin_token') : null;
     if (!token) {
@@ -250,66 +250,88 @@ export default function App() {
     setIsAdminVerifying(true);
     setAdminVerifyError(null);
 
-    try {
-      const res = await fetch('/api/admin/verify', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+    const maxRetries = 2;
+    let attempt = 0;
 
-      // Post-Logout Race Defense: Discard response if session sequence has advanced
-      if (authSessionSeqRef.current !== seqId) return;
+    while (attempt <= maxRetries) {
+      attempt++;
+      try {
+        const res = await fetch('/api/admin/verify', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.authorized) {
-          const verifiedRoles = Array.isArray(data.roles) && data.roles.length > 0
-            ? data.roles
-            : (data.role ? [data.role] : ['Admin']);
-          const verifiedAdmin: AdminUser = {
-            id: data.uid || 'admin-root',
-            name: (data.name && data.name !== 'avatar-1') ? data.name : 'Admin',
-            email: (data.email || '').toLowerCase().trim(),
-            roles: verifiedRoles,
-            status: 'Active',
-            testsCompleted: 0,
-            points: 9999,
-            joinedDate: new Date().toLocaleDateString('en-GB'),
-          };
-          setAdminUser(verifiedAdmin);
+        // Post-Logout / Stale Attempt Race Defense: Discard response if session sequence has advanced
+        if (authSessionSeqRef.current !== seqId) return;
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authorized) {
+            const verifiedRoles = Array.isArray(data.roles) && data.roles.length > 0
+              ? data.roles
+              : (data.role ? [data.role] : ['Admin']);
+            const verifiedAdmin: AdminUser = {
+              id: data.uid || 'admin-root',
+              name: (data.name && data.name !== 'avatar-1') ? data.name : 'Admin',
+              email: (data.email || '').toLowerCase().trim(),
+              roles: verifiedRoles,
+              status: 'Active',
+              testsCompleted: 0,
+              points: 9999,
+              joinedDate: new Date().toLocaleDateString('en-GB'),
+            };
+            setAdminUser(verifiedAdmin);
+            setIsAdminVerifying(false);
+            setAdminVerifyError(null);
+
+            const currentPath = getBrowserPath();
+            checkAndApplyRoute(currentPath, {
+              adminUser: verifiedAdmin,
+              isInitializing: false,
+            });
+            return;
+          }
+        }
+
+        // Definitive Authentication or Authorization Rejection (401 or 403)
+        if (res.status === 401 || res.status === 403) {
+          try {
+            localStorage.removeItem('taleemguru_admin_token');
+            localStorage.removeItem('taleemguru_admin_profile');
+          } catch (e) {}
+          setAdminUser(null);
           setIsAdminVerifying(false);
           setAdminVerifyError(null);
-
           const currentPath = getBrowserPath();
-          checkAndApplyRoute(currentPath, {
-            adminUser: verifiedAdmin,
-            isInitializing: false,
-          });
+          if (currentPath.startsWith('/admin')) {
+            checkAndApplyRoute(currentPath, { adminUser: null, isInitializing: false });
+          }
           return;
         }
-      }
 
-      if (res.status === 401 || res.status === 403) {
-        try {
-          localStorage.removeItem('taleemguru_admin_token');
-          localStorage.removeItem('taleemguru_admin_profile');
-        } catch (e) {}
-        setAdminUser(null);
-        setIsAdminVerifying(false);
-        setAdminVerifyError(null);
-        const currentPath = getBrowserPath();
-        if (currentPath.startsWith('/admin')) {
-          checkAndApplyRoute(currentPath, { adminUser: null, isInitializing: false });
+        // Transient Server Error (5xx) - Retry with short increasing backoff
+        if (res.status >= 500 && attempt <= maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 500));
+          if (authSessionSeqRef.current !== seqId) return;
+          continue;
         }
+
+        // Exhausted retries or unhandled status: preserve token and show verification notice
+        setAdminVerifyError('Unable to verify administrative credentials due to server response. Please try again.');
+        setIsAdminVerifying(false);
+        return;
+      } catch (err: any) {
+        if (authSessionSeqRef.current !== seqId) return;
+        // Network failure: retry up to maxRetries before showing network error
+        if (attempt <= maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 500));
+          if (authSessionSeqRef.current !== seqId) return;
+          continue;
+        }
+        console.error('Admin session verification network error:', err);
+        setIsAdminVerifying(false);
+        setAdminVerifyError('Unable to verify administrative credentials. Please check your internet connection.');
         return;
       }
-
-      setAdminVerifyError('Unable to verify administrative credentials due to server response. Please try again.');
-      setIsAdminVerifying(false);
-    } catch (err: any) {
-      if (authSessionSeqRef.current !== seqId) return;
-      console.error('Admin session verification network error:', err);
-      // Area 2.3: Network failure: do NOT grant admin access. adminUser remains null.
-      setIsAdminVerifying(false);
-      setAdminVerifyError('Unable to verify administrative credentials. Please check your internet connection.');
     }
   }, [checkAndApplyRoute]);
 
