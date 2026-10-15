@@ -187,7 +187,28 @@ export interface CommandHistoryEntry {
 }
 
 // In-Memory Runtime Stores with DB persistence fallback
-let lastCleanupAt: number = 0;
+export const CLEANUP_INTERVAL_MS = 3600000; // 1 hour cooldown after successful cleanup
+export const CLEANUP_FAILURE_COOLDOWN_MS = 60000; // 1 minute cooldown after failure before retrying
+
+let lastCleanupAt: number = 0; // Timestamp of last successful cleanup
+let lastCleanupAttemptAt: number = 0; // Timestamp of last cleanup attempt (success or failure)
+let isCleaningUp: boolean = false; // In-process single-flight guard to prevent overlapping cleanup queries
+
+/**
+ * Inspection helper for test verification of cleanup throttle state
+ */
+export function getCleanupStateForTesting() {
+  return { lastCleanupAt, lastCleanupAttemptAt, isCleaningUp };
+}
+
+/**
+ * Reset helper for test isolation
+ */
+export function resetCleanupStateForTesting(overrides?: { lastCleanupAt?: number; lastCleanupAttemptAt?: number; isCleaningUp?: boolean }) {
+  lastCleanupAt = overrides?.lastCleanupAt ?? 0;
+  lastCleanupAttemptAt = overrides?.lastCleanupAttemptAt ?? 0;
+  isCleaningUp = overrides?.isCleaningUp ?? false;
+}
 let latestSeoReport: SeoAuditReport | null = null;
 let latestApiHealthResults: ApiHealthResult[] = [];
 let latestDbHealthResult: DatabaseHealthResult | null = null;
@@ -394,12 +415,10 @@ export async function recordLiveError(entry: Omit<ErrorLogEntry, 'id' | 'occurre
         },
       });
 
-    // Prune Resolved incidents older than 30 days. Throttled to run at most once per hour.
-    const nowMs = Date.now();
-    if (nowMs - lastCleanupAt > 3600000) {
-      await cleanupOldResolvedIncidents();
-      lastCleanupAt = nowMs;
-    }
+    // Prune Resolved incidents older than 30 days.
+    // Throttled to run at most once per hour after success, with a 1-minute failure retry cooldown.
+    // Guarded by an in-process single-flight lock to prevent overlapping queries within this instance.
+    await triggerRetentionCleanupIfEligible();
   } catch (error) {
     console.error('Error in persistent recordLiveError:', error);
   }
@@ -496,17 +515,64 @@ export async function updateErrorStatus(id: string, status: 'Open' | 'Investigat
 
 /**
  * Cleanup strategy to prune old resolved incidents while retaining active and recent ones.
+ * Accepts an optional databaseClient (defaults to production db singleton) for safe dependency injection.
+ * Returns true if the cleanup query succeeded, false if database unavailable or query failed.
  */
-export async function cleanupOldResolvedIncidents() {
-  if (!db) return;
+export async function cleanupOldResolvedIncidents(databaseClient: any = db): Promise<boolean> {
+  if (!databaseClient) return false;
   try {
     // Delete resolved incidents older than 30 days
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
-    await db.execute(
+    await databaseClient.execute(
       sql`DELETE FROM website_error_incidents WHERE incident_status = 'Resolved' AND last_seen < ${thirtyDaysAgo}`
     );
+    return true;
   } catch (error) {
     console.error('Error cleaning up old resolved incidents:', error);
+    return false;
+  }
+}
+
+/**
+ * Triggers incident retention cleanup if eligible under throttling and single-flight concurrency rules.
+ * - Enforces a 1-hour interval following a successful cleanup.
+ * - Enforces a 1-minute retry cooldown following a failed attempt.
+ * - In-process single-flight lock ensures at most one cleanup query runs concurrently per process.
+ * - Single-flight lock is unconditionally released in a finally block.
+ * - Accepts optional databaseClient and customNowMs overrides for isolated testing.
+ */
+export async function triggerRetentionCleanupIfEligible(
+  databaseClient: any = db,
+  customNowMs?: number
+): Promise<{ triggered: boolean; success?: boolean; skippedReason?: string }> {
+  const nowMs = customNowMs ?? Date.now();
+  const isSuccessIntervalSatisfied = nowMs - lastCleanupAt > CLEANUP_INTERVAL_MS;
+  const isFailureCooldownSatisfied = nowMs - lastCleanupAttemptAt > CLEANUP_FAILURE_COOLDOWN_MS;
+
+  if (isCleaningUp) {
+    return { triggered: false, skippedReason: 'already_running' };
+  }
+  if (!isSuccessIntervalSatisfied) {
+    return { triggered: false, skippedReason: 'success_cooldown' };
+  }
+  if (!isFailureCooldownSatisfied) {
+    return { triggered: false, skippedReason: 'failure_cooldown' };
+  }
+
+  isCleaningUp = true;
+  lastCleanupAttemptAt = nowMs;
+  try {
+    const ok = await cleanupOldResolvedIncidents(databaseClient);
+    if (ok) {
+      lastCleanupAt = customNowMs ?? Date.now();
+      return { triggered: true, success: true };
+    }
+    return { triggered: true, success: false };
+  } catch (cleanupErr) {
+    console.error('Unexpected error in cleanup execution:', cleanupErr);
+    return { triggered: true, success: false };
+  } finally {
+    isCleaningUp = false;
   }
 }
 
