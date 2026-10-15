@@ -457,7 +457,7 @@ apiRouter.get('/admin/website-health/errors', requireHighAdmin, async (req: Auth
     const category = req.query.category as string;
     const severity = req.query.severity as string;
     const status = req.query.status as string;
-    const logs = getLiveErrorLogs({ category, severity, status });
+    const logs = await getLiveErrorLogs({ category, severity, status });
     res.json({ logs });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to fetch error logs' });
@@ -468,7 +468,8 @@ apiRouter.post('/admin/website-health/errors/status', requireHighAdmin, async (r
   try {
     const { id, status } = req.body || {};
     if (!id || !status) return res.status(400).json({ error: 'id and status required' });
-    const ok = updateErrorStatus(id, status);
+    const adminEmail = req.user?.email || 'admin@taleemguru.pk';
+    const ok = await updateErrorStatus(id, status, adminEmail);
     res.json({ success: ok });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to update error status' });
