@@ -187,6 +187,7 @@ export interface CommandHistoryEntry {
 }
 
 // In-Memory Runtime Stores with DB persistence fallback
+let lastCleanupAt: number = 0;
 let latestSeoReport: SeoAuditReport | null = null;
 let latestApiHealthResults: ApiHealthResult[] = [];
 let latestDbHealthResult: DatabaseHealthResult | null = null;
@@ -393,8 +394,12 @@ export async function recordLiveError(entry: Omit<ErrorLogEntry, 'id' | 'occurre
         },
       });
 
-    // Retain maximum of 500 records to prevent infinite growth
-    await cleanupOldResolvedIncidents();
+    // Prune Resolved incidents older than 30 days. Throttled to run at most once per hour.
+    const nowMs = Date.now();
+    if (nowMs - lastCleanupAt > 3600000) {
+      await cleanupOldResolvedIncidents();
+      lastCleanupAt = nowMs;
+    }
   } catch (error) {
     console.error('Error in persistent recordLiveError:', error);
   }
