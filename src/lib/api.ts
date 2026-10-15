@@ -3095,7 +3095,9 @@ export async function updateErrorLogStatusApi(id: string, status: string): Promi
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ id, status }),
     });
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json().catch(() => ({}));
+    return Boolean(data.success);
   } catch (error) {
     console.error('Error updating error status:', error);
     return false;
