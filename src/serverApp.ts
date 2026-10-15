@@ -400,6 +400,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
       recordLiveError({
         severity,
         category,
+        method: req.method,
         statusCode: code,
         route: req.path,
         errorMessage: code >= 500 ? `Server Error (${code})` : code === 404 ? 'Resource Not Found' : `HTTP ${code} Response`,
