@@ -1420,13 +1420,13 @@ export async function getAdminComprehensiveStats() {
         .select({ count: sql<number>`count(*)` })
         .from(users)
         .where(
-          sql`EXISTS (SELECT 1 FROM jsonb_array_elements_text(roles) AS r WHERE LOWER(r) IN ('admin', 'superadmin', 'administrator'))`
+          sql`EXISTS (SELECT 1 FROM unnest(roles) AS r WHERE LOWER(r) IN ('admin', 'superadmin', 'administrator'))`
         ),
       db
         .select({ count: sql<number>`count(*)` })
         .from(users)
         .where(
-          sql`NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(roles) AS r WHERE LOWER(r) IN ('admin', 'superadmin', 'administrator'))`
+          sql`NOT EXISTS (SELECT 1 FROM unnest(roles) AS r WHERE LOWER(r) IN ('admin', 'superadmin', 'administrator'))`
         ),
       db.select({ count: sql<number>`count(*)` }).from(testResults),
       db.select({ count: sql<number>`count(*)` }).from(certificates),
