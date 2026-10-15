@@ -8,6 +8,19 @@ async function runConcurrentTest() {
   console.log('STARTING ATOMIC CONCURRENT DEDUPLICATION QA TEST');
   console.log('====================================================\n');
 
+  // Strict Safety Guard: Never execute against production or unverified remote databases.
+  // Requires explicit ALLOW_INTEGRATION_TEST_DB_WRITES === 'true' AND verified localhost DATABASE_URL.
+  const allowWrites = process.env.ALLOW_INTEGRATION_TEST_DB_WRITES === 'true';
+  const dbUrl = process.env.DATABASE_URL || '';
+  const isVerifiedLocal = dbUrl.includes('127.0.0.1') || dbUrl.includes('localhost');
+
+  if (!allowWrites || !isVerifiedLocal || process.env.NODE_ENV === 'production') {
+    console.warn('[SAFETY SHIELD] Refusing to execute live database mutation test.');
+    console.warn('Live database mutations require ALLOW_INTEGRATION_TEST_DB_WRITES=true on a verified localhost DATABASE_URL.');
+    console.warn('Test aborted safely without modifying database.');
+    return;
+  }
+
   if (!db) {
     console.error('Database connection not available for test. Skipping.');
     process.exit(1);
