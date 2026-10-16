@@ -18,7 +18,6 @@ import {
 import { fetchAdminReportsApi, updateAdminReportStatusApi } from '../../lib/api';
 
 export interface ContentReportItem {
-  id: number;
   reportId: string;
   category: string;
   questionId?: string;
@@ -26,12 +25,11 @@ export interface ContentReportItem {
   description: string;
   userEmail?: string;
   userUid?: string;
-  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'REJECTED';
+  status: 'OPEN' | 'IN_REVIEW' | 'RESOLVED' | 'REJECTED' | null;
   adminNotes?: string;
   resolvedBy?: string;
-  resolvedAt?: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface AdminReportsTabProps {
@@ -71,13 +69,14 @@ export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
     loadReports();
   }, []);
 
-  const openStatusCount = reports.filter((r) => r.status === 'OPEN').length;
+  const openStatusCount = reports.filter((r) => (r.status || 'OPEN') === 'OPEN').length;
   const inReviewCount = reports.filter((r) => r.status === 'IN_REVIEW').length;
   const resolvedCount = reports.filter((r) => r.status === 'RESOLVED').length;
   const rejectedCount = reports.filter((r) => r.status === 'REJECTED').length;
 
   const filteredReports = reports.filter((r) => {
-    const matchStatus = statusFilter === 'All' || r.status === statusFilter;
+    const effectiveStatus = r.status || 'OPEN';
+    const matchStatus = statusFilter === 'All' || effectiveStatus === statusFilter;
     const q = searchQuery.toLowerCase();
     const matchSearch =
       !q ||
@@ -91,7 +90,7 @@ export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
 
   const handleOpenModal = (report: ContentReportItem) => {
     setActiveReport(report);
-    setNewStatus(report.status);
+    setNewStatus(report.status || 'OPEN');
     setAdminNotes(report.adminNotes || '');
     setActionSuccess(null);
   };
@@ -267,24 +266,25 @@ export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredReports.map((report) => {
+                  const effectiveStatus = report.status || 'OPEN';
                   let statusBadge = (
                     <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300/30">
                       OPEN
                     </span>
                   );
-                  if (report.status === 'IN_REVIEW') {
+                  if (effectiveStatus === 'IN_REVIEW') {
                     statusBadge = (
                       <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-300/30">
                         IN REVIEW
                       </span>
                     );
-                  } else if (report.status === 'RESOLVED') {
+                  } else if (effectiveStatus === 'RESOLVED') {
                     statusBadge = (
                       <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/30">
                         RESOLVED
                       </span>
                     );
-                  } else if (report.status === 'REJECTED') {
+                  } else if (effectiveStatus === 'REJECTED') {
                     statusBadge = (
                       <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300/30">
                         REJECTED
@@ -335,7 +335,9 @@ export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
                         )}
                       </td>
                       <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
-                        {new Date(report.createdAt).toLocaleDateString('en-GB')}
+                        {report.createdAt && !isNaN(new Date(report.createdAt).getTime())
+                          ? new Date(report.createdAt).toLocaleDateString('en-GB')
+                          : '—'}
                       </td>
                       <td className="py-3 px-4 text-right">
                         <button
@@ -410,7 +412,9 @@ export const AdminReportsTab: React.FC<AdminReportsTabProps> = ({
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-bold">Submitted Date</span>
                   <span className="font-mono text-slate-800 dark:text-slate-200">
-                    {new Date(activeReport.createdAt).toLocaleString()}
+                    {activeReport.createdAt && !isNaN(new Date(activeReport.createdAt).getTime())
+                      ? new Date(activeReport.createdAt).toLocaleString()
+                      : '—'}
                   </span>
                 </div>
               </div>
