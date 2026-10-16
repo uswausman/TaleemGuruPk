@@ -8,10 +8,31 @@ export { DEFAULT_SITE_SETTINGS };
 
 let isTableVerified = false;
 
+function coerceSettingValue(val: unknown): string | null {
+  if (val === null || val === undefined) {
+    return null;
+  }
+  if (typeof val === 'string') {
+    return val;
+  }
+  if (typeof val === 'number' || typeof val === 'boolean') {
+    return String(val);
+  }
+  if (typeof val === 'object') {
+    try {
+      const serialized = JSON.stringify(val);
+      return typeof serialized === 'string' ? serialized : null;
+    } catch {
+      return null;
+    }
+  }
+  return String(val);
+}
+
 export async function ensureSettingsTableExists() {
   if (isTableVerified) return;
   try {
-    await db.select({ id: siteSettings.id }).from(siteSettings).limit(1);
+    await db.select({ key: siteSettings.key }).from(siteSettings).limit(1);
     isTableVerified = true;
   } catch (error) {
     // Graceful fallback to default configuration if database is unreachable
@@ -35,8 +56,9 @@ export async function getAllSettingsFromDb(): Promise<Record<string, string>> {
     const rows = await db.select().from(siteSettings);
     if (Array.isArray(rows)) {
       rows.forEach((row) => {
-        if (row.key && row.value !== null && row.value !== undefined) {
-          settingsMap[row.key] = row.value;
+        const coerced = coerceSettingValue(row.value);
+        if (row.key && coerced !== null) {
+          settingsMap[row.key] = coerced;
         }
       });
     }
@@ -92,8 +114,9 @@ export async function getPublicSettingsFromDb(): Promise<Record<string, string>>
     const rows = await db.select().from(siteSettings).where(eq(siteSettings.isPublic, true));
     if (Array.isArray(rows)) {
       rows.forEach((row) => {
-        if (row.key && row.value !== null && row.value !== undefined) {
-          publicMap[row.key] = row.value;
+        const coerced = coerceSettingValue(row.value);
+        if (row.key && coerced !== null) {
+          publicMap[row.key] = coerced;
         }
       });
     }
@@ -174,16 +197,14 @@ export async function updateSettingsInDb(
     for (const [key, rawValue] of Object.entries(finalUpdates)) {
       const valStr = rawValue !== null && rawValue !== undefined ? String(rawValue) : '';
       const def = DEFAULT_SITE_SETTINGS[key];
-      const category = def ? def.category : (key.startsWith('site_name') ? 'branding' : key.split('.')[0] || 'general');
       const isPublic = def ? def.isPublic : true;
 
       try {
         await db.execute(sql`
-          INSERT INTO site_settings (key, category, value, is_public, updated_by, updated_at)
-          VALUES (${key}, ${category}, ${valStr}, ${isPublic}, ${updatedBy}, NOW())
+          INSERT INTO site_settings (key, value, is_public, updated_by, updated_at)
+          VALUES (${key}, to_jsonb(${valStr}::text), ${isPublic}, ${updatedBy}, NOW())
           ON CONFLICT (key) DO UPDATE SET
             value = EXCLUDED.value,
-            category = EXCLUDED.category,
             is_public = EXCLUDED.is_public,
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW();
