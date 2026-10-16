@@ -77,19 +77,18 @@ export const certificates = pgTable('certificates', {
 
 // Content / Question Error Reports submitted by students or reviewed by admins
 export const contentReports = pgTable('content_reports', {
-  id: serial('id').primaryKey(),
-  reportId: text('report_id').notNull().unique(),
+  reportId: text('report_id').primaryKey(),
   category: text('category').notNull(),
   questionId: text('question_id'),
   subject: text('subject'),
   description: text('description').notNull(),
   userEmail: text('user_email'),
   userUid: text('user_uid'),
-  status: text('status').default('OPEN').notNull(),
+  status: text('status').default('OPEN'),
   adminNotes: text('admin_notes'),
   resolvedBy: text('resolved_by'),
-  createdAt: timestamp('created_at').defaultNow().notNull(),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 // Admin Audit Logs for tracking administrative actions authoritatively
@@ -520,13 +519,11 @@ export const notifications = pgTable('notifications', {
 
 // 8. Site Settings Table for Centralized Administrative Platform Configuration
 export const siteSettings = pgTable('site_settings', {
-  id: serial('id').primaryKey(),
-  key: text('key').notNull().unique(),
-  category: text('category').notNull(),
-  value: text('value'),
-  isPublic: boolean('is_public').default(true).notNull(),
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  isPublic: boolean('is_public').default(true),
   updatedBy: text('updated_by'),
-  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
 // Newsletter Subscribers
