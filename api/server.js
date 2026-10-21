@@ -71,7 +71,7 @@ var users = pgTable("users", {
   // Supabase Auth User ID
   email: text("email").notNull(),
   name: text("name"),
-  roles: jsonb("roles").$type().default(["Student"]).notNull(),
+  roles: text("roles").array().$type().default(["Student"]).notNull(),
   // Multiple roles
   targetExam: text("target_exam"),
   classLevel: text("class_level"),
@@ -137,19 +137,18 @@ var certificates = pgTable("certificates", {
   issueDate: timestamp("issue_date").defaultNow().notNull()
 });
 var contentReports = pgTable("content_reports", {
-  id: serial("id").primaryKey(),
-  reportId: text("report_id").notNull().unique(),
+  reportId: text("report_id").primaryKey(),
   category: text("category").notNull(),
   questionId: text("question_id"),
   subject: text("subject"),
   description: text("description").notNull(),
   userEmail: text("user_email"),
   userUid: text("user_uid"),
-  status: text("status").default("OPEN").notNull(),
+  status: text("status").default("OPEN"),
   adminNotes: text("admin_notes"),
   resolvedBy: text("resolved_by"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull()
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow()
 });
 var auditLogs = pgTable("audit_logs", {
   id: serial("id").primaryKey(),
@@ -565,13 +564,11 @@ var notifications = pgTable("notifications", {
   createdAt: timestamp("created_at").defaultNow().notNull()
 });
 var siteSettings = pgTable("site_settings", {
-  id: serial("id").primaryKey(),
-  key: text("key").notNull().unique(),
-  category: text("category").notNull(),
-  value: text("value"),
-  isPublic: boolean("is_public").default(true).notNull(),
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  isPublic: boolean("is_public").default(true),
   updatedBy: text("updated_by"),
-  updatedAt: timestamp("updated_at").defaultNow().notNull()
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow()
 });
 var newsletterSubscribers = pgTable("newsletter_subscribers", {
   id: serial("id").primaryKey(),
@@ -701,29 +698,62 @@ var testQuestionsRelations = relations(testQuestions, ({ one }) => ({
 }));
 
 // src/db/index.ts
+function isValidProjectRefFormat(ref) {
+  return /^[a-z0-9-]+$/i.test(ref) && ref.length >= 1 && ref.length <= 64;
+}
+function extractProjectRefFromUrl(urlStr) {
+  if (!urlStr) return void 0;
+  try {
+    const parsed = new URL(urlStr);
+    const hostParts = parsed.hostname.toLowerCase().split(".");
+    if (hostParts.length === 3 && hostParts[1] === "supabase" && (hostParts[2] === "co" || hostParts[2] === "net")) {
+      const ref = hostParts[0];
+      if (isValidProjectRefFormat(ref)) {
+        return ref;
+      }
+    }
+  } catch (e) {
+  }
+  return void 0;
+}
 function sanitizeSupabaseConnectionString(urlStr) {
   try {
     const parsed = new URL(urlStr);
     const host = parsed.hostname.toLowerCase();
-    if (host.includes("pooler.supabase.com")) {
-      let projectRef = "gshwabwmhzxbxbetqgcp";
-      const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
-      if (supabaseUrl) {
-        try {
-          const sHost = new URL(supabaseUrl).hostname;
-          projectRef = sHost.split(".")[0] || projectRef;
-        } catch (e) {
+    const isPoolerHost = host === "pooler.supabase.com" || host.endsWith(".pooler.supabase.com");
+    if (isPoolerHost) {
+      const explicitProjectId = process.env.SUPABASE_PROJECT_ID?.trim();
+      if (explicitProjectId && !isValidProjectRefFormat(explicitProjectId)) {
+        throw new Error("Database configuration error: Invalid SUPABASE_PROJECT_ID format");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+      const derivedRef = extractProjectRefFromUrl(supabaseUrl);
+      if (explicitProjectId && derivedRef && explicitProjectId !== derivedRef) {
+        throw new Error("Database configuration error: SUPABASE_PROJECT_ID mismatch with configured SUPABASE_URL");
+      }
+      const projectRef = explicitProjectId || derivedRef;
+      if (!projectRef) {
+        throw new Error("Database configuration error: Missing required SUPABASE_PROJECT_ID or valid SUPABASE_URL for pooler connection");
+      }
+      if (parsed.username) {
+        if (parsed.username.startsWith("postgres.")) {
+          const existingUserRef = parsed.username.slice(9);
+          if (!existingUserRef || !isValidProjectRefFormat(existingUserRef) || existingUserRef !== projectRef) {
+            throw new Error("Database configuration error: Connection string username project reference mismatch");
+          }
+        } else if (parsed.username === "postgres") {
+          parsed.username = `postgres.${projectRef}`;
         }
       }
-      if (parsed.username === "postgres" && projectRef && !parsed.username.includes(".")) {
-        parsed.username = `postgres.${projectRef}`;
-      }
-      if (parsed.port === "5432" || !parsed.port) {
+      if (!parsed.port) {
         parsed.port = "6543";
       }
       return parsed.toString();
     }
   } catch (e) {
+    if (e?.message?.startsWith("Database configuration error:")) {
+      throw e;
+    }
   }
   return urlStr;
 }
@@ -2856,6 +2886,11 @@ var getCanonicalUrl = (pathname = "/", baseDomain = CANONICAL_PRODUCTION_DOMAIN)
 // src/server/websiteHealthServer.ts
 var apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
 var ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+var CLEANUP_INTERVAL_MS = 36e5;
+var CLEANUP_FAILURE_COOLDOWN_MS = 6e4;
+var lastCleanupAt = 0;
+var lastCleanupAttemptAt = 0;
+var isCleaningUp = false;
 var latestSeoReport = null;
 var latestApiHealthResults = [];
 var latestDbHealthResult = null;
@@ -2966,36 +3001,32 @@ async function recordLiveError(entry) {
     const rawFingerprint = `${methodVal}::${cleanRoute}::${statusCodeVal}::${categoryVal}::${cleanMessage}`;
     const fingerprint = crypto3.createHash("sha256").update(rawFingerprint).digest("hex");
     const now = /* @__PURE__ */ new Date();
-    const existingRows = await db.select().from(websiteErrorIncidents).where(eq5(websiteErrorIncidents.fingerprint, fingerprint)).limit(1);
-    const existing = existingRows[0] || null;
-    if (existing) {
-      const nextStatus = existing.incidentStatus === "Resolved" ? "Open" : existing.incidentStatus;
-      await db.update(websiteErrorIncidents).set({
-        occurrenceCount: existing.occurrenceCount + 1,
+    const newId = `err_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    await db.insert(websiteErrorIncidents).values({
+      id: newId,
+      severity: severityVal,
+      category: categoryVal,
+      route: cleanRoute,
+      method: methodVal,
+      statusCode: statusCodeVal,
+      errorMessage: cleanMessage,
+      occurrenceCount: 1,
+      firstSeen: now,
+      lastSeen: now,
+      incidentStatus: "Open",
+      fingerprint,
+      createdAt: now,
+      updatedAt: now
+    }).onConflictDoUpdate({
+      target: websiteErrorIncidents.fingerprint,
+      set: {
+        occurrenceCount: sql7`website_error_incidents.occurrence_count + 1`,
         lastSeen: now,
-        incidentStatus: nextStatus,
+        incidentStatus: sql7`CASE WHEN website_error_incidents.incident_status = 'Resolved' THEN 'Open' ELSE website_error_incidents.incident_status END`,
         updatedAt: now
-      }).where(eq5(websiteErrorIncidents.id, existing.id));
-    } else {
-      const newId = `err_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await db.insert(websiteErrorIncidents).values({
-        id: newId,
-        severity: severityVal,
-        category: categoryVal,
-        route: cleanRoute,
-        method: methodVal,
-        statusCode: statusCodeVal,
-        errorMessage: cleanMessage,
-        occurrenceCount: 1,
-        firstSeen: now,
-        lastSeen: now,
-        incidentStatus: "Open",
-        fingerprint,
-        createdAt: now,
-        updatedAt: now
-      });
-      await cleanupOldResolvedIncidents();
-    }
+      }
+    });
+    await triggerRetentionCleanupIfEligible();
   } catch (error) {
     console.error("Error in persistent recordLiveError:", error);
   }
@@ -3072,15 +3103,46 @@ async function updateErrorStatus(id, status, resolverEmail) {
     return false;
   }
 }
-async function cleanupOldResolvedIncidents() {
-  if (!db) return;
+async function cleanupOldResolvedIncidents(databaseClient = db) {
+  if (!databaseClient) return false;
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 864e5);
-    await db.execute(
+    await databaseClient.execute(
       sql7`DELETE FROM website_error_incidents WHERE incident_status = 'Resolved' AND last_seen < ${thirtyDaysAgo}`
     );
+    return true;
   } catch (error) {
     console.error("Error cleaning up old resolved incidents:", error);
+    return false;
+  }
+}
+async function triggerRetentionCleanupIfEligible(databaseClient = db, customNowMs) {
+  const nowMs = customNowMs ?? Date.now();
+  const isSuccessIntervalSatisfied = nowMs - lastCleanupAt > CLEANUP_INTERVAL_MS;
+  const isFailureCooldownSatisfied = nowMs - lastCleanupAttemptAt > CLEANUP_FAILURE_COOLDOWN_MS;
+  if (isCleaningUp) {
+    return { triggered: false, skippedReason: "already_running" };
+  }
+  if (!isSuccessIntervalSatisfied) {
+    return { triggered: false, skippedReason: "success_cooldown" };
+  }
+  if (!isFailureCooldownSatisfied) {
+    return { triggered: false, skippedReason: "failure_cooldown" };
+  }
+  isCleaningUp = true;
+  lastCleanupAttemptAt = nowMs;
+  try {
+    const ok = await cleanupOldResolvedIncidents(databaseClient);
+    if (ok) {
+      lastCleanupAt = customNowMs ?? Date.now();
+      return { triggered: true, success: true };
+    }
+    return { triggered: true, success: false };
+  } catch (cleanupErr) {
+    console.error("Unexpected error in cleanup execution:", cleanupErr);
+    return { triggered: true, success: false };
+  } finally {
+    isCleaningUp = false;
   }
 }
 async function investigateErrorIncident(errorId, adminEmail) {
@@ -12772,10 +12834,30 @@ var DEFAULT_SITE_SETTINGS = {
 
 // src/db/settings.ts
 var isTableVerified = false;
+function coerceSettingValue(val) {
+  if (val === null || val === void 0) {
+    return null;
+  }
+  if (typeof val === "string") {
+    return val;
+  }
+  if (typeof val === "number" || typeof val === "boolean") {
+    return String(val);
+  }
+  if (typeof val === "object") {
+    try {
+      const serialized = JSON.stringify(val);
+      return typeof serialized === "string" ? serialized : null;
+    } catch {
+      return null;
+    }
+  }
+  return String(val);
+}
 async function ensureSettingsTableExists() {
   if (isTableVerified) return;
   try {
-    await db.select({ id: siteSettings.id }).from(siteSettings).limit(1);
+    await db.select({ key: siteSettings.key }).from(siteSettings).limit(1);
     isTableVerified = true;
   } catch (error) {
     isTableVerified = false;
@@ -12791,8 +12873,9 @@ async function getAllSettingsFromDb() {
     const rows = await db.select().from(siteSettings);
     if (Array.isArray(rows)) {
       rows.forEach((row) => {
-        if (row.key && row.value !== null && row.value !== void 0) {
-          settingsMap[row.key] = row.value;
+        const coerced = coerceSettingValue(row.value);
+        if (row.key && coerced !== null) {
+          settingsMap[row.key] = coerced;
         }
       });
     }
@@ -12823,8 +12906,9 @@ async function getPublicSettingsFromDb() {
     const rows = await db.select().from(siteSettings).where(eq13(siteSettings.isPublic, true));
     if (Array.isArray(rows)) {
       rows.forEach((row) => {
-        if (row.key && row.value !== null && row.value !== void 0) {
-          publicMap[row.key] = row.value;
+        const coerced = coerceSettingValue(row.value);
+        if (row.key && coerced !== null) {
+          publicMap[row.key] = coerced;
         }
       });
     }
@@ -12867,15 +12951,13 @@ async function updateSettingsInDb(updates, updatedBy = "admin@taleemguru.pk") {
     for (const [key, rawValue] of Object.entries(finalUpdates)) {
       const valStr = rawValue !== null && rawValue !== void 0 ? String(rawValue) : "";
       const def = DEFAULT_SITE_SETTINGS[key];
-      const category = def ? def.category : key.startsWith("site_name") ? "branding" : key.split(".")[0] || "general";
       const isPublic = def ? def.isPublic : true;
       try {
         await db.execute(sql14`
-          INSERT INTO site_settings (key, category, value, is_public, updated_by, updated_at)
-          VALUES (${key}, ${category}, ${valStr}, ${isPublic}, ${updatedBy}, NOW())
+          INSERT INTO site_settings (key, value, is_public, updated_by, updated_at)
+          VALUES (${key}, to_jsonb(${valStr}::text), ${isPublic}, ${updatedBy}, NOW())
           ON CONFLICT (key) DO UPDATE SET
             value = EXCLUDED.value,
-            category = EXCLUDED.category,
             is_public = EXCLUDED.is_public,
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW();
@@ -12979,6 +13061,7 @@ app.use((req, res, next) => {
       recordLiveError({
         severity,
         category,
+        method: req.method,
         statusCode: code,
         route: req.path,
         errorMessage: code >= 500 ? `Server Error (${code})` : code === 404 ? "Resource Not Found" : `HTTP ${code} Response`
@@ -13030,7 +13113,7 @@ apiRouter.get("/admin/website-health/errors", requireHighAdmin, async (req, res)
     const category = req.query.category;
     const severity = req.query.severity;
     const status = req.query.status;
-    const logs = getLiveErrorLogs({ category, severity, status });
+    const logs = await getLiveErrorLogs({ category, severity, status });
     res.json({ logs });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to fetch error logs" });
@@ -13040,8 +13123,16 @@ apiRouter.post("/admin/website-health/errors/status", requireHighAdmin, async (r
   try {
     const { id, status } = req.body || {};
     if (!id || !status) return res.status(400).json({ error: "id and status required" });
-    const ok = updateErrorStatus(id, status);
-    res.json({ success: ok });
+    const rawEmail = req.user?.email;
+    const adminEmail = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+    if (!adminEmail || !adminEmail.includes("@")) {
+      return res.status(400).json({ error: "Authenticated administrator email identity is required." });
+    }
+    const ok = await updateErrorStatus(id, status, adminEmail);
+    if (!ok) {
+      return res.status(500).json({ error: "Failed to update error status in database" });
+    }
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message || "Failed to update error status" });
   }
@@ -13050,7 +13141,11 @@ apiRouter.post("/admin/website-health/errors/:id/investigate", requireHighAdmin,
   try {
     const id = req.params.id || req.body.id;
     if (!id) return res.status(400).json({ error: "Incident ID is required" });
-    const adminEmail = req.user?.email || "admin@taleemguru.pk";
+    const rawEmail = req.user?.email;
+    const adminEmail = typeof rawEmail === "string" ? rawEmail.trim().toLowerCase() : "";
+    if (!adminEmail || !adminEmail.includes("@")) {
+      return res.status(400).json({ error: "Authenticated administrator email identity is required." });
+    }
     const report = await investigateErrorIncident(id, adminEmail);
     res.json({ success: true, report });
   } catch (err) {
