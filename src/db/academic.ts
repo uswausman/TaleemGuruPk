@@ -1361,6 +1361,12 @@ export async function deleteEntryTestSubcategoryFromDb(id: number) {
 // ============================================================================
 
 let isHierarchyRepaired = false;
+let repairPromise: Promise<void> | null = null;
+
+export function _resetAcademicHierarchyStateForTesting() {
+  isHierarchyRepaired = false;
+  repairPromise = null;
+}
 
 async function ensureSchemaTablesAndColumns() {
   // Execute each statement in an isolated try/catch so permission warnings on one query do not abort others
@@ -1526,354 +1532,369 @@ async function ensureSchemaTablesAndColumns() {
 }
 
 export async function ensureAndRepairAcademicHierarchy() {
-  if (!db) return;
+  if (isHierarchyRepaired) return;
+  if (!db) {
+    throw new Error('Database client (db) is not initialized');
+  }
 
-  try {
-    // 0. Ensure schema tables & missing columns exist in PostgreSQL database
-    await ensureSchemaTablesAndColumns();
-
-    // 1. Ensure Pakistani Boards in boards table
-    const existingBoards = await db.select().from(boards);
-    const existingBoardNames = new Set(existingBoards.map((b) => b.name.trim().toLowerCase()));
-
-    const standardBoards = [
-      { name: 'FBISE Islamabad', code: 'FBISE', establishmentYear: 1975, province: 'Federal', city: 'Islamabad', description: 'Federal Board of Intermediate and Secondary Education Islamabad' },
-      { name: 'BISE Lahore', code: 'LHR', establishmentYear: 1954, province: 'Punjab', city: 'Lahore', description: 'Board of Intermediate and Secondary Education Lahore' },
-      { name: 'BISE Rawalpindi', code: 'RWP', establishmentYear: 1977, province: 'Punjab', city: 'Rawalpindi', description: 'Board of Intermediate and Secondary Education Rawalpindi' },
-      { name: 'BISE Gujranwala', code: 'GRW', establishmentYear: 1982, province: 'Punjab', city: 'Gujranwala', description: 'Board of Intermediate and Secondary Education Gujranwala' },
-      { name: 'BISE Faisalabad', code: 'FSD', establishmentYear: 1988, province: 'Punjab', city: 'Faisalabad', description: 'Board of Intermediate and Secondary Education Faisalabad' },
-      { name: 'BISE Multan', code: 'MUL', establishmentYear: 1968, province: 'Punjab', city: 'Multan', description: 'Board of Intermediate and Secondary Education Multan' },
-      { name: 'BSEK / BIEK Karachi', code: 'KHI', establishmentYear: 1950, province: 'Sindh', city: 'Karachi', description: 'Secondary & Intermediate Education Boards Karachi' },
-      { name: 'BISE Peshawar', code: 'PEW', establishmentYear: 1961, province: 'KPK', city: 'Peshawar', description: 'Board of Intermediate and Secondary Education Peshawar' },
-      { name: 'BISE Quetta', code: 'QTA', establishmentYear: 1976, province: 'Balochistan', city: 'Quetta', description: 'Board of Intermediate and Secondary Education Quetta' },
-    ];
-
-    for (const sb of standardBoards) {
-      if (!existingBoardNames.has(sb.name.toLowerCase())) {
-        await db.insert(boards).values({
-          name: sb.name,
-          code: sb.code,
-          establishmentYear: sb.establishmentYear,
-          province: sb.province,
-          city: sb.city,
-          description: sb.description,
-          status: 'Active',
-        });
-      }
-    }
-
-    const allBoards = await db.select().from(boards);
-    const defaultBoardId = allBoards[0]?.id || 1;
-
-    // 2. Ensure Classes in classes table
-    const existingClasses = await db.select().from(classes);
-    const existingClassNames = new Set(existingClasses.map((c) => c.name.trim().toLowerCase()));
-
-    const standardClasses = [
-      'Class 9',
-      'Class 10',
-      'Class 11',
-      'Class 12',
-      'BA / Associate Degree',
-      'BSc / Associate Degree',
-      'BS (4 Years Honors)',
-      'Masters & Postgraduate',
-    ];
-
-    for (const cName of standardClasses) {
-      if (!existingClassNames.has(cName.toLowerCase())) {
-        await db.insert(classes).values({
-          boardId: defaultBoardId,
-          name: cName,
-          status: 'Active',
-        });
-      }
-    }
-
-    const allClasses = await db.select().from(classes);
-    const classMap = new Map<string, number>();
-    for (const c of allClasses) {
-      const lower = c.name.trim().toLowerCase();
-      classMap.set(lower, c.id);
-      if (lower.includes('9')) classMap.set('class 9', c.id);
-      if (lower.includes('10')) classMap.set('class 10', c.id);
-      if (lower.includes('11')) classMap.set('class 11', c.id);
-      if (lower.includes('12')) classMap.set('class 12', c.id);
-    }
-
-    const class9Id = classMap.get('class 9') || allClasses[0]?.id || 1;
-    const class10Id = classMap.get('class 10') || allClasses[1]?.id || 2;
-    const class11Id = classMap.get('class 11') || allClasses[2]?.id || 3;
-    const class12Id = classMap.get('class 12') || allClasses[3]?.id || 4;
-
-    // 3. Ensure Subjects per Class (Class 9, Class 10, Class 11, Class 12)
-    const classSubjectRequirements: { classId: number; subjects: string[] }[] = [
-      {
-        classId: class9Id,
-        subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Islamiyat', 'Pakistan Studies'],
-      },
-      {
-        classId: class10Id,
-        subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Pakistan Studies'],
-      },
-      {
-        classId: class11Id,
-        subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Islamic Education'],
-      },
-      {
-        classId: class12Id,
-        subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Pakistan Studies'],
-      },
-    ];
-
-    const allSubjects = await db.select().from(subjects);
-
-    for (const req of classSubjectRequirements) {
-      const existingSubjectsInClass = allSubjects.filter((s) => s.classId === req.classId);
-      const existingSubjectNames = new Set(existingSubjectsInClass.map((s) => s.name.trim().toLowerCase()));
-
-      for (const subjName of req.subjects) {
-        if (!existingSubjectNames.has(subjName.toLowerCase())) {
-          await db.insert(subjects).values({
-            classId: req.classId,
-            boardId: defaultBoardId,
-            name: subjName,
-            status: 'Active',
-          });
-        }
-      }
-    }
-
-    // Refresh subjects after insertion
-    const updatedSubjects = await db.select().from(subjects);
-
-    // 4. Ensure Chapters for each Subject in Class 9, Class 10, Class 11, Class 12
-    let allChapters: any[] = [];
-    try {
-      allChapters = await db
-        .select({
-          id: chapters.id,
-          subjectId: chapters.subjectId,
-          classId: chapters.classId,
-          name: chapters.name,
-          status: chapters.status,
-          draftStatus: chapters.draftStatus,
-        })
-        .from(chapters);
-    } catch (chErr) {
+  if (!repairPromise) {
+    const currentRef = (async () => {
       try {
-        const res = await db.execute(sql`SELECT id, subject_id as "subjectId", name FROM chapters`);
-        allChapters = (res.rows || res) as any[];
-      } catch (e) {
-        allChapters = [];
-      }
-    }
+        // 0. Ensure schema tables & missing columns exist in PostgreSQL database
+        await ensureSchemaTablesAndColumns();
 
-    const standardChaptersMap: Record<string, string[]> = {
-      biology: [
-        'Introduction to Biology & Gaseous Exchange',
-        'Cell Biology & Homeostasis',
-        'Coordination and Control',
-        'Support and Movement',
-        'Reproduction & Genetics',
-        'Inheritance & Biotechnology',
-        'Ecology & Pharmacology',
-      ],
-      physics: [
-        'Physical Quantities & Measurement',
-        'Kinematics & Dynamics',
-        'Simple Harmonic Motion and Waves',
-        'Sound & Geometrical Optics',
-        'Electrostatics & Current Electricity',
-        'Electromagnetism & Basic Electronics',
-        'Atomic and Nuclear Physics',
-      ],
-      chemistry: [
-        'Fundamentals of Chemistry',
-        'Chemical Equilibrium',
-        'Acids, Bases and Salts',
-        'Organic Chemistry & Hydrocarbons',
-        'Biochemistry & Atmosphere',
-        'Water & Chemical Industries',
-      ],
-      mathematics: [
-        'Real and Complex Numbers',
-        'Quadratic Equations',
-        'Partial Fractions',
-        'Sets, Functions and Groups',
-        'Matrices and Determinants',
-        'Basic Statistics & Trigonometry',
-      ],
-      'computer science': [
-        'Basics of Information Technology',
-        'Programming Fundamentals & C Concepts',
-        'Data Types, Input/Output & Operators',
-        'Control Structures & Logic',
-        'Database Management & Web Development',
-      ],
-      english: [
-        'Reading Comprehension & Passages',
-        'Grammar & Parts of Speech',
-        'Vocabulary & Idioms',
-        'Essay Writing & Summaries',
-      ],
-      urdu: [
-        'نثر (Essays and Stories)',
-        'غزلیات (Ghazals)',
-        'منظومات (Poems)',
-        'قواعد و انشا (Grammar and Composition)',
-      ],
-    };
+        // 1. Ensure Pakistani Boards in boards table
+        const existingBoards = await db.select().from(boards);
+        const existingBoardNames = new Set(existingBoards.map((b) => b.name.trim().toLowerCase()));
 
-    for (const sub of updatedSubjects) {
-      const existingChaps = allChapters.filter((ch) => ch.subjectId === sub.id);
-      if (existingChaps.length === 0) {
-        const subNameLower = sub.name.trim().toLowerCase();
-        let chList: string[] = [];
+        const standardBoards = [
+          { name: 'FBISE Islamabad', code: 'FBISE', establishmentYear: 1975, province: 'Federal', city: 'Islamabad', description: 'Federal Board of Intermediate and Secondary Education Islamabad' },
+          { name: 'BISE Lahore', code: 'LHR', establishmentYear: 1954, province: 'Punjab', city: 'Lahore', description: 'Board of Intermediate and Secondary Education Lahore' },
+          { name: 'BISE Rawalpindi', code: 'RWP', establishmentYear: 1977, province: 'Punjab', city: 'Rawalpindi', description: 'Board of Intermediate and Secondary Education Rawalpindi' },
+          { name: 'BISE Gujranwala', code: 'GRW', establishmentYear: 1982, province: 'Punjab', city: 'Gujranwala', description: 'Board of Intermediate and Secondary Education Gujranwala' },
+          { name: 'BISE Faisalabad', code: 'FSD', establishmentYear: 1988, province: 'Punjab', city: 'Faisalabad', description: 'Board of Intermediate and Secondary Education Faisalabad' },
+          { name: 'BISE Multan', code: 'MUL', establishmentYear: 1968, province: 'Punjab', city: 'Multan', description: 'Board of Intermediate and Secondary Education Multan' },
+          { name: 'BSEK / BIEK Karachi', code: 'KHI', establishmentYear: 1950, province: 'Sindh', city: 'Karachi', description: 'Secondary & Intermediate Education Boards Karachi' },
+          { name: 'BISE Peshawar', code: 'PEW', establishmentYear: 1961, province: 'KPK', city: 'Peshawar', description: 'Board of Intermediate and Secondary Education Peshawar' },
+          { name: 'BISE Quetta', code: 'QTA', establishmentYear: 1976, province: 'Balochistan', city: 'Quetta', description: 'Board of Intermediate and Secondary Education Quetta' },
+        ];
 
-        for (const [key, list] of Object.entries(standardChaptersMap)) {
-          if (subNameLower.includes(key)) {
-            chList = list;
-            break;
+        for (const sb of standardBoards) {
+          if (!existingBoardNames.has(sb.name.toLowerCase())) {
+            await db.insert(boards).values({
+              name: sb.name,
+              code: sb.code,
+              establishmentYear: sb.establishmentYear,
+              province: sb.province,
+              city: sb.city,
+              description: sb.description,
+              status: 'Active',
+            });
           }
         }
 
-        if (chList.length === 0) {
-          chList = [
-            `Chapter 1: Fundamentals of ${sub.name}`,
-            `Chapter 2: Core Concepts & Principles`,
-            `Chapter 3: Advanced Applications`,
-            `Chapter 4: Summary & Revision Topics`,
-          ];
+        const allBoards = await db.select().from(boards);
+        const defaultBoardId = allBoards[0]?.id || 1;
+
+        // 2. Ensure Classes in classes table
+        const existingClasses = await db.select().from(classes);
+        const existingClassNames = new Set(existingClasses.map((c) => c.name.trim().toLowerCase()));
+
+        const standardClasses = [
+          'Class 9',
+          'Class 10',
+          'Class 11',
+          'Class 12',
+          'BA / Associate Degree',
+          'BSc / Associate Degree',
+          'BS (4 Years Honors)',
+          'Masters & Postgraduate',
+        ];
+
+        for (const cName of standardClasses) {
+          if (!existingClassNames.has(cName.toLowerCase())) {
+            await db.insert(classes).values({
+              boardId: defaultBoardId,
+              name: cName,
+              status: 'Active',
+            });
+          }
         }
 
-        for (const cTitle of chList) {
-          try {
-            await db.insert(chapters).values({
-              subjectId: sub.id,
-              classId: sub.classId,
-              name: cTitle,
-              status: 'Active',
-              draftStatus: 'Published',
-            });
-          } catch (insErr) {
-            try {
-              await db.insert(chapters).values({
-                subjectId: sub.id,
-                name: cTitle,
+        const allClasses = await db.select().from(classes);
+        const classMap = new Map<string, number>();
+        for (const c of allClasses) {
+          const lower = c.name.trim().toLowerCase();
+          classMap.set(lower, c.id);
+          if (lower.includes('9')) classMap.set('class 9', c.id);
+          if (lower.includes('10')) classMap.set('class 10', c.id);
+          if (lower.includes('11')) classMap.set('class 11', c.id);
+          if (lower.includes('12')) classMap.set('class 12', c.id);
+        }
+
+        const class9Id = classMap.get('class 9') || allClasses[0]?.id || 1;
+        const class10Id = classMap.get('class 10') || allClasses[1]?.id || 2;
+        const class11Id = classMap.get('class 11') || allClasses[2]?.id || 3;
+        const class12Id = classMap.get('class 12') || allClasses[3]?.id || 4;
+
+        // 3. Ensure Subjects per Class (Class 9, Class 10, Class 11, Class 12)
+        const classSubjectRequirements: { classId: number; subjects: string[] }[] = [
+          {
+            classId: class9Id,
+            subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Islamiyat', 'Pakistan Studies'],
+          },
+          {
+            classId: class10Id,
+            subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Pakistan Studies'],
+          },
+          {
+            classId: class11Id,
+            subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Islamic Education'],
+          },
+          {
+            classId: class12Id,
+            subjects: ['Biology', 'Physics', 'Chemistry', 'Mathematics', 'Computer Science', 'English', 'Urdu', 'Pakistan Studies'],
+          },
+        ];
+
+        const allSubjects = await db.select().from(subjects);
+
+        for (const req of classSubjectRequirements) {
+          const existingSubjectsInClass = allSubjects.filter((s) => s.classId === req.classId);
+          const existingSubjectNames = new Set(existingSubjectsInClass.map((s) => s.name.trim().toLowerCase()));
+
+          for (const subjName of req.subjects) {
+            if (!existingSubjectNames.has(subjName.toLowerCase())) {
+              await db.insert(subjects).values({
+                classId: req.classId,
+                boardId: defaultBoardId,
+                name: subjName,
                 status: 'Active',
               });
-            } catch (e2) {}
+            }
           }
         }
-      } else {
-        // Safe Repair: Ensure classId on chapter matches subject.classId if column exists
-        for (const ch of existingChaps) {
-          if (!ch.classId || ch.classId !== sub.classId) {
-            try {
-              await db.update(chapters).set({ classId: sub.classId }).where(eq(chapters.id, ch.id));
-            } catch (updErr) {}
+
+        // Refresh subjects after insertion
+        const updatedSubjects = await db.select().from(subjects);
+
+        // 4. Ensure Chapters for each Subject in Class 9, Class 10, Class 11, Class 12
+        let allChapters: any[] = [];
+        try {
+          allChapters = await db
+            .select({
+              id: chapters.id,
+              subjectId: chapters.subjectId,
+              classId: chapters.classId,
+              name: chapters.name,
+              status: chapters.status,
+              draftStatus: chapters.draftStatus,
+            })
+            .from(chapters);
+        } catch (chErr) {
+          try {
+            const res = await db.execute(sql`SELECT id, subject_id as "subjectId", name FROM chapters`);
+            allChapters = (res.rows || res) as any[];
+          } catch (e) {
+            allChapters = [];
           }
         }
-      }
-    }
 
-    // 5. Ensure Entry Test Categories & Subcategories
-    const allEntryCats = await db.select().from(entryTestCategories);
-    const catMap = new Map<string, number>();
-    for (const c of allEntryCats) {
-      catMap.set(c.name.trim().toLowerCase(), c.id);
-    }
+        const standardChaptersMap: Record<string, string[]> = {
+          biology: [
+            'Introduction to Biology & Gaseous Exchange',
+            'Cell Biology & Homeostasis',
+            'Coordination and Control',
+            'Support and Movement',
+            'Reproduction & Genetics',
+            'Inheritance & Biotechnology',
+            'Ecology & Pharmacology',
+          ],
+          physics: [
+            'Physical Quantities & Measurement',
+            'Kinematics & Dynamics',
+            'Simple Harmonic Motion and Waves',
+            'Sound & Geometrical Optics',
+            'Electrostatics & Current Electricity',
+            'Electromagnetism & Basic Electronics',
+            'Atomic and Nuclear Physics',
+          ],
+          chemistry: [
+            'Fundamentals of Chemistry',
+            'Chemical Equilibrium',
+            'Acids, Bases and Salts',
+            'Organic Chemistry & Hydrocarbons',
+            'Biochemistry & Atmosphere',
+            'Water & Chemical Industries',
+          ],
+          mathematics: [
+            'Real and Complex Numbers',
+            'Quadratic Equations',
+            'Partial Fractions',
+            'Sets, Functions and Groups',
+            'Matrices and Determinants',
+            'Basic Statistics & Trigonometry',
+          ],
+          'computer science': [
+            'Basics of Information Technology',
+            'Programming Fundamentals & C Concepts',
+            'Data Types, Input/Output & Operators',
+            'Control Structures & Logic',
+            'Database Management & Web Development',
+          ],
+          english: [
+            'Reading Comprehension & Passages',
+            'Grammar & Parts of Speech',
+            'Vocabulary & Idioms',
+            'Essay Writing & Summaries',
+          ],
+          urdu: [
+            'نثر (Essays and Stories)',
+            'غزلیات (Ghazals)',
+            'منظومات (Poems)',
+            'قواعد و انشا (Grammar and Composition)',
+          ],
+        };
 
-    const defaultCategories = [
-      { name: 'Armed Forces', type: 'Defense Services', organizer: 'ISSB / Pak Forces', description: 'Pak Army, Navy & PAF Officer Commission Cadet Tests' },
-      { name: 'Medical', type: 'Entrance Exam', organizer: 'PMDC / UHS / NUMS', description: 'MDCAT & NUMS Medical Entrance Exams for MBBS & BDS' },
-      { name: 'Engineering', type: 'Entrance Exam', organizer: 'UET / NUST / GIKI', description: 'ECAT, NUST NET & GIKI Engineering Admission Tests' },
-      { name: 'Civil Services & CSS', type: 'Competitive Exam', organizer: 'FPSC / PPSC / SPSC', description: 'Federal & Provincial Public Service Officer Exams' },
-    ];
+        for (const sub of updatedSubjects) {
+          const existingChaps = allChapters.filter((ch) => ch.subjectId === sub.id);
+          if (existingChaps.length === 0) {
+            const subNameLower = sub.name.trim().toLowerCase();
+            let chList: string[] = [];
 
-    for (const dc of defaultCategories) {
-      if (!catMap.has(dc.name.toLowerCase())) {
-        const [inserted] = await db.insert(entryTestCategories).values({
-          name: dc.name,
-          type: dc.type,
-          organizer: dc.organizer,
-          description: dc.description,
-          status: 'Active',
-        }).returning();
-        if (inserted) catMap.set(dc.name.toLowerCase(), inserted.id);
-      }
-    }
+            for (const [key, list] of Object.entries(standardChaptersMap)) {
+              if (subNameLower.includes(key)) {
+                chList = list;
+                break;
+              }
+            }
 
-    const armedForcesCatId = catMap.get('armed forces');
-    if (armedForcesCatId) {
-      const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, armedForcesCatId));
-      const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
+            if (chList.length === 0) {
+              chList = [
+                `Chapter 1: Fundamentals of ${sub.name}`,
+                `Chapter 2: Core Concepts & Principles`,
+                `Chapter 3: Advanced Applications`,
+                `Chapter 4: Summary & Revision Topics`,
+              ];
+            }
 
-      const forceSubs = [
-        { name: 'Army', description: 'PMA Long Course, Technical Cadet Scheme, Lady Cadet Course' },
-        { name: 'Navy', description: 'PN Cadet, Short Service Commission, Marine' },
-        { name: 'Air Force', description: 'GDP - General Duty Pilot, Aeronautical Engineering, Air Defence' },
-      ];
-
-      for (const fs of forceSubs) {
-        if (!existingSubNames.has(fs.name.toLowerCase())) {
-          await db.insert(entryTestSubcategories).values({
-            categoryId: armedForcesCatId,
-            name: fs.name,
-            description: fs.description,
-            status: 'Active',
-          });
+            for (const cTitle of chList) {
+              try {
+                await db.insert(chapters).values({
+                  subjectId: sub.id,
+                  classId: sub.classId,
+                  name: cTitle,
+                  status: 'Active',
+                  draftStatus: 'Published',
+                });
+              } catch (insErr) {
+                try {
+                  await db.insert(chapters).values({
+                    subjectId: sub.id,
+                    name: cTitle,
+                    status: 'Active',
+                  });
+                } catch (e2) {}
+              }
+            }
+          } else {
+            // Safe Repair: Ensure classId on chapter matches subject.classId if column exists
+            for (const ch of existingChaps) {
+              if (!ch.classId || ch.classId !== sub.classId) {
+                try {
+                  await db.update(chapters).set({ classId: sub.classId }).where(eq(chapters.id, ch.id));
+                } catch (updErr) {}
+              }
+            }
+          }
         }
-      }
-    }
 
-    const medicalCatId = catMap.get('medical');
-    if (medicalCatId) {
-      const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, medicalCatId));
-      const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
-
-      const medSubs = [
-        { name: 'MDCAT', description: 'National Medical & Dental College Admission Test' },
-        { name: 'NUMS', description: 'National University of Medical Sciences Admission Test' },
-      ];
-
-      for (const ms of medSubs) {
-        if (!existingSubNames.has(ms.name.toLowerCase())) {
-          await db.insert(entryTestSubcategories).values({
-            categoryId: medicalCatId,
-            name: ms.name,
-            description: ms.description,
-            status: 'Active',
-          });
+        // 5. Ensure Entry Test Categories & Subcategories
+        const allEntryCats = await db.select().from(entryTestCategories);
+        const catMap = new Map<string, number>();
+        for (const c of allEntryCats) {
+          catMap.set(c.name.trim().toLowerCase(), c.id);
         }
-      }
-    }
 
-    const engCatId = catMap.get('engineering');
-    if (engCatId) {
-      const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, engCatId));
-      const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
+        const defaultCategories = [
+          { name: 'Armed Forces', type: 'Defense Services', organizer: 'ISSB / Pak Forces', description: 'Pak Army, Navy & PAF Officer Commission Cadet Tests' },
+          { name: 'Medical', type: 'Entrance Exam', organizer: 'PMDC / UHS / NUMS', description: 'MDCAT & NUMS Medical Entrance Exams for MBBS & BDS' },
+          { name: 'Engineering', type: 'Entrance Exam', organizer: 'UET / NUST / GIKI', description: 'ECAT, NUST NET & GIKI Engineering Admission Tests' },
+          { name: 'Civil Services & CSS', type: 'Competitive Exam', organizer: 'FPSC / PPSC / SPSC', description: 'Federal & Provincial Public Service Officer Exams' },
+        ];
 
-      const engSubs = [
-        { name: 'ECAT', description: 'UET Engineering College Admission Test' },
-        { name: 'NUST NET', description: 'National University of Sciences & Technology Entry Test' },
-      ];
-
-      for (const es of engSubs) {
-        if (!existingSubNames.has(es.name.toLowerCase())) {
-          await db.insert(entryTestSubcategories).values({
-            categoryId: engCatId,
-            name: es.name,
-            description: es.description,
-            status: 'Active',
-          });
+        for (const dc of defaultCategories) {
+          if (!catMap.has(dc.name.toLowerCase())) {
+            const [inserted] = await db.insert(entryTestCategories).values({
+              name: dc.name,
+              type: dc.type,
+              organizer: dc.organizer,
+              description: dc.description,
+              status: 'Active',
+            }).returning();
+            if (inserted) catMap.set(dc.name.toLowerCase(), inserted.id);
+          }
         }
-      }
-    }
 
-    isHierarchyRepaired = true;
-  } catch (error) {
-    console.error('Notice during ensureAndRepairAcademicHierarchy:', error);
+        const armedForcesCatId = catMap.get('armed forces');
+        if (armedForcesCatId) {
+          const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, armedForcesCatId));
+          const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
+
+          const forceSubs = [
+            { name: 'Army', description: 'PMA Long Course, Technical Cadet Scheme, Lady Cadet Course' },
+            { name: 'Navy', description: 'PN Cadet, Short Service Commission, Marine' },
+            { name: 'Air Force', description: 'GDP - General Duty Pilot, Aeronautical Engineering, Air Defence' },
+          ];
+
+          for (const fs of forceSubs) {
+            if (!existingSubNames.has(fs.name.toLowerCase())) {
+              await db.insert(entryTestSubcategories).values({
+                categoryId: armedForcesCatId,
+                name: fs.name,
+                description: fs.description,
+                status: 'Active',
+              });
+            }
+          }
+        }
+
+        const medicalCatId = catMap.get('medical');
+        if (medicalCatId) {
+          const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, medicalCatId));
+          const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
+
+          const medSubs = [
+            { name: 'MDCAT', description: 'National Medical & Dental College Admission Test' },
+            { name: 'NUMS', description: 'National University of Medical Sciences Admission Test' },
+          ];
+
+          for (const ms of medSubs) {
+            if (!existingSubNames.has(ms.name.toLowerCase())) {
+              await db.insert(entryTestSubcategories).values({
+                categoryId: medicalCatId,
+                name: ms.name,
+                description: ms.description,
+                status: 'Active',
+              });
+            }
+          }
+        }
+
+        const engCatId = catMap.get('engineering');
+        if (engCatId) {
+          const existingSubcats = await db.select().from(entryTestSubcategories).where(eq(entryTestSubcategories.categoryId, engCatId));
+          const existingSubNames = new Set(existingSubcats.map((s) => s.name.trim().toLowerCase()));
+
+          const engSubs = [
+            { name: 'ECAT', description: 'UET Engineering College Admission Test' },
+            { name: 'NUST NET', description: 'National University of Sciences & Technology Entry Test' },
+          ];
+
+          for (const es of engSubs) {
+            if (!existingSubNames.has(es.name.toLowerCase())) {
+              await db.insert(entryTestSubcategories).values({
+                categoryId: engCatId,
+                name: es.name,
+                description: es.description,
+                status: 'Active',
+              });
+            }
+          }
+        }
+
+        isHierarchyRepaired = true;
+      } catch (error) {
+        console.error('Error during ensureAndRepairAcademicHierarchy:', error);
+        if (repairPromise === currentRef) {
+          repairPromise = null;
+        }
+        throw error;
+      }
+    })();
+
+    repairPromise = currentRef;
   }
+
+  return repairPromise;
 }
