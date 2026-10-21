@@ -189,7 +189,7 @@ export const AdminAuditLogsTab: React.FC = () => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {filteredLogs.map((log) => (
                   <tr
-                    key={log.logId}
+                    key={log.id}
                     className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition-colors"
                   >
                     <td className="py-3 px-4 font-mono text-[11px] text-slate-500 whitespace-nowrap">
